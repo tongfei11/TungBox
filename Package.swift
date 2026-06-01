@@ -11,7 +11,10 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "TungBox"
+            name: "TungBox",
+            resources: [
+                .process("Resources")
+            ]
         )
     ]
 )

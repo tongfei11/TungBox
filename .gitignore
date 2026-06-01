@@ -1,0 +1,6 @@
+.DS_Store
+.build/
+cache.db
+*.app/
+*.dmg
+test_port
