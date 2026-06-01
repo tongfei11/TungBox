@@ -2561,55 +2561,88 @@ final class MD3SettingsPageView: NSView, MD3Themeable {
         if !profiles.isEmpty { selectProfile(at: min(index, profiles.count - 1)) }
     }
 
-    @objc private func addSubscriptionClicked() {
-        let alert = NSAlert()
-        alert.messageText = "添加订阅"
-        alert.informativeText = "请输入新订阅的名称和配置 URL。"
-        alert.addButton(withTitle: "确定")
-        alert.addButton(withTitle: "取消")
+    @discardableResult
+    @MainActor
+    private func showMD3Dialog(
+        title: String,
+        message: String,
+        customView: NSView?,
+        confirmTitle: String = "确定",
+        cancelTitle: String = "取消"
+    ) -> MD3Dialog {
+        guard let contentView = window?.contentView else { fatalError("No content view") }
+        let dialog = MD3Dialog(
+            title: title,
+            message: message,
+            customView: customView,
+            confirmTitle: confirmTitle,
+            cancelTitle: cancelTitle
+        )
+        dialog.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(dialog)
+        
+        NSLayoutConstraint.activate([
+            dialog.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            dialog.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            dialog.topAnchor.constraint(equalTo: contentView.topAnchor),
+            dialog.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
+        ])
+        
+        dialog.present()
+        return dialog
+    }
 
+    @objc private func addSubscriptionClicked() {
         let nameField = MD3TextField()
         nameField.placeholderString = "订阅名称 (如: Xboard)"
         nameField.translatesAutoresizingMaskIntoConstraints = false
-        nameField.widthAnchor.constraint(equalToConstant: 420).isActive = true
-        nameField.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        nameField.widthAnchor.constraint(equalToConstant: 432).isActive = true
+        nameField.heightAnchor.constraint(equalToConstant: 36).isActive = true
 
         let urlField = MD3TextField()
         urlField.placeholderString = "https://..."
         urlField.translatesAutoresizingMaskIntoConstraints = false
-        urlField.widthAnchor.constraint(equalToConstant: 420).isActive = true
-        urlField.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        urlField.widthAnchor.constraint(equalToConstant: 432).isActive = true
+        urlField.heightAnchor.constraint(equalToConstant: 36).isActive = true
 
         let stack = NSStackView(views: [nameField, urlField])
         stack.orientation = .vertical
-        stack.spacing = 10
+        stack.spacing = 12
         stack.alignment = .leading
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 74))
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(stack)
         
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             stack.topAnchor.constraint(equalTo: container.topAnchor),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor)
+            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            container.widthAnchor.constraint(equalToConstant: 432),
+            container.heightAnchor.constraint(equalToConstant: 84)
         ])
 
-        alert.accessoryView = container
+        let dialog = showMD3Dialog(
+            title: "添加订阅",
+            message: "请输入新订阅的名称和配置 URL。",
+            customView: container
+        )
         
-        alert.layout()
-        alert.window.initialFirstResponder = nameField
-
-        if alert.runModal() == .alertFirstButtonReturn {
-            let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            let url = urlField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        dialog.window?.initialFirstResponder = nameField
+        
+        dialog.onConfirm = { [weak self, weak nameField, weak urlField, weak dialog] in
+            guard let self = self else { return }
+            let name = nameField?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let url = urlField?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            
             guard !name.isEmpty else {
-                showError(NSError.user("订阅名称不能为空"))
+                self.showError(NSError.user("订阅名称不能为空"))
                 return
             }
             guard !url.isEmpty else {
-                showError(NSError.user("订阅 URL 不能为空"))
+                self.showError(NSError.user("订阅 URL 不能为空"))
                 return
             }
 
@@ -2620,12 +2653,17 @@ final class MD3SettingsPageView: NSView, MD3Themeable {
                 profileID: nil,
                 updatedAt: nil
             )
-            subscriptions.append(subscription)
-            store.saveSubscriptions(subscriptions)
-            subscriptionTable.reloadData()
-            selectedSubscriptionIndex = subscriptions.count - 1
-            subscriptionTable.selectRowIndexes(IndexSet(integer: subscriptions.count - 1), byExtendingSelection: false)
-            refreshSubscription(at: subscriptions.count - 1)
+            self.subscriptions.append(subscription)
+            self.store.saveSubscriptions(self.subscriptions)
+            self.subscriptionTable.reloadData()
+            self.selectedSubscriptionIndex = self.subscriptions.count - 1
+            self.subscriptionTable.selectRowIndexes(IndexSet(integer: self.subscriptions.count - 1), byExtendingSelection: false)
+            self.refreshSubscription(at: self.subscriptions.count - 1)
+            dialog?.dismiss()
+        }
+        
+        dialog.onCancel = { [weak dialog] in
+            dialog?.dismiss()
         }
     }
 
@@ -2636,69 +2674,76 @@ final class MD3SettingsPageView: NSView, MD3Themeable {
         }
         let subscription = subscriptions[index]
 
-        let alert = NSAlert()
-        alert.messageText = "编辑订阅"
-        alert.informativeText = "请修改订阅的名称或配置 URL。"
-        alert.addButton(withTitle: "确定")
-        alert.addButton(withTitle: "取消")
-
         let nameField = MD3TextField()
         nameField.stringValue = subscription.name
         nameField.placeholderString = "订阅名称"
         nameField.translatesAutoresizingMaskIntoConstraints = false
-        nameField.widthAnchor.constraint(equalToConstant: 420).isActive = true
-        nameField.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        nameField.widthAnchor.constraint(equalToConstant: 432).isActive = true
+        nameField.heightAnchor.constraint(equalToConstant: 36).isActive = true
 
         let urlField = MD3TextField()
         urlField.stringValue = subscription.url
         urlField.placeholderString = "https://..."
         urlField.translatesAutoresizingMaskIntoConstraints = false
-        urlField.widthAnchor.constraint(equalToConstant: 420).isActive = true
-        urlField.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        urlField.widthAnchor.constraint(equalToConstant: 432).isActive = true
+        urlField.heightAnchor.constraint(equalToConstant: 36).isActive = true
 
         let stack = NSStackView(views: [nameField, urlField])
         stack.orientation = .vertical
-        stack.spacing = 10
+        stack.spacing = 12
         stack.alignment = .leading
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 74))
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(stack)
         
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             stack.topAnchor.constraint(equalTo: container.topAnchor),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor)
+            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            container.widthAnchor.constraint(equalToConstant: 432),
+            container.heightAnchor.constraint(equalToConstant: 84)
         ])
 
-        alert.accessoryView = container
+        let dialog = showMD3Dialog(
+            title: "编辑订阅",
+            message: "请修改订阅的名称或配置 URL。",
+            customView: container
+        )
         
-        alert.layout()
-        alert.window.initialFirstResponder = nameField
-
-        if alert.runModal() == .alertFirstButtonReturn {
-            let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            let url = urlField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        dialog.window?.initialFirstResponder = nameField
+        
+        dialog.onConfirm = { [weak self, weak nameField, weak urlField, weak dialog] in
+            guard let self = self else { return }
+            let name = nameField?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let url = urlField?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            
             guard !name.isEmpty else {
-                showError(NSError.user("订阅名称不能为空"))
+                self.showError(NSError.user("订阅名称不能为空"))
                 return
             }
             guard !url.isEmpty else {
-                showError(NSError.user("订阅 URL 不能为空"))
+                self.showError(NSError.user("订阅 URL 不能为空"))
                 return
             }
 
-            subscriptions[index] = Subscription(
+            self.subscriptions[index] = Subscription(
                 id: subscription.id,
                 name: name,
                 url: url,
                 profileID: subscription.profileID,
                 updatedAt: subscription.updatedAt
             )
-            store.saveSubscriptions(subscriptions)
-            subscriptionTable.reloadData()
-            refreshSubscription(at: index)
+            self.store.saveSubscriptions(self.subscriptions)
+            self.subscriptionTable.reloadData()
+            self.refreshSubscription(at: index)
+            dialog?.dismiss()
+        }
+        
+        dialog.onCancel = { [weak dialog] in
+            dialog?.dismiss()
         }
     }
 
@@ -2724,12 +2769,6 @@ final class MD3SettingsPageView: NSView, MD3Themeable {
         customRuleValueField.stringValue = ""
         customRuleNoteField.stringValue = ""
 
-        let alert = NSAlert()
-        alert.messageText = "新建标准规则"
-        alert.informativeText = "自定义规则会按当前订阅单独保存，并在刷新订阅后自动合并。"
-        alert.addButton(withTitle: "添加")
-        alert.addButton(withTitle: "取消")
-
         let typeLabel = settingsLabel("规则类型")
         let valueLabel = settingsLabel("值")
         let strategyLabel = settingsLabel("使用策略")
@@ -2754,22 +2793,39 @@ final class MD3SettingsPageView: NSView, MD3Themeable {
         ])
         grid.translatesAutoresizingMaskIntoConstraints = false
         grid.column(at: 0).xPlacement = .trailing
-        grid.column(at: 1).width = 420
+        grid.column(at: 1).width = 340
         grid.rowSpacing = 12
         grid.columnSpacing = 12
 
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 190))
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(grid)
+        
         NSLayoutConstraint.activate([
             grid.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             grid.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             grid.topAnchor.constraint(equalTo: container.topAnchor),
-            grid.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor)
+            grid.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            container.widthAnchor.constraint(equalToConstant: 432),
+            container.heightAnchor.constraint(equalToConstant: 180)
         ])
-        alert.accessoryView = container
 
-        if alert.runModal() == .alertFirstButtonReturn {
-            addCustomRuleFromDialog()
+        let dialog = showMD3Dialog(
+            title: "新建标准规则",
+            message: "自定义规则会按当前订阅单独保存，并在刷新订阅后自动合并。",
+            customView: container,
+            confirmTitle: "添加"
+        )
+        
+        dialog.window?.initialFirstResponder = customRuleValueField
+        
+        dialog.onConfirm = { [weak self, weak dialog] in
+            self?.addCustomRuleFromDialog()
+            dialog?.dismiss()
+        }
+        
+        dialog.onCancel = { [weak dialog] in
+            dialog?.dismiss()
         }
     }
 
