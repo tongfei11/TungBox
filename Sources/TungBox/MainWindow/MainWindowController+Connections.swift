@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 
 extension MainWindowController {
-    
+
     func makeConnectionsView() -> NSView {
         let view = NSView()
         view.wantsLayer = true
@@ -19,26 +19,49 @@ extension MainWindowController {
             title?.textColor = MD3.onSurface
         }
 
+        // Filter bar
+        let filterField = connectionFilterField
+        filterField.placeholderString = "过滤节点 / 域名 / IP / 规则..."
+        filterField.target = self
+        filterField.action = #selector(connectionFilterChanged)
+        filterField.translatesAutoresizingMaskIntoConstraints = false
+        filterField.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(connectionFilterChanged),
+            name: NSControl.textDidChangeNotification,
+            object: filterField
+        )
+
         let refreshButton = MD3Button()
-        refreshButton.title = "刷新连接"
+        refreshButton.title = "刷新"
         refreshButton.style = .tonal
         refreshButton.target = self
         refreshButton.action = #selector(refreshConnectionsClicked)
         refreshButton.translatesAutoresizingMaskIntoConstraints = false
         refreshButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        refreshButton.widthAnchor.constraint(equalToConstant: 80).isActive = true
 
         let closeButton = MD3Button()
-        closeButton.title = "关闭全部连接"
+        closeButton.title = "关闭全部"
         closeButton.style = .outlined
         closeButton.target = self
         closeButton.action = #selector(closeAllConnectionsClicked)
         closeButton.translatesAutoresizingMaskIntoConstraints = false
         closeButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        closeButton.widthAnchor.constraint(equalToConstant: 100).isActive = true
 
         let buttons = NSStackView(views: [refreshButton, closeButton])
         buttons.orientation = .horizontal
         buttons.spacing = 8
         buttons.translatesAutoresizingMaskIntoConstraints = false
+
+        let toolbar = NSStackView(views: [filterField, buttons])
+        toolbar.orientation = .horizontal
+        toolbar.spacing = 12
+        toolbar.alignment = .centerY
+        toolbar.translatesAutoresizingMaskIntoConstraints = false
+        filterField.widthAnchor.constraint(equalTo: toolbar.widthAnchor, multiplier: 0.55).isActive = true
 
         let panel = MD3Panel()
         panel.type = .filled
@@ -60,23 +83,25 @@ extension MainWindowController {
         connectionsTable.dataSource = self
         connectionsTable.rowHeight = 40
         connectionsTable.gridStyleMask = [.solidHorizontalGridLineMask]
+        connectionsTable.menu = connectionContextMenu()
         scroll.documentView = connectionsTable
 
         panel.addSubview(scroll)
         view.addSubview(title)
-        view.addSubview(buttons)
+        view.addSubview(toolbar)
         view.addSubview(panel)
 
         NSLayoutConstraint.activate([
             title.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
             title.topAnchor.constraint(equalTo: view.topAnchor, constant: 28),
 
-            buttons.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
-            buttons.centerYAnchor.constraint(equalTo: title.centerYAnchor),
+            toolbar.leadingAnchor.constraint(equalTo: title.leadingAnchor),
+            toolbar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
+            toolbar.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 16),
 
             panel.leadingAnchor.constraint(equalTo: title.leadingAnchor),
             panel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
-            panel.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 20),
+            panel.topAnchor.constraint(equalTo: toolbar.bottomAnchor, constant: 12),
             panel.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -24),
 
             scroll.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 12),
@@ -93,6 +118,50 @@ extension MainWindowController {
         column.title = title
         column.width = width
         return column
+    }
+
+    func filteredConnections() -> [ConnectionInfo] {
+        let query = connectionFilterField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return connections }
+        return connections.filter { conn in
+            conn.outbound.lowercased().contains(query) ||
+            conn.destination.lowercased().contains(query) ||
+            conn.source.lowercased().contains(query) ||
+            conn.rule.lowercased().contains(query) ||
+            conn.network.lowercased().contains(query)
+        }
+    }
+
+    func connectionContextMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.addItem(NSMenuItem(title: "关闭此连接", action: #selector(closeSingleConnectionClicked(_:)), keyEquivalent: ""))
+        return menu
+    }
+
+    @objc func connectionFilterChanged() {
+        connectionsTable.reloadData()
+    }
+
+    @objc func closeSingleConnectionClicked(_ sender: Any) {
+        let row = connectionsTable.clickedRow
+        guard row >= 0 else { return }
+        let conns = filteredConnections()
+        guard conns.indices.contains(row) else { return }
+        let conn = conns[row]
+
+        Task {
+            do {
+                try await ClashAPI.closeConnection(id: conn.id)
+                await MainActor.run {
+                    // Remove from the unfiltered list too
+                    connections.removeAll { $0.id == conn.id }
+                    connectionsTable.reloadData()
+                    appendLog("[连接] 已关闭 \(conn.destination)\n")
+                }
+            } catch {
+                await MainActor.run { showError(error) }
+            }
+        }
     }
 
     @objc func refreshConnectionsClicked() {

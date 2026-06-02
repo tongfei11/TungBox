@@ -7,7 +7,7 @@ extension MainWindowController {
         if tableView == subscriptionTable { return (subscriptions.count + 1) / 2 }
         if tableView == nodeTable { return nodes.count }
         if tableView == rulesTable { return filteredRuleRows().count }
-        if tableView == connectionsTable { return connections.count }
+        if tableView == connectionsTable { return filteredConnections().count }
         return profiles.count
     }
 

@@ -55,6 +55,11 @@ enum ClashAPI {
         try await requestJSON(path: "/connections", method: "DELETE")
     }
 
+    @discardableResult
+    static func closeConnection(id: String) async throws -> Any {
+        try await requestJSON(path: "/connections/\(id)", method: "DELETE")
+    }
+
     static func traffic() async throws -> (up: Int, down: Int) {
         guard let object = try await requestJSON(path: "/traffic") as? [String: Any] else { return (0, 0) }
         return ((object["up"] as? Int) ?? 0, (object["down"] as? Int) ?? 0)

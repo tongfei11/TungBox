@@ -91,6 +91,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var detectedCoreVersion = "检测中"
     var subscriptionTimer: Timer?
     weak var zeroStateView: NSView?
+    let connectionFilterField = MD3TextField()
     
     let serviceSwitch = MD3Switch()
     let tunSwitch = MD3Switch()
