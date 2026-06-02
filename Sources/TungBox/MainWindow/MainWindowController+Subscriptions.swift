@@ -378,14 +378,42 @@ extension MainWindowController {
                 let format = SubscriptionFormatParser.detectFormat(content)
                 let nodes = try SubscriptionImporter.extractNodesFromAnyFormat(content)
                 let config = try SubscriptionImporter.singBoxConfig(from: content, profileName: subscription.name)
+                let fixLog = SubscriptionImporter.compatibilityFixLog
+                SubscriptionImporter.compatibilityFixLog = []
+                // Check for manual-fix issues
+                var manualIssues: [ConfigCompatibilityChecker.Issue] = []
+                if let data = config.data(using: .utf8),
+                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    manualIssues = ConfigCompatibilityChecker.check(config: obj).filter { !$0.autoFixed }
+                }
                 DispatchQueue.main.async {
-                    // Clear error on success + persist
                     if let idx = self?.subscriptions.firstIndex(where: { $0.id == subscription.id }) {
                         self?.subscriptions[idx].lastError = nil
                         self?.store.saveSubscriptions(self?.subscriptions ?? [])
                         self?.subscriptionTable.reloadData()
                     }
                     self?.appendLog("[订阅] 检测到 \(format.rawValue) 格式，\(nodes.count) 个节点\n")
+                    for fix in fixLog { self?.appendLog(fix + "\n") }
+                    for issue in manualIssues {
+                        self?.appendLog("[兼容性] [\(issue.severity.rawValue)] \(issue.path): \(issue.message)\n")
+                    }
+                    let errorCount = manualIssues.filter({ $0.severity == .error }).count
+                    if errorCount > 0 {
+                        let dialog = self?.showMD3Dialog(
+                            title: "配置兼容性警告",
+                            message: "订阅包含 \(errorCount) 个已弃用的配置项，在当前 Core 版本上可能无法正常启动。\n\n是否安装兼容旧配置的 sing-box 1.11.10？\n\n（可在 设置 → Core 管理 中随时装回最新版）",
+                            customView: nil,
+                            confirmTitle: "安装兼容旧版 Core",
+                            cancelTitle: "忽略"
+                        )
+                        dialog?.onConfirm = { [weak self, weak dialog] in
+                            dialog?.dismiss()
+                            Task {
+                                await self?.downgradeCoreForCompatibility()
+                            }
+                        }
+                        dialog?.onCancel = { [weak dialog] in dialog?.dismiss() }
+                    }
                     self?.applySubscriptionConfig(config, at: index)
                 }
             } catch {
@@ -440,6 +468,20 @@ extension MainWindowController {
         appendLog("[订阅] 自动刷新已开启，间隔：\(intervalText)\n")
     }
 
+    @MainActor
+    func downgradeCoreForCompatibility() async {
+        let oldVersion = "1.11.10"
+        serviceLabel.stringValue = "sing-box Core：正在安装兼容版本 \(oldVersion)..."
+        appendLog("[Core] 订阅兼容性要求降级 Core 至 \(oldVersion)\n")
+        do {
+            let release = try await CoreUpdater.release(version: oldVersion)
+            installCoreRelease(release, reason: "兼容旧订阅")
+        } catch {
+            serviceLabel.stringValue = "sing-box Core：安装 \(oldVersion) 失败\n\(error.localizedDescription)"
+            showError(error)
+        }
+    }
+
     func notifySubscriptionFailure(name: String, error: String) {
         let content = UNMutableNotificationContent()
         content.title = "订阅刷新失败"
@@ -453,17 +495,6 @@ extension MainWindowController {
         guard subscriptions.indices.contains(index) else { return }
         var subscription = subscriptions[index]
         let profileName = "订阅 - \(subscription.name)"
-
-        // Compatibility check
-        if let configData = config.data(using: .utf8),
-           let configObj = try? JSONSerialization.jsonObject(with: configData) as? [String: Any] {
-            let issues = ConfigCompatibilityChecker.check(config: configObj)
-            if !issues.isEmpty {
-                for issue in issues {
-                    appendLog("[兼容性] [\(issue.severity.rawValue)] \(issue.path): \(issue.message)\n")
-                }
-            }
-        }
 
         let mergedConfig: String
         do {

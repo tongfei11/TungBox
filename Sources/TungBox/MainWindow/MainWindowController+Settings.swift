@@ -500,7 +500,7 @@ extension MainWindowController {
         }
     }
 
-    private func installCoreRelease(_ release: CoreRelease, reason: String) {
+    func installCoreRelease(_ release: CoreRelease, reason: String) {
         guard !isProxyRuntimeRunning() else {
             showToast("请先关闭代理服务，再更新 Core")
             showError(NSError.user("请先关闭代理服务，再更新 sing-box Core。"))

@@ -52,11 +52,18 @@ enum SubscriptionImporter {
         var config = try generateManagedConfig(profileName: profileName, nodes: nodes, subscriptionRuleSetURLs: parsed.ruleSetURLs)
 
         // Auto-fix deprecated sing-box fields for compatibility with newer Core
-        let (fixed, _) = ConfigCompatibilityChecker.autoFix(config: config)
+        let (fixed, fixLog) = ConfigCompatibilityChecker.autoFix(config: config)
+        // Log auto-fixes so user can review
+        for msg in fixLog {
+            SubscriptionImporter.compatibilityFixLog.append("[兼容性] [AUTO-FIX] \(msg)")
+        }
         config = fixed
 
         return try renderJSON(config)
     }
+
+    /// Collects compatibility fix messages to be logged after import completes.
+    nonisolated(unsafe) static var compatibilityFixLog: [String] = []
 
     static func extractNodes(from text: String) throws -> [[String: Any]] {
         let parsed = try parseSubscription(text)
