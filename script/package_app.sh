@@ -61,39 +61,71 @@ sign_app() {
   /usr/bin/codesign --force --deep --sign - "$APP_DIR"
 }
 
-find_core() {
+build_core() {
   if [[ -n "${TUNGBOX_CORE_PATH:-}" && -x "$TUNGBOX_CORE_PATH" ]]; then
     printf '%s\n' "$TUNGBOX_CORE_PATH"
     return 0
   fi
 
-  local candidates=(
-    "$HOME/Library/Application Support/TungBox/Core/sing-box"
-    "/opt/homebrew/bin/sing-box"
-    "/usr/local/bin/sing-box"
-    "/usr/bin/sing-box"
-    "/opt/homebrew/bin/singbox"
-    "/usr/local/bin/singbox"
-  )
+  if ! command -v go >/dev/null 2>&1; then
+    echo "Missing Go toolchain. Install Go or set TUNGBOX_CORE_PATH to a pre-built core." >&2
+    return 1
+  fi
 
-  local candidate
-  for candidate in "${candidates[@]}"; do
-    if [[ -x "$candidate" ]]; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
+  local gopath
+  gopath="$(go env GOPATH)"
+
+  # Resolve latest sing-box version for version injection
+  local core_version
+  if core_version="$(go list -m -json github.com/sagernet/sing-box@latest 2>/dev/null | awk -F'"' '/"Version"/ {print $4}')" && [[ -n "$core_version" ]]; then
+    echo "sing-box ${core_version} identified, building..." >&2
+  else
+    core_version="unknown"
+    echo "Failed to resolve sing-box version, building with 'unknown'..." >&2
+  fi
+
+  local tags="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale"
+  local ldflags="-X 'github.com/sagernet/sing-box/constant.Version=${core_version}' -s -w -buildid="
+  echo "Building stripped sing-box core (tags: ${tags}, version: ${core_version})..." >&2
+  env CGO_ENABLED=0 go install -ldflags="$ldflags" -tags "$tags" \
+    github.com/sagernet/sing-box/cmd/sing-box@latest
+
+  local binary="$gopath/bin/sing-box"
+
+  if [[ -x "$binary" ]]; then
+    printf '%s\n' "$binary"
+    return 0
+  fi
+
+  echo "Core build failed unexpectedly." >&2
+  return 1
+}
+
+generate_app_icon() {
+  local logo="$ROOT_DIR/Sources/TungBox/Resources/Tray/logo.png"
+  local icon_set_dir="/tmp/${PRODUCT}_AppIcon.iconset"
+  local icns_path="$RESOURCES_DIR/AppIcon.icns"
+
+  rm -rf "$icon_set_dir"
+  mkdir -p "$icon_set_dir"
+
+  local sizes=(16 32 128 256 512)
+  local size
+  for size in "${sizes[@]}"; do
+    sips -z "$size" "$size" "$logo" --out "$icon_set_dir/icon_${size}x${size}.png" &>/dev/null
+    sips -z "$((size*2))" "$((size*2))" "$logo" --out "$icon_set_dir/icon_${size}x${size}@2x.png" &>/dev/null
   done
+  # 1024x1024 for @2x of 512
+  sips -z 1024 1024 "$logo" --out "$icon_set_dir/icon_512x512@2x.png" &>/dev/null
 
-  if command -v sing-box >/dev/null 2>&1; then
-    command -v sing-box
+  iconutil -c icns "$icon_set_dir" -o "$icns_path" 2>/dev/null
+  rm -rf "$icon_set_dir"
+
+  if [[ -f "$icns_path" ]]; then
+    echo "Generated app icon: $icns_path"
     return 0
   fi
-
-  if command -v singbox >/dev/null 2>&1; then
-    command -v singbox
-    return 0
-  fi
-
+  echo "Warning: failed to generate .icns, app will use default icon." >&2
   return 1
 }
 
@@ -113,14 +145,16 @@ if [[ -d "$RESOURCE_BUNDLE" ]]; then
   cp -R "$RESOURCE_BUNDLE" "$RESOURCES_DIR/"
 fi
 
-if CORE_PATH="$(find_core)"; then
+if CORE_PATH="$(build_core)"; then
   cp "$CORE_PATH" "$CORE_DIR/sing-box"
   chmod +x "$CORE_DIR/sing-box"
   echo "Bundled sing-box Core: $CORE_PATH"
 else
-  echo "Missing sing-box Core. Set TUNGBOX_CORE_PATH or install/import Core before packaging." >&2
+  echo "Missing sing-box Core. Set TUNGBOX_CORE_PATH to a pre-built binary, or install Go toolchain." >&2
   exit 1
 fi
+
+generate_app_icon
 
 cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -135,6 +169,8 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
   <string>${IDENTIFIER}</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
   <key>CFBundleName</key>
   <string>${PRODUCT}</string>
   <key>CFBundlePackageType</key>
@@ -157,5 +193,32 @@ clear_finder_info
 
 sign_app
 verify_signature
+
+DMG_NAME="${PRODUCT}-${RELEASE_VERSION}-macos-arm64"
+DMG_PATH="$ROOT_DIR/dist/${DMG_NAME}.dmg"
+
+echo "Creating DMG: ${DMG_NAME}.dmg..."
+DMG_TEMP=$(mktemp -d)
+ln -sf /Applications "$DMG_TEMP/Applications"
+cp -R "$APP_DIR" "$DMG_TEMP/"
+
+hdiutil create \
+  -volname "${PRODUCT}" \
+  -srcfolder "$DMG_TEMP" \
+  -ov \
+  -format UDZO \
+  -imagekey zlib-level=9 \
+  "$DMG_PATH"
+
+rm -rf "$DMG_TEMP"
+
+if [[ -f "$DMG_PATH" ]]; then
+  echo "Created: $DMG_PATH ($(du -sh "$DMG_PATH" | cut -f1))"
+  shasum -a 256 "$DMG_PATH" | awk '{print $1}' > "${DMG_PATH}.sha256"
+  echo "SHA256: $(cat "${DMG_PATH}.sha256")"
+
+  # Clean up old zip
+  rm -f "$ROOT_DIR/dist/${DMG_NAME}.zip" "$ROOT_DIR/dist/${DMG_NAME}.zip.sha256"
+fi
 
 echo "Packaged: $APP_DIR"

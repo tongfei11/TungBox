@@ -1444,6 +1444,11 @@ final class MD3SidebarItem: NSView, MD3Themeable {
     private let iconView = NSImageView()
     private let labelField = NSTextField(labelWithString: "")
     private let selectionPill = NSView()
+    private let badgeDot = NSView()
+
+    var hasBadge: Bool = false {
+        didSet { badgeDot.isHidden = !hasBadge }
+    }
     
     private var _tag: Int = 0
     override var tag: Int {
@@ -1520,29 +1525,41 @@ final class MD3SidebarItem: NSView, MD3Themeable {
         
         addSubview(iconView)
         addSubview(labelField)
-        
+        addSubview(badgeDot)
+
+        badgeDot.wantsLayer = true
+        badgeDot.layer?.backgroundColor = NSColor.systemRed.cgColor
+        badgeDot.layer?.cornerRadius = 4
+        badgeDot.translatesAutoresizingMaskIntoConstraints = false
+        badgeDot.isHidden = true
+
         labelField.font = .systemFont(ofSize: 14, weight: .medium)
         labelField.textColor = MD3.onSurfaceVariant
-        
+
         let leadingConstraint = iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16)
         let centerConstraint = iconView.centerXAnchor.constraint(equalTo: centerXAnchor)
         self.iconLeadingConstraint = leadingConstraint
         self.iconCenterConstraint = centerConstraint
-        
+
         NSLayoutConstraint.activate([
             selectionPill.leadingAnchor.constraint(equalTo: leadingAnchor),
             selectionPill.trailingAnchor.constraint(equalTo: trailingAnchor),
             selectionPill.topAnchor.constraint(equalTo: topAnchor),
             selectionPill.bottomAnchor.constraint(equalTo: bottomAnchor),
-            
+
             leadingConstraint,
             iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
             iconView.widthAnchor.constraint(equalToConstant: 20),
             iconView.heightAnchor.constraint(equalToConstant: 20),
-            
+
             labelField.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 12),
-            labelField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-            labelField.centerYAnchor.constraint(equalTo: centerYAnchor)
+            labelField.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            badgeDot.leadingAnchor.constraint(equalTo: labelField.trailingAnchor, constant: 6),
+            badgeDot.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -16),
+            badgeDot.centerYAnchor.constraint(equalTo: centerYAnchor),
+            badgeDot.widthAnchor.constraint(equalToConstant: 8),
+            badgeDot.heightAnchor.constraint(equalToConstant: 8)
         ])
         
         updateState()

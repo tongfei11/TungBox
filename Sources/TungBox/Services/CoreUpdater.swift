@@ -54,21 +54,42 @@ enum CoreUpdater {
     }
 
     private static func fetchData(from url: URL) async throws -> Data {
-        var request = URLRequest(url: url)
+        var request = URLRequest(url: url, timeoutInterval: 120)
         request.setValue("TungBox/\(TungBoxVersion.current)", forHTTPHeaderField: "User-Agent")
         request.setValue("application/octet-stream,*/*", forHTTPHeaderField: "Accept")
-        let (data, response) = try await URLSession.shared.data(for: request)
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 120
+        config.timeoutIntervalForResource = 300
+        let session = URLSession(configuration: config)
+
+        let (data, response) = try await session.data(for: request)
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            throw NSError.user("下载失败：HTTP \(http.statusCode)")
+            let hint: String
+            switch http.statusCode {
+            case 404: hint = "版本不存在，请确认版本号正确"
+            case 403: hint = "访问被 GitHub 拒绝，可能触发了频率限制"
+            case 500...599: hint = "GitHub 服务器错误，请稍后重试"
+            default: hint = "请检查网络连接后重试"
+            }
+            throw NSError.user("下载失败 (HTTP \(http.statusCode))：\(hint)")
         }
         return data
     }
 
     private static func latestStableTag() async throws -> String {
-        var request = URLRequest(url: stableLatestURL)
+        var request = URLRequest(url: stableLatestURL, timeoutInterval: 15)
         request.httpMethod = "HEAD"
         request.setValue("TungBox/\(TungBoxVersion.current)", forHTTPHeaderField: "User-Agent")
-        let (_, response) = try await URLSession.shared.data(for: request)
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 15
+        config.timeoutIntervalForResource = 30
+        let session = URLSession(configuration: config)
+
+        let (_, response) = try await session.data(for: request)
         if let http = response as? HTTPURLResponse, !(200..<400).contains(http.statusCode) {
             throw NSError.user("检查更新失败：HTTP \(http.statusCode)")
         }

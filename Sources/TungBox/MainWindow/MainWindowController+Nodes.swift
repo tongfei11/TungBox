@@ -413,7 +413,8 @@ extension MainWindowController {
                             result = try runner.urlTest(config: config, outbound: tag, testURL: finalURL)
                         }
                     } catch {
-                        result = "失败"
+                        let msg = error.localizedDescription
+                        result = msg.contains("超时") ? "超时" : "失败"
                     }
                     
                     await MainActor.run { [weak self] in
@@ -512,7 +513,8 @@ extension MainWindowController {
                             result = try runner.urlTest(config: config, outbound: tag, testURL: testURL)
                         }
                     } catch {
-                        result = "失败"
+                        let msg = error.localizedDescription
+                        result = msg.contains("超时") ? "超时" : "失败"
                     }
                     await MainActor.run { [weak self] in
                         guard let self, self.nodes.indices.contains(index), self.nodes[index].tag == tag else { return }
@@ -560,7 +562,8 @@ extension MainWindowController {
                     do {
                         result = try runner.tcpTest(config: config, outbound: tag, address: address)
                     } catch {
-                        result = "失败"
+                        let msg = error.localizedDescription
+                        result = msg.contains("超时") ? "超时" : "失败"
                     }
                     await MainActor.run { [weak self] in
                         guard let self, self.nodes.indices.contains(index), self.nodes[index].tag == tag else { return }

@@ -869,10 +869,28 @@ extension MainWindowController {
         panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let source = panel.url {
             do {
+                guard FileManager.default.isExecutableFile(atPath: source.path) else {
+                    showError(NSError.user("所选文件不是可执行的 sing-box 程序。请确保选择了正确的二进制文件。"))
+                    return
+                }
+                // Quick sanity check: try running version
+                let test = Process()
+                test.executableURL = source
+                test.arguments = ["version"]
+                let pipe = Pipe()
+                test.standardOutput = pipe
+                test.standardError = pipe
+                try test.run()
+                test.waitUntilExit()
+                guard test.terminationStatus == 0 else {
+                    let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                    showError(NSError.user("所选文件无法执行 sing-box version：\(output.prefix(200))"))
+                    return
+                }
+
                 if FileManager.default.fileExists(atPath: store.coreBinaryURL.path) {
                     try FileManager.default.removeItem(at: store.coreBinaryURL)
                 }
-                try FileManager.default.copyItem(at: source, to: store.coreBinaryURL)
                 try FileManager.default.copyItem(at: source, to: store.coreBinaryURL)
                 try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: store.coreBinaryURL.path)
                 appendLog("[Core] 已导入 sing-box Core：\(store.coreBinaryURL.path)\n")

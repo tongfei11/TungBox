@@ -209,10 +209,10 @@ final class Runner: @unchecked Sendable {
             "-c", actualConfig.path,
             "-o", outbound,
             testURL
-        ])
+        ], timeoutSeconds: 10)
         if result.status != 0 {
             let message = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-            throw NSError.user(message.isEmpty ? "测试失败" : message)
+            throw NSError.user(message.isEmpty ? "节点延迟测试超时或失败" : message)
         }
         return "\(Int(Date().timeIntervalSince(start) * 1000)) ms"
     }
@@ -228,15 +228,15 @@ final class Runner: @unchecked Sendable {
             "-c", actualConfig.path,
             "-o", outbound,
             address
-        ])
+        ], timeoutSeconds: 5)
         if result.status != 0 {
             let message = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-            throw NSError.user(message.isEmpty ? "TCP 测试失败" : message)
+            throw NSError.user(message.isEmpty ? "TCP 连接测试超时或失败" : message)
         }
         return "\(Int(Date().timeIntervalSince(start) * 1000)) ms"
     }
 
-    private func runAndWait(_ binary: String, _ args: [String]) -> (status: Int32, output: String) {
+    private func runAndWait(_ binary: String, _ args: [String], timeoutSeconds: UInt32? = nil) -> (status: Int32, output: String) {
         let process = Process()
         process.currentDirectoryURL = store.baseURL
         process.executableURL = URL(fileURLWithPath: binary)
@@ -246,7 +246,32 @@ final class Runner: @unchecked Sendable {
         process.standardError = pipe
         do {
             try process.run()
-            process.waitUntilExit()
+
+            if let timeout = timeoutSeconds {
+                let semaphore = DispatchSemaphore(value: 0)
+                let deadline = DispatchTime.now() + .seconds(Int(timeout))
+
+                DispatchQueue.global().async {
+                    process.waitUntilExit()
+                    semaphore.signal()
+                }
+
+                if semaphore.wait(timeout: deadline) == .timedOut {
+                    if process.isRunning {
+                        process.terminate()
+                        // Give it a brief moment to clean up
+                        DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(500)) {
+                            if process.isRunning {
+                                _ = Darwin.kill(process.processIdentifier, SIGKILL)
+                            }
+                        }
+                    }
+                    return (143, "操作超时 (\(timeout)s)")
+                }
+            } else {
+                process.waitUntilExit()
+            }
+
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             return (process.terminationStatus, String(data: data, encoding: .utf8) ?? "")
         } catch {

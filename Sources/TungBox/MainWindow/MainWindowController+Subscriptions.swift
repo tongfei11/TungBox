@@ -100,7 +100,51 @@ extension MainWindowController {
             scroll.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -8)
         ])
 
+        let emptyLabel = subscriptionZeroStateLabel(panel: panel)
+        view.addSubview(emptyLabel)
+        NSLayoutConstraint.activate([
+            emptyLabel.centerXAnchor.constraint(equalTo: panel.centerXAnchor),
+            emptyLabel.centerYAnchor.constraint(equalTo: panel.centerYAnchor),
+            emptyLabel.widthAnchor.constraint(lessThanOrEqualTo: panel.widthAnchor, constant: -32)
+        ])
+
+        refreshSubscriptionEmptyState()
         return view
+    }
+
+    func subscriptionZeroStateLabel(panel: NSView) -> NSTextField {
+        let label = NSTextField(labelWithString: "暂无订阅\n\n点击「添加订阅」导入机场链接或 sing-box 订阅地址。\n支持 sing-box JSON、Base64 编码的节点列表等格式。")
+        label.font = .systemFont(ofSize: 14, weight: .regular)
+        label.textColor = MD3.onSurfaceVariant
+        label.alignment = .center
+        label.lineBreakMode = .byWordWrapping
+        label.maximumNumberOfLines = 0
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.tag = 9_001
+        registerThemeObserver { [weak label] in
+            label?.textColor = MD3.onSurfaceVariant
+        }
+        return label
+    }
+
+    func refreshSubscriptionEmptyState() {
+        if let zeroState = viewWithTag(9_001) {
+            zeroState.isHidden = !subscriptions.isEmpty
+            subscriptionTable.isHidden = subscriptions.isEmpty
+        }
+    }
+
+    func viewWithTag(_ tag: Int) -> NSView? {
+        guard let content = window?.contentView else { return nil }
+        return findTaggedView(tag, in: content)
+    }
+
+    func findTaggedView(_ tag: Int, in root: NSView) -> NSView? {
+        if root.tag == tag { return root }
+        for subview in root.subviews {
+            if let found = findTaggedView(tag, in: subview) { return found }
+        }
+        return nil
     }
 
     @objc func addSubscriptionClicked() {
@@ -247,6 +291,8 @@ extension MainWindowController {
             )
             self.store.saveSubscriptions(self.subscriptions)
             self.subscriptionTable.reloadData()
+            refreshSubscriptionEmptyState()
+            refreshSubscriptionBadge()
             self.refreshSubscription(at: index)
             dialog?.dismiss()
         }
@@ -271,6 +317,8 @@ extension MainWindowController {
             nodes = []
             nodeTable.reloadData()
             subscriptionTable.reloadData()
+            refreshSubscriptionEmptyState()
+            refreshSubscriptionBadge()
             return
         }
         guard subscriptions.indices.contains(index) else { return }
@@ -288,6 +336,8 @@ extension MainWindowController {
             nodeTable.reloadData()
         }
         subscriptionTable.reloadData()
+            refreshSubscriptionEmptyState()
+            refreshSubscriptionBadge()
     }
 
     func createProfile(named name: String, content: String) {
@@ -380,6 +430,8 @@ extension MainWindowController {
         store.saveSubscriptions(subscriptions)
         table.reloadData()
         subscriptionTable.reloadData()
+            refreshSubscriptionEmptyState()
+            refreshSubscriptionBadge()
         if let selectedIndex {
             selectProfile(at: selectedIndex, forceReload: true)
         }

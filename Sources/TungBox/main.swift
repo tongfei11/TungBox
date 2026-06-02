@@ -244,12 +244,34 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         }
 
         checkSingBoxInstall(showAlert: true)
+        refreshSubscriptionBadge()
     }
 
     func normalizeProxyPreferences() {
-        if isTunEnabled && !isSystemProxyEnabled {
+        // If TUN daemon is actively running (e.g. survived a crash/force-quit), sync UI state
+        let tunStatus = TunServiceManager.status(store: store)
+        if tunStatus.isRunning {
+            isTunEnabled = true
+            UserDefaults.standard.set(true, forKey: "tunEnabled")
+            // Daemon is running TUN — regular proxy should be off to avoid conflict
+            isSystemProxyEnabled = false
+            UserDefaults.standard.set(false, forKey: "systemProxyEnabled")
+        } else if isTunEnabled && !isSystemProxyEnabled {
             isTunEnabled = false
             UserDefaults.standard.set(false, forKey: "tunEnabled")
+        }
+        // If TUN was enabled but daemon is idle (e.g. manual flag removal), re-enable
+        if isTunEnabled && tunStatus.isInstalled && !tunStatus.isRunning {
+            if let index = selectedIndex, profiles.indices.contains(index),
+               let configText = try? String(contentsOf: store.configURL(for: profiles[index])) {
+                try? TunServiceManager.enable(store: store, configText: configText)
+                appendLog("[TUN] 启动时恢复 TUN 服务\n")
+            } else {
+                // No valid config to give the daemon — disable TUN to prevent restart loop
+                isTunEnabled = false
+                UserDefaults.standard.set(false, forKey: "tunEnabled")
+                try? TunServiceManager.disable(store: store)
+            }
         }
     }
 
@@ -558,13 +580,47 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     }
 
     func stopService() {
+        // 1. Tell TUN daemon to stop (removes enabled flag; daemon cleanly kills TUN child, keeps daemon alive)
         try? TunServiceManager.disable(store: store)
+        appendLog("[TungBox] TUN 标记已关闭\n")
+
+        // 2. Stop sing-box processes (normal + elevated)
         runner.stop()
-        appendLog("[TungBox] 已停止\n")
-        
-        setSystemProxy(enabled: false, port: 7890)
-        
+        appendLog("[TungBox] sing-box 已停止\n")
+
+        // 3. Turn off system proxy synchronously — must complete before app exits
+        setSystemProxySync(enabled: false, port: 7890)
+        appendLog("[TungBox] 系统代理已关闭\n")
+
+        // 4. Persist proxy-off preference so next launch doesn't re-enable unexpectedly
+        UserDefaults.standard.set(false, forKey: "systemProxyEnabled")
+
         refreshStatus()
+    }
+
+    /// Synchronous system proxy toggle — used during app quit/crash where async dispatch might not complete.
+    func setSystemProxySync(enabled: Bool, port: Int) {
+        let services = getActiveNetworkServices()
+        for service in services {
+            if enabled {
+                _ = runCommand("/usr/sbin/networksetup", args: ["-setwebproxy", service, "127.0.0.1", "\(port)"])
+                _ = runCommand("/usr/sbin/networksetup", args: ["-setsecurewebproxy", service, "127.0.0.1", "\(port)"])
+                _ = runCommand("/usr/sbin/networksetup", args: ["-setsocksfirewallproxy", service, "127.0.0.1", "\(port)"])
+                _ = runCommand("/usr/sbin/networksetup", args: ["-setwebproxystate", service, "on"])
+                _ = runCommand("/usr/sbin/networksetup", args: ["-setsecurewebproxystate", service, "on"])
+                _ = runCommand("/usr/sbin/networksetup", args: ["-setsocksfirewallproxystate", service, "on"])
+            } else {
+                _ = runCommand("/usr/sbin/networksetup", args: ["-setwebproxystate", service, "off"])
+                _ = runCommand("/usr/sbin/networksetup", args: ["-setsecurewebproxystate", service, "off"])
+                _ = runCommand("/usr/sbin/networksetup", args: ["-setsocksfirewallproxystate", service, "off"])
+            }
+        }
+        if !enabled {
+            // Clear proxy bypass domains that may have been set
+            if !services.isEmpty {
+                _ = runCommand("/usr/sbin/networksetup", args: ["-setproxybypassdomains", services[0], "Empty"])
+            }
+        }
     }
 
     func selectProfile(at index: Int, forceReload: Bool = false) {
@@ -1232,6 +1288,14 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             nodeTable.reloadData()
             refreshNodeGroupsView()
         }
+    }
+
+    func refreshSubscriptionBadge() {
+        // Index 3 = 订阅 in the sidebar nav
+        if navButtons.indices.contains(3) {
+            navButtons[3].hasBadge = subscriptions.isEmpty
+        }
+        refreshSubscriptionEmptyState()
     }
 
     func refreshStatus() {

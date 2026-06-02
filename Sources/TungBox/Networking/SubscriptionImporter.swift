@@ -7,14 +7,19 @@ enum SubscriptionImporter {
             throw NSError.user("订阅地址必须是 http 或 https URL")
         }
 
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 30
+        var request = URLRequest(url: url, timeoutInterval: 30)
         request.setValue("SFA/1.12.0 sing-box/1.12.0", forHTTPHeaderField: "User-Agent")
         request.setValue("application/json,text/plain,*/*", forHTTPHeaderField: "Accept")
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForResource = 60
+        let session = URLSession(configuration: config)
 
         let semaphore = DispatchSemaphore(value: 0)
         let result = LockedValue<Result<(Data, URLResponse), Error>?>(nil)
-        URLSession.shared.dataTask(with: request) { data, response, error in
+        session.dataTask(with: request) { data, response, error in
             if let error {
                 result.set(.failure(error))
             } else {
@@ -22,9 +27,13 @@ enum SubscriptionImporter {
             }
             semaphore.signal()
         }.resume()
-        semaphore.wait()
+        // 30s timeout guard — prevents hanging if semaphore never signals
+        _ = semaphore.wait(timeout: .now() + 30)
 
-        let (data, response) = try result.get()?.get() ?? (Data(), URLResponse())
+        guard let resolved = result.get() else {
+            throw NSError.user("订阅下载超时，请检查网络或订阅地址")
+        }
+        let (data, response) = try resolved.get()
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             throw NSError.user("订阅下载失败：HTTP \(http.statusCode)")
         }
