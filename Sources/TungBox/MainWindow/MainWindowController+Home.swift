@@ -539,7 +539,6 @@ extension MainWindowController {
     @objc func switchToggled(_ sender: MD3Switch) {
         if sender.isOn {
             isSystemProxyEnabled = true
-            UserDefaults.standard.set(true, forKey: "systemProxyEnabled")
             syncProxyPreferenceControls()
             startService()
         } else {
@@ -548,7 +547,6 @@ extension MainWindowController {
                 isTunEnabled = false
                 UserDefaults.standard.set(false, forKey: "tunEnabled")
             }
-            UserDefaults.standard.set(false, forKey: "systemProxyEnabled")
             syncProxyPreferenceControls()
             stopService()
         }
@@ -570,7 +568,6 @@ extension MainWindowController {
         UserDefaults.standard.set(isTunEnabled, forKey: "tunEnabled")
         if isTunEnabled {
             isSystemProxyEnabled = true
-            UserDefaults.standard.set(true, forKey: "systemProxyEnabled")
         }
         syncProxyPreferenceControls()
         do {
@@ -600,4 +597,3 @@ extension MainWindowController {
         }
     }
 }
-

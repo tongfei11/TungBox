@@ -142,13 +142,11 @@ extension MainWindowController {
     @objc func toggleSystemProxyFromTray() {
         if !isProxyRuntimeRunning() {
             isSystemProxyEnabled = true
-            UserDefaults.standard.set(isSystemProxyEnabled, forKey: "systemProxyEnabled")
             syncProxyPreferenceControls()
             startService()
             appendLog("[托盘] 启动代理服务并开启系统代理\n")
         } else {
             isSystemProxyEnabled = false
-            UserDefaults.standard.set(isSystemProxyEnabled, forKey: "systemProxyEnabled")
             if isTunEnabled {
                 isTunEnabled = false
                 UserDefaults.standard.set(isTunEnabled, forKey: "tunEnabled")
@@ -163,7 +161,6 @@ extension MainWindowController {
     @objc func toggleTunFromTray() {
         if !isTunEnabled && !isSystemProxyEnabled {
             isSystemProxyEnabled = true
-            UserDefaults.standard.set(true, forKey: "systemProxyEnabled")
         }
         if !isTunEnabled, !TunServiceManager.status(store: store).isInstalled {
             showToast("请先安装 TUN 服务")

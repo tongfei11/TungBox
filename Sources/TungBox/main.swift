@@ -79,7 +79,10 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var colorSchemeRows: [MD3ColorSchemeRow] = []
     var themeObservers: [() -> Void] = []
     var statusItem: NSStatusItem?
-    var isSystemProxyEnabled = UserDefaults.standard.object(forKey: "systemProxyEnabled") as? Bool ?? true
+    var isSystemProxyDefaultEnabled = UserDefaults.standard.object(forKey: "systemProxyDefaultEnabled") as? Bool
+        ?? UserDefaults.standard.object(forKey: "systemProxyEnabled") as? Bool
+        ?? true
+    lazy var isSystemProxyEnabled = isSystemProxyDefaultEnabled
     var isTunEnabled = UserDefaults.standard.object(forKey: "tunEnabled") as? Bool ?? false
     var isLaunchAtLoginEnabled: Bool {
         if #available(macOS 13.0, *) {
@@ -273,7 +276,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             UserDefaults.standard.set(true, forKey: "tunEnabled")
             // Daemon is running TUN — regular proxy should be off to avoid conflict
             isSystemProxyEnabled = false
-            UserDefaults.standard.set(false, forKey: "systemProxyEnabled")
         } else if isTunEnabled && !isSystemProxyEnabled {
             isTunEnabled = false
             UserDefaults.standard.set(false, forKey: "tunEnabled")
@@ -614,9 +616,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         // 3. Turn off system proxy synchronously — must complete before app exits
         setSystemProxySync(enabled: false, port: 7890)
         appendLog("[TungBox] 系统代理已关闭\n")
-
-        // 4. Persist proxy-off preference so next launch doesn't re-enable unexpectedly
-        UserDefaults.standard.set(false, forKey: "systemProxyEnabled")
 
         refreshStatus()
     }
