@@ -190,8 +190,7 @@ extension MainWindowController {
     }
 
     @objc func showConsoleFromTray() {
-        window?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        showConsoleWindow()
     }
 
     @objc func modeFromTray(_ sender: NSMenuItem) {

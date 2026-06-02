@@ -3,7 +3,7 @@ import Foundation
 import ServiceManagement
 
 
-final class MainWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate {
+final class MainWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate, NSWindowDelegate {
     let store = Store()
     lazy var runner = Runner(store: store)
     var profiles: [ConfigProfile] = []
@@ -133,6 +133,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         window.isReleasedWhenClosed = false
         window.center()
         self.init(window: window)
+        window.delegate = self
         setup()
     }
 
@@ -1497,6 +1498,21 @@ extension MainWindowController: NSSplitViewDelegate {
     }
 }
 
+extension MainWindowController {
+    func windowWillClose(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+        appendLog("[窗口] 控制台已关闭，TungBox 保留在状态栏后台运行。\n")
+    }
+
+    func showConsoleWindow() {
+        NSApp.setActivationPolicy(.regular)
+        showWindow(nil)
+        window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        appendLog("[窗口] 已从状态栏恢复控制台。\n")
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var controller: MainWindowController?
 
@@ -1506,10 +1522,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         
         let startSilently = UserDefaults.standard.bool(forKey: "startSilently")
         if isLaunchedAtLogin() && startSilently {
+            NSApp.setActivationPolicy(.accessory)
             controller?.appendLog("[启动] 检测到开机自启动且已勾选“静默启动”，只在状态栏运行，已隐藏控制台窗口。\n")
         } else {
-            controller?.showWindow(nil)
-            NSApp.activate(ignoringOtherApps: true)
+            controller?.showConsoleWindow()
         }
     }
 
