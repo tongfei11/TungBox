@@ -63,6 +63,8 @@ struct ConnectionInfo {
     var outbound: String
     var upload: Int
     var download: Int
+    var uploadSpeed: Int = 0
+    var downloadSpeed: Int = 0
 }
 
 struct CoreRelease {

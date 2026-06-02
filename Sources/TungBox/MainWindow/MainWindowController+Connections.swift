@@ -167,15 +167,41 @@ extension MainWindowController {
     @objc func refreshConnectionsClicked() {
         guard isProxyRuntimeRunning() else {
             connections.removeAll()
+            prevConnections.removeAll()
             connectionsTable.reloadData()
             return
         }
         Task {
             do {
                 let list = try await ClashAPI.connections()
-                connections = list
+                let now = Date()
+                let elapsed = max(now.timeIntervalSince(connectionRefreshTime), 0.5)
+
+                // Calculate per-connection speed
+                var speedMap: [String: (up: Int, down: Int)] = [:]
+                for prev in prevConnections {
+                    if let curr = list.first(where: { $0.id == prev.id }) {
+                        let upSpeed = max(0, curr.upload - prev.upload)
+                        let downSpeed = max(0, curr.download - prev.download)
+                        speedMap[curr.id] = (
+                            Int(Double(upSpeed) / elapsed),
+                            Int(Double(downSpeed) / elapsed)
+                        )
+                    }
+                }
+
+                // Attach speeds to connection info
+                connections = list.map { conn in
+                    var c = conn
+                    c.uploadSpeed = speedMap[conn.id]?.up ?? 0
+                    c.downloadSpeed = speedMap[conn.id]?.down ?? 0
+                    return c
+                }
+
+                prevConnections = list
+                connectionRefreshTime = now
                 connectionsTable.reloadData()
-                updateConnectionsCard(value: "\(connections.count)", detail: "已从 Clash API 刷新")
+                updateConnectionsCard(value: "\(connections.count)", detail: "已刷新")
             } catch {
                 showError(error)
             }
@@ -204,7 +230,12 @@ extension MainWindowController {
         case "destination": text = connection.destination
         case "rule": text = connection.rule
         case "outbound": text = connection.outbound
-        case "traffic": text = "\(formatBytes(connection.upload)) / \(formatBytes(connection.download))"
+        case "traffic":
+            if connection.uploadSpeed > 0 || connection.downloadSpeed > 0 {
+                text = "↑\(formatBytes(connection.uploadSpeed))/s ↓\(formatBytes(connection.downloadSpeed))/s"
+            } else {
+                text = "\(formatBytes(connection.upload)) / \(formatBytes(connection.download))"
+            }
         default: text = ""
         }
 

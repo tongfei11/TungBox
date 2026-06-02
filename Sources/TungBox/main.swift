@@ -111,6 +111,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     let downloadValueLabel = NSTextField(labelWithString: "0 KB/s")
     var statsTimer: Timer?
     var lastProxiesObj: [String: Any]? = nil
+    var prevConnections: [ConnectionInfo] = []
+    var connectionRefreshTime: Date = .distantPast
     var settingsPages: [NSView] = []
     let settingsTabView = NSView()
     private weak var toastView: NSView?
