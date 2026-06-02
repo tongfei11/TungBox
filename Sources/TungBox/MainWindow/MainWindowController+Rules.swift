@@ -47,6 +47,29 @@ extension MainWindowController {
         addRuleButton.translatesAutoresizingMaskIntoConstraints = false
         addRuleButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
 
+        let refreshRuleSetsButton = MD3Button()
+        refreshRuleSetsButton.title = "刷新规则集"
+        refreshRuleSetsButton.style = .outlined
+        refreshRuleSetsButton.target = self
+        refreshRuleSetsButton.action = #selector(refreshRuleSetsManuallyClicked)
+        refreshRuleSetsButton.translatesAutoresizingMaskIntoConstraints = false
+        refreshRuleSetsButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
+
+        let clearRuleSetsButton = MD3Button()
+        clearRuleSetsButton.title = "清空缓存"
+        clearRuleSetsButton.style = .outlined
+        clearRuleSetsButton.target = self
+        clearRuleSetsButton.action = #selector(clearRuleSetCacheClicked)
+        clearRuleSetsButton.translatesAutoresizingMaskIntoConstraints = false
+        clearRuleSetsButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
+
+        let ruleToolbar = NSStackView(views: [ruleSearchField, addRuleButton, refreshRuleSetsButton, clearRuleSetsButton])
+        ruleToolbar.orientation = .horizontal
+        ruleToolbar.spacing = 12
+        ruleToolbar.alignment = .centerY
+        ruleToolbar.translatesAutoresizingMaskIntoConstraints = false
+        ruleSearchField.widthAnchor.constraint(equalToConstant: 200).isActive = true
+
         let scroll = NSScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.hasVerticalScroller = true
@@ -77,31 +100,22 @@ extension MainWindowController {
         panel.translatesAutoresizingMaskIntoConstraints = false
         panel.addSubview(scroll)
 
-        view.addSubview(title)
-        view.addSubview(subtitle)
-        view.addSubview(ruleSearchField)
-        view.addSubview(addRuleButton)
-        view.addSubview(panel)
+        view.addSubview(ruleToolbar)
 
         NSLayoutConstraint.activate([
             title.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
             title.topAnchor.constraint(equalTo: view.topAnchor, constant: 28),
 
             subtitle.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            subtitle.trailingAnchor.constraint(lessThanOrEqualTo: ruleSearchField.leadingAnchor, constant: -16),
             subtitle.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 6),
 
-            ruleSearchField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
-            ruleSearchField.centerYAnchor.constraint(equalTo: subtitle.centerYAnchor),
-            ruleSearchField.widthAnchor.constraint(equalToConstant: 360),
-
-            addRuleButton.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            addRuleButton.topAnchor.constraint(equalTo: subtitle.bottomAnchor, constant: 18),
-            addRuleButton.widthAnchor.constraint(equalToConstant: 112),
+            ruleToolbar.leadingAnchor.constraint(equalTo: title.leadingAnchor),
+            ruleToolbar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
+            ruleToolbar.topAnchor.constraint(equalTo: subtitle.bottomAnchor, constant: 20),
 
             panel.leadingAnchor.constraint(equalTo: title.leadingAnchor),
             panel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
-            panel.topAnchor.constraint(equalTo: addRuleButton.bottomAnchor, constant: 14),
+            panel.topAnchor.constraint(equalTo: ruleToolbar.bottomAnchor, constant: 14),
             panel.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -24),
 
             scroll.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 8),
@@ -434,6 +448,26 @@ extension MainWindowController {
         ruleRows = buildRuleRows(from: editor.string)
         rulesTable.reloadData()
         refreshRuleSetCachesIfNeeded()
+    }
+
+    @objc func refreshRuleSetsManuallyClicked() {
+        let sets = currentRouteRuleSets()
+        guard !sets.isEmpty else { showToast("当前配置没有规则集"); return }
+        ruleSetDownloads.removeAll()
+        appendLog("[规则集] 手动刷新 \(sets.count) 个规则集\n")
+        refreshRuleSetCachesIfNeeded()
+        showToast("正在刷新 \(sets.count) 个规则集")
+    }
+
+    @objc func clearRuleSetCacheClicked() {
+        let dir = store.ruleSetsURL
+        guard FileManager.default.fileExists(atPath: dir.path) else { showToast("缓存为空"); return }
+        let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+        var n = 0
+        for f in files { try? FileManager.default.removeItem(at: f); n += 1 }
+        ruleSetDownloads.removeAll()
+        appendLog("[规则集] 已清空缓存（\(n) 个文件）\n")
+        showToast("已清空 \(n) 个规则集缓存")
     }
 
     func filteredRuleRows() -> [RuleInfo] {
