@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import UserNotifications
 
 extension MainWindowController {
     
@@ -375,12 +376,30 @@ extension MainWindowController {
                 let nodes = try SubscriptionImporter.extractNodesFromAnyFormat(content)
                 let config = try SubscriptionImporter.singBoxConfig(from: content, profileName: subscription.name)
                 DispatchQueue.main.async {
+                    // Clear error on success + persist
+                    if let idx = self?.subscriptions.firstIndex(where: { $0.id == subscription.id }) {
+                        self?.subscriptions[idx].lastError = nil
+                        self?.store.saveSubscriptions(self?.subscriptions ?? [])
+                        self?.subscriptionTable.reloadData()
+                    }
                     self?.appendLog("[订阅] 检测到 \(format.rawValue) 格式，\(nodes.count) 个节点\n")
                     self?.applySubscriptionConfig(config, at: index)
                 }
             } catch {
+                let errorMsg = error.localizedDescription
                 DispatchQueue.main.async {
-                    self?.appendLog("[订阅] \(subscription.name) 刷新失败：\(error.localizedDescription)\n")
+                    // Store error on subscription card
+                    if var sub = self?.subscriptions.first(where: { $0.id == subscription.id }) {
+                        sub.lastError = errorMsg
+                        if let idx = self?.subscriptions.firstIndex(where: { $0.id == sub.id }) {
+                            self?.subscriptions[idx].lastError = errorMsg
+                            self?.store.saveSubscriptions(self?.subscriptions ?? [])
+                            self?.subscriptionTable.reloadData()
+                        }
+                    }
+                    self?.appendLog("[订阅] \(subscription.name) 刷新失败：\(errorMsg)\n")
+                    // macOS notification for auto-refresh failures (not for manual refresh)
+                    self?.notifySubscriptionFailure(name: subscription.name, error: errorMsg)
                     self?.showError(error)
                 }
             }
@@ -389,7 +408,23 @@ extension MainWindowController {
 
     func startSubscriptionTimer() {
         subscriptionTimer?.invalidate()
-        subscriptionTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
+        subscriptionTimer = nil
+
+        let minutes = UserDefaults.standard.integer(forKey: "subscriptionRefreshMinutes")
+        let effectiveMinutes = minutes > 0 ? minutes : 60
+        let seconds = TimeInterval(effectiveMinutes * 60)
+
+        // If set to "off" (0 minutes), don't start a timer
+        guard minutes != 0 else {
+            appendLog("[订阅] 自动刷新已关闭\n")
+            return
+        }
+
+        let formatter = DateComponentsFormatter()
+        formatter.unitsStyle = .abbreviated
+        let intervalText = formatter.string(from: seconds) ?? "\(effectiveMinutes)分"
+
+        subscriptionTimer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self, !self.subscriptions.isEmpty else { return }
                 self.appendLog("[订阅] 自动刷新开始\n")
@@ -399,6 +434,16 @@ extension MainWindowController {
                 }
             }
         }
+        appendLog("[订阅] 自动刷新已开启，间隔：\(intervalText)\n")
+    }
+
+    func notifySubscriptionFailure(name: String, error: String) {
+        let content = UNMutableNotificationContent()
+        content.title = "订阅刷新失败"
+        content.body = "\(name): \(String(error.prefix(120)))"
+        content.sound = .default
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
     }
 
     func applySubscriptionConfig(_ config: String, at index: Int) {

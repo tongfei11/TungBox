@@ -13,6 +13,7 @@ struct Subscription: Codable, Equatable {
     var url: String
     var profileID: UUID?
     var updatedAt: Date?
+    var lastError: String?
 }
 
 struct NodeInfo {

@@ -1205,7 +1205,10 @@ final class MD3SubscriptionItemView: NSView, MD3Themeable {
         titleLabel.stringValue = sub.name
         subtitleLabel.stringValue = sub.url
         
-        if let updateDate = sub.updatedAt {
+        if let error = sub.lastError {
+            statusLabel.stringValue = "失败: \(String(error.prefix(40)))"
+            statusLabel.textColor = MD3.error
+        } else if let updateDate = sub.updatedAt {
             statusLabel.stringValue = "更新于: \(DateFormatter.short.string(from: updateDate))"
         } else {
             statusLabel.stringValue = "未刷新"

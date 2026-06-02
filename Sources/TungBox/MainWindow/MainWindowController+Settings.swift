@@ -133,8 +133,35 @@ extension MainWindowController {
             installOldCoreButton,
             openCoreFolderButton
         ])
+
+        // Subscription auto-refresh interval
+        let refreshLabel = settingsLabel("订阅自动刷新间隔")
+        let refreshPopup = MD3PopUpButton()
+        let intervals: [(String, Int)] = [("关闭", 0), ("30 分钟", 30), ("1 小时", 60), ("2 小时", 120), ("4 小时", 240), ("6 小时", 360), ("12 小时", 720), ("24 小时", 1440)]
+        refreshPopup.removeAllItems()
+        for (title, _) in intervals { refreshPopup.addItem(withTitle: title) }
+        let savedInterval = UserDefaults.standard.integer(forKey: "subscriptionRefreshMinutes")
+        let savedMinutes = savedInterval > 0 ? savedInterval : 60
+        if let idx = intervals.firstIndex(where: { $0.1 == savedMinutes }) {
+            refreshPopup.selectItem(at: idx)
+        } else {
+            refreshPopup.selectItem(at: 2) // default 1h
+        }
+        refreshPopup.target = self
+        refreshPopup.action = #selector(subscriptionRefreshIntervalChanged(_:))
+        refreshPopup.translatesAutoresizingMaskIntoConstraints = false
+        refreshPopup.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        refreshPopup.widthAnchor.constraint(equalToConstant: 160).isActive = true
+
+        let refreshRow = NSStackView(views: [refreshLabel, refreshPopup])
+        refreshRow.orientation = .horizontal
+        refreshRow.alignment = .centerY
+        refreshRow.spacing = 12
+        refreshRow.translatesAutoresizingMaskIntoConstraints = false
+
         return settingsPageStack([
             settingsPanel(title: "基础信息", views: [detailsText, openFolderButton]),
+            settingsPanel(title: "订阅", views: [refreshRow]),
             settingsPanel(title: "Core 管理", views: [
                 serviceLabel,
                 coreButtonGrid
@@ -642,6 +669,14 @@ extension MainWindowController {
             tunServiceLogLabel.stringValue = "最近状态：卸载失败\n\(error.localizedDescription)"
             showError(error)
         }
+    }
+
+    @objc func subscriptionRefreshIntervalChanged(_ sender: MD3PopUpButton) {
+        let intervals = [0, 30, 60, 120, 240, 360, 720, 1440]
+        let minutes = intervals[sender.indexOfSelectedItem]
+        UserDefaults.standard.set(minutes, forKey: "subscriptionRefreshMinutes")
+        startSubscriptionTimer()
+        appendLog("[设置] 订阅自动刷新间隔已设为 \(sender.titleOfSelectedItem ?? "关闭")\n")
     }
 
     @objc func openTunLogClicked() {

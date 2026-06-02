@@ -277,7 +277,17 @@ extension MainWindowController {
             ? "运行态 API：\(TungBoxConfig.clashAPIListen)"
             : "运行态 API：服务未启动"
         let latestSubscription = subscriptions.compactMap(\.updatedAt).max().map { DateFormatter.short.string(from: $0) } ?? "尚未刷新"
-        subscriptionAutoStatusLabel.stringValue = "订阅自动刷新：每 60 分钟；上次刷新 \(latestSubscription)"
+        let refreshMinutes = UserDefaults.standard.integer(forKey: "subscriptionRefreshMinutes")
+        let effectiveMinutes = refreshMinutes > 0 ? refreshMinutes : 60
+        let intervalText: String
+        if refreshMinutes == 0 {
+            intervalText = "已关闭"
+        } else if effectiveMinutes < 60 {
+            intervalText = "每 \(effectiveMinutes) 分钟"
+        } else {
+            intervalText = "每 \(effectiveMinutes / 60) 小时"
+        }
+        subscriptionAutoStatusLabel.stringValue = "订阅自动刷新：\(intervalText)；上次刷新 \(latestSubscription)"
         coreStatusLabel.stringValue = "sing-box Core：\(detectedCoreVersion)"
         logStatusLabel.stringValue = "日志：\(logs.string.components(separatedBy: .newlines).filter { !$0.isEmpty }.count) 行"
         tunRuntimeStatusLabel.stringValue = isTunEnabled
