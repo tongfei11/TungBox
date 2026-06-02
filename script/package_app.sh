@@ -31,6 +31,36 @@ clear_finder_info() {
   done
 }
 
+verify_signature() {
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    sleep 0.4
+    clear_finder_info
+    if /usr/bin/codesign --verify --deep --strict --verbose=2 "$APP_DIR" 2>/dev/null; then
+      echo "$APP_DIR: valid on disk"
+      echo "$APP_DIR: satisfies its Designated Requirement"
+      return 0
+    fi
+  done
+
+  /usr/bin/codesign --verify --deep --strict --verbose=2 "$APP_DIR"
+}
+
+sign_app() {
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    clear_finder_info
+    if /usr/bin/codesign --force --deep --sign - "$APP_DIR" 2>/dev/null; then
+      echo "$APP_DIR: signed"
+      return 0
+    fi
+    sleep 0.4
+  done
+
+  clear_finder_info
+  /usr/bin/codesign --force --deep --sign - "$APP_DIR"
+}
+
 find_core() {
   if [[ -n "${TUNGBOX_CORE_PATH:-}" && -x "$TUNGBOX_CORE_PATH" ]]; then
     printf '%s\n' "$TUNGBOX_CORE_PATH"
@@ -125,10 +155,7 @@ PLIST
 
 clear_finder_info
 
-/usr/bin/codesign --force --deep --sign - "$APP_DIR"
-sleep 0.2
-clear_finder_info
-
-/usr/bin/codesign --verify --deep --strict --verbose=2 "$APP_DIR"
+sign_app
+verify_signature
 
 echo "Packaged: $APP_DIR"
