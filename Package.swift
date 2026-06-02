@@ -12,12 +12,14 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "TungBox",
-            exclude: [
-                "main.swift.bak"
-            ],
             resources: [
                 .process("Resources")
             ]
+        ),
+        .testTarget(
+            name: "TungBoxTests",
+            dependencies: ["TungBox"],
+            path: "Tests"
         )
     ]
 )

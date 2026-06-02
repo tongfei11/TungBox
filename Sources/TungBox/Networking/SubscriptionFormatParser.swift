@@ -89,6 +89,12 @@ enum SubscriptionFormatParser {
                 let entry = String(trimmed.dropFirst(2))
                 if entry.hasPrefix("{") {
                     current = parseClashInlineProxy(entry)
+                } else if let colonIndex = entry.firstIndex(of: ":") {
+                    let key = String(entry[..<colonIndex]).trimmingCharacters(in: .whitespaces)
+                    let value = String(entry[entry.index(after: colonIndex)...]).trimmingCharacters(in: .whitespaces)
+                    if !key.isEmpty {
+                        current[clashToSingBoxKey(key)] = normalizeClashValue(value)
+                    }
                 }
                 continue
             }
