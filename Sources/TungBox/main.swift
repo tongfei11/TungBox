@@ -92,6 +92,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var subscriptionTimer: Timer?
     weak var zeroStateView: NSView?
     let connectionFilterField = MD3TextField()
+    var editingRuleID: UUID?
     
     let serviceSwitch = MD3Switch()
     let tunSwitch = MD3Switch()
@@ -471,7 +472,12 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         if columnID == "enabled" && !rule.isSection {
             let button = MD3Checkbox(checkboxWithTitle: "", target: nil, action: nil)
             button.state = rule.enabled ? .on : .off
-            button.isEnabled = false
+            button.isEnabled = rule.customRuleID != nil
+            if rule.customRuleID != nil {
+                button.tag = ruleRows.firstIndex(where: { $0.customRuleID == rule.customRuleID }) ?? -1
+                button.target = self
+                button.action = #selector(toggleRuleEnabled(_:))
+            }
             button.translatesAutoresizingMaskIntoConstraints = false
             let container = NSView()
             container.addSubview(button)

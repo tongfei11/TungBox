@@ -57,7 +57,7 @@ TungBox 是 [sing-box](https://github.com/SagerNet/sing-box) 的 macOS 原生客
 
 - 规则列表搜索、浏览、命中概览
 - SRS 规则集下载与展开
-- 自定义规则添加与删除（按订阅独立存储）
+- 自定义规则添加 / 编辑 / 启用禁用 / 删除（按订阅独立存储）
 - 订阅刷新后自动合并自定义规则
 
 ### TUN

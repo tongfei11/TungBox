@@ -62,6 +62,8 @@ extension MainWindowController {
         rulesTable.gridStyleMask = [.solidHorizontalGridLineMask]
         rulesTable.gridColor = MD3.outlineVariant
         rulesTable.menu = ruleContextMenu()
+        rulesTable.registerForDraggedTypes([.string])
+        rulesTable.draggingDestinationFeedbackStyle = .gap
         rulesTable.addTableColumn(ruleColumn("enabled", title: "", width: 48))
         rulesTable.addTableColumn(ruleColumn("id", title: "#", width: 56))
         rulesTable.addTableColumn(ruleColumn("type", title: "类型", width: 150))
@@ -124,6 +126,8 @@ extension MainWindowController {
     private func ruleContextMenu() -> NSMenu {
         let menu = NSMenu()
         menu.delegate = self
+        menu.addItem(NSMenuItem(title: "编辑自定义规则", action: #selector(editCustomRuleClicked), keyEquivalent: ""))
+        menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "删除自定义规则", action: #selector(deleteCustomRuleClicked), keyEquivalent: ""))
         return menu
     }
@@ -135,8 +139,8 @@ extension MainWindowController {
             rulesTable.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
         }
         let rows = filteredRuleRows()
-        let canDelete = rows.indices.contains(rulesTable.selectedRow) && rows[rulesTable.selectedRow].customRuleID != nil
-        menu.items.first?.isEnabled = canDelete
+        let isCustom = rows.indices.contains(rulesTable.selectedRow) && rows[rulesTable.selectedRow].customRuleID != nil
+        menu.items.forEach { $0.isEnabled = isCustom }
     }
 
     @objc func refreshRulesClicked() {
@@ -271,11 +275,12 @@ extension MainWindowController {
             container.widthAnchor.constraint(equalToConstant: 432)
         ])
 
+        let isEditing = editingRuleID != nil
         let dialog = showMD3Dialog(
-            title: "新建标准规则",
-            message: "自定义规则会按当前订阅单独保存，并在刷新订阅后自动合并。",
+            title: isEditing ? "编辑自定义规则" : "新建标准规则",
+            message: isEditing ? "修改后点击保存即可更新。" : "自定义规则会按当前订阅单独保存，并在刷新订阅后自动合并。",
             customView: container,
-            confirmTitle: "添加"
+            confirmTitle: isEditing ? "保存" : "添加"
         )
         
         dialog.window?.initialFirstResponder = customRuleValueField
@@ -303,34 +308,44 @@ extension MainWindowController {
             let type = customRuleTypePopup.titleOfSelectedItem ?? "DOMAIN"
             let strategy = customRuleStrategyPopup.titleOfSelectedItem ?? "Proxy"
             let note = customRuleNoteField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            let newRule = CustomRule(
-                id: UUID(),
-                subscriptionID: subscription.id,
-                type: type,
-                value: value,
-                strategy: strategy,
-                note: note,
-                enabled: true,
-                createdAt: Date()
-            )
             let previous = editor.string
-            customRules.append(newRule)
-            store.saveCustomRules(customRules)
-            editor.string = try renderConfig(try applyCustomRules(to: previous, subscriptionID: subscription.id))
-            let url = try saveCurrent()
-            do {
-                _ = try runner.check(config: url)
-            } catch {
-                customRules.removeAll { $0.id == newRule.id }
+            let previousRules = customRules
+
+            if let editID = editingRuleID, let idx = customRules.firstIndex(where: { $0.id == editID }) {
+                // Edit existing rule
+                customRules[idx].type = type
+                customRules[idx].value = value
+                customRules[idx].strategy = strategy
+                customRules[idx].note = note
                 store.saveCustomRules(customRules)
-                editor.string = previous
-                _ = try? saveCurrent()
-                throw error
+                editor.string = try renderConfig(try applyCustomRules(to: previous, subscriptionID: subscription.id))
+                let url = try saveCurrent()
+                do { _ = try runner.check(config: url) }
+                catch {
+                    customRules = previousRules; store.saveCustomRules(customRules)
+                    editor.string = previous; _ = try? saveCurrent()
+                    throw error
+                }
+                editingRuleID = nil
+                appendLog("[规则] 已更新自定义规则\n")
+            } else {
+                // Add new rule
+                let newRule = CustomRule(id: UUID(), subscriptionID: subscription.id, type: type, value: value, strategy: strategy, note: note, enabled: true, createdAt: Date())
+                customRules.append(newRule)
+                store.saveCustomRules(customRules)
+                editor.string = try renderConfig(try applyCustomRules(to: previous, subscriptionID: subscription.id))
+                let url = try saveCurrent()
+                do { _ = try runner.check(config: url) }
+                catch {
+                    customRules.removeAll { $0.id == newRule.id }; store.saveCustomRules(customRules)
+                    editor.string = previous; _ = try? saveCurrent()
+                    throw error
+                }
+                appendLog("[规则] 已添加 \(type) \(value) -> \(strategy)\(note.isEmpty ? "" : "，备注：\(note)")\n")
             }
 
             customRuleValueField.stringValue = ""
             customRuleNoteField.stringValue = ""
-            appendLog("[规则] 已添加 \(type) \(value) -> \(strategy)\(note.isEmpty ? "" : "，备注：\(note)")\n")
             refreshRulesFromEditor()
         } catch {
             showError(error)
@@ -371,6 +386,48 @@ extension MainWindowController {
         } catch {
             showError(error)
         }
+    }
+
+    @objc func editCustomRuleClicked() {
+        let rows = filteredRuleRows()
+        guard rows.indices.contains(rulesTable.selectedRow),
+              let ruleID = rows[rulesTable.selectedRow].customRuleID,
+              let rule = customRules.first(where: { $0.id == ruleID }) else {
+            showError(NSError.user("请先选中一条自定义规则"))
+            return
+        }
+        // Pre-fill dialog with existing values
+        showAddCustomRuleDialog()
+        customRuleTypePopup.selectItem(withTitle: rule.type)
+        customRuleStrategyPopup.selectItem(withTitle: rule.strategy)
+        customRuleValueField.stringValue = rule.value
+        customRuleNoteField.stringValue = rule.note
+
+        editingRuleID = rule.id
+    }
+
+    @objc func toggleRuleEnabled(_ sender: MD3Checkbox) {
+        let idx = sender.tag
+        guard customRules.indices.contains(idx) else { return }
+        customRules[idx].enabled = (sender.state == .on)
+        store.saveCustomRules(customRules)
+        appendLog("[规则] \(customRules[idx].type) \(customRules[idx].value) 已\(customRules[idx].enabled ? "启用" : "禁用")\n")
+
+        // Regenerate config to apply the toggle
+        if let sub = currentSubscription() {
+            do {
+                let baseConfig = try removeCustomRule(customRules[idx], from: editor.string)
+                editor.string = try renderConfig(try applyCustomRules(to: baseConfig, subscriptionID: sub.id))
+                _ = try saveCurrent()
+            } catch {
+                // Rollback
+                customRules[idx].enabled.toggle()
+                sender.state = customRules[idx].enabled ? .on : .off
+                store.saveCustomRules(customRules)
+                showError(error)
+            }
+        }
+        refreshRulesFromEditor()
     }
 
     func refreshRulesFromEditor() {
