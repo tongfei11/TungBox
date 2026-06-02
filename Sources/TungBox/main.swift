@@ -263,7 +263,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
         checkSingBoxInstall(showAlert: true)
         refreshSubscriptionBadge()
-        restoreWindowState()
         detectProxyConflicts()
     }
 
@@ -573,7 +572,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         if index == 6 {
             checkSingBoxInstall(showAlert: false)
         }
-        UserDefaults.standard.set(index, forKey: "lastSelectedPage")
         window?.contentView?.refreshSubviews()
     }
     func startService() {
@@ -1625,33 +1623,8 @@ extension MainWindowController: NSSplitViewDelegate {
 
 extension MainWindowController {
     func windowWillClose(_ notification: Notification) {
-        saveWindowFrame()
         NSApp.setActivationPolicy(.accessory)
         appendLog("[窗口] 控制台已关闭，TungBox 保留在状态栏后台运行。\n")
-    }
-
-    func windowDidEndLiveResize(_ notification: Notification) { saveWindowFrame() }
-    func windowDidMove(_ notification: Notification) { saveWindowFrame() }
-
-    func saveWindowFrame() {
-        guard let frame = window?.frame else { return }
-        UserDefaults.standard.set(NSStringFromRect(frame), forKey: "windowFrame")
-    }
-
-    func restoreWindowState() {
-        // Restore frame
-        if let saved = UserDefaults.standard.string(forKey: "windowFrame"),
-           !saved.isEmpty {
-            let rect = NSRectFromString(saved)
-            if rect.width >= 400 && rect.height >= 300 {
-                window?.setFrame(rect, display: true)
-            }
-        }
-        // Restore last tab
-        let lastPage = UserDefaults.standard.integer(forKey: "lastSelectedPage")
-        if lastPage > 0, lastPage < pages.numberOfTabViewItems {
-            selectPage(at: lastPage)
-        }
     }
 
     func showConsoleWindow() {
