@@ -1083,15 +1083,28 @@ final class MD3ProfileCellView: NSTableCellView {
     }
 }
 
-final class MD3SubscriptionCellView: NSTableCellView, MD3Themeable {
-    private let cardView = NSView()
+final class MD3SubscriptionItemView: NSView, MD3Themeable {
+    private let selectionPill = NSView()
     private let iconView = NSImageView()
     private let checkImageView = NSImageView()
     let titleLabel = NSTextField(labelWithString: "")
     let subtitleLabel = NSTextField(labelWithString: "")
     let statusLabel = NSTextField(labelWithString: "")
     
-    private var isSelected = false
+    var isSelected = false {
+        didSet {
+            updateColors()
+        }
+    }
+    
+    var isHovered = false {
+        didSet {
+            updateColors()
+        }
+    }
+    
+    var onClick: (() -> Void)?
+    private var trackingArea: NSTrackingArea?
     
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -1103,26 +1116,47 @@ final class MD3SubscriptionCellView: NSTableCellView, MD3Themeable {
         setup()
     }
     
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let old = trackingArea {
+            removeTrackingArea(old)
+        }
+        let opts: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeAlways, .inVisibleRect]
+        let newArea = NSTrackingArea(rect: bounds, options: opts, owner: self, userInfo: nil)
+        addTrackingArea(newArea)
+        trackingArea = newArea
+    }
+    
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+    }
+    
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+    }
+    
+    override func mouseDown(with event: NSEvent) {
+        onClick?()
+    }
+    
     private func setup() {
         wantsLayer = true
         
-        cardView.wantsLayer = true
-        cardView.layer?.cornerRadius = 12
-        cardView.layer?.borderWidth = 1
-        cardView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(cardView)
+        selectionPill.wantsLayer = true
+        selectionPill.layer?.cornerRadius = 16
+        selectionPill.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(selectionPill)
         
         iconView.image = NSImage(systemSymbolName: "personalhotspot", accessibilityDescription: nil)
         iconView.imageScaling = .scaleProportionallyDown
         iconView.translatesAutoresizingMaskIntoConstraints = false
-        cardView.addSubview(iconView)
+        addSubview(iconView)
         
-        // 勾选 Icon
         checkImageView.image = NSImage(systemSymbolName: "checkmark.circle.fill", accessibilityDescription: nil)
         checkImageView.imageScaling = .scaleProportionallyDown
         checkImageView.translatesAutoresizingMaskIntoConstraints = false
         checkImageView.isHidden = true
-        cardView.addSubview(checkImageView)
+        addSubview(checkImageView)
         
         titleLabel.font = .systemFont(ofSize: 13, weight: .bold)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -1131,47 +1165,41 @@ final class MD3SubscriptionCellView: NSTableCellView, MD3Themeable {
         subtitleLabel.lineBreakMode = .byTruncatingTail
         subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
         
-        statusLabel.font = .systemFont(ofSize: 11, weight: .medium)
-        statusLabel.alignment = .right
+        statusLabel.font = .systemFont(ofSize: 10, weight: .medium)
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
         
-        cardView.addSubview(titleLabel)
-        cardView.addSubview(subtitleLabel)
-        cardView.addSubview(statusLabel)
+        let textStack = NSStackView(views: [titleLabel, subtitleLabel, statusLabel])
+        textStack.orientation = .vertical
+        textStack.alignment = .leading
+        textStack.spacing = 2
+        textStack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(textStack)
         
         NSLayoutConstraint.activate([
-            cardView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            cardView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            cardView.topAnchor.constraint(equalTo: topAnchor, constant: 4),
-            cardView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
+            selectionPill.leadingAnchor.constraint(equalTo: leadingAnchor),
+            selectionPill.trailingAnchor.constraint(equalTo: trailingAnchor),
+            selectionPill.topAnchor.constraint(equalTo: topAnchor),
+            selectionPill.bottomAnchor.constraint(equalTo: bottomAnchor),
             
-            iconView.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 12),
-            iconView.centerYAnchor.constraint(equalTo: cardView.centerYAnchor),
-            iconView.widthAnchor.constraint(equalToConstant: 20),
-            iconView.heightAnchor.constraint(equalToConstant: 20),
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: 24),
+            iconView.heightAnchor.constraint(equalToConstant: 24),
             
-            titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 10),
-            titleLabel.topAnchor.constraint(equalTo: cardView.topAnchor, constant: 8),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: statusLabel.leadingAnchor, constant: -16),
+            textStack.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 12),
+            textStack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            textStack.trailingAnchor.constraint(equalTo: checkImageView.leadingAnchor, constant: -12),
             
-            subtitleLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
-            subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 2),
-            subtitleLabel.trailingAnchor.constraint(lessThanOrEqualTo: statusLabel.leadingAnchor, constant: -16),
-            
-            checkImageView.trailingAnchor.constraint(equalTo: cardView.trailingAnchor, constant: -16),
-            checkImageView.centerYAnchor.constraint(equalTo: cardView.centerYAnchor),
-            checkImageView.widthAnchor.constraint(equalToConstant: 18),
-            checkImageView.heightAnchor.constraint(equalToConstant: 18),
-            
-            statusLabel.trailingAnchor.constraint(equalTo: checkImageView.leadingAnchor, constant: -12),
-            statusLabel.centerYAnchor.constraint(equalTo: cardView.centerYAnchor),
-            statusLabel.widthAnchor.constraint(equalToConstant: 130)
+            checkImageView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            checkImageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            checkImageView.widthAnchor.constraint(equalToConstant: 20),
+            checkImageView.heightAnchor.constraint(equalToConstant: 20)
         ])
         
         updateColors()
     }
     
-    func configure(with sub: Subscription, selected: Bool = false) {
+    func configure(with sub: Subscription, selected: Bool) {
         self.isSelected = selected
         
         titleLabel.stringValue = sub.name
@@ -1186,37 +1214,91 @@ final class MD3SubscriptionCellView: NSTableCellView, MD3Themeable {
         updateColors()
     }
     
-    func updateColors(selected: Bool) {
-        self.isSelected = selected
-        updateColors()
-    }
-    
     func updateColors() {
         checkImageView.isHidden = !isSelected
         
-        // Remove background fill completely so it blends with the window background
-        cardView.layer?.backgroundColor = NSColor.clear.cgColor
-        
         if isSelected {
-            cardView.layer?.borderWidth = 1.5
-            cardView.layer?.borderColor = MD3.primary.cgColor
-            titleLabel.textColor = MD3.primary
-            subtitleLabel.textColor = MD3.onSurfaceVariant
-            statusLabel.textColor = MD3.onSurfaceVariant
-            iconView.contentTintColor = MD3.primary
-            checkImageView.contentTintColor = MD3.primary
+            selectionPill.layer?.backgroundColor = MD3.primaryContainer.cgColor
+            titleLabel.textColor = MD3.onPrimaryContainer
+            subtitleLabel.textColor = MD3.onPrimaryContainer.withAlphaComponent(0.8)
+            statusLabel.textColor = MD3.onPrimaryContainer.withAlphaComponent(0.6)
+            iconView.contentTintColor = MD3.onPrimaryContainer
+            checkImageView.contentTintColor = MD3.onPrimaryContainer
         } else {
-            cardView.layer?.borderWidth = 1.0
-            cardView.layer?.borderColor = MD3.outlineVariant.cgColor
+            if isHovered {
+                selectionPill.layer?.backgroundColor = MD3.surfaceContainer.cgColor
+            } else {
+                selectionPill.layer?.backgroundColor = NSColor.clear.cgColor
+            }
             titleLabel.textColor = MD3.onSurface
             subtitleLabel.textColor = MD3.onSurfaceVariant
-            statusLabel.textColor = MD3.onSurfaceVariant
+            statusLabel.textColor = MD3.onSurfaceVariant.withAlphaComponent(0.7)
             iconView.contentTintColor = MD3.onSurfaceVariant
         }
     }
     
     func themeChanged() {
         updateColors()
+    }
+}
+
+final class MD3SubscriptionCellView: NSTableCellView, MD3Themeable {
+    let leftItem = MD3SubscriptionItemView()
+    let rightItem = MD3SubscriptionItemView()
+    
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+    
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setup()
+    }
+    
+    private func setup() {
+        wantsLayer = true
+        
+        leftItem.translatesAutoresizingMaskIntoConstraints = false
+        rightItem.translatesAutoresizingMaskIntoConstraints = false
+        
+        addSubview(leftItem)
+        addSubview(rightItem)
+        
+        NSLayoutConstraint.activate([
+            leftItem.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            leftItem.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+            leftItem.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
+            leftItem.trailingAnchor.constraint(equalTo: centerXAnchor, constant: -8),
+            
+            rightItem.leadingAnchor.constraint(equalTo: centerXAnchor, constant: 8),
+            rightItem.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+            rightItem.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
+            rightItem.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8)
+        ])
+    }
+    
+    func configure(leftSub: Subscription?, leftSelected: Bool, rightSub: Subscription?, rightSelected: Bool, leftClick: (() -> Void)?, rightClick: (() -> Void)?) {
+        if let left = leftSub {
+            leftItem.isHidden = false
+            leftItem.configure(with: left, selected: leftSelected)
+            leftItem.onClick = leftClick
+        } else {
+            leftItem.isHidden = true
+        }
+        
+        if let right = rightSub {
+            rightItem.isHidden = false
+            rightItem.configure(with: right, selected: rightSelected)
+            rightItem.onClick = rightClick
+        } else {
+            rightItem.isHidden = true
+        }
+    }
+    
+    func themeChanged() {
+        leftItem.themeChanged()
+        rightItem.themeChanged()
     }
 }
 
@@ -1281,8 +1363,6 @@ final class MD3NodeCellView: NSTableCellView {
 // MARK: - MD3 Table Row View (Custom Rounded Selection)
 
 final class MD3TableRowView: NSTableRowView {
-    private let selectionIndicator = NSView()
-    
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         setup()
@@ -1295,47 +1375,51 @@ final class MD3TableRowView: NSTableRowView {
     
     private func setup() {
         wantsLayer = true
-        selectionIndicator.wantsLayer = true
-        selectionIndicator.layer?.cornerRadius = 10
-        addSubview(selectionIndicator)
-    }
-    
-    override func layout() {
-        super.layout()
-        selectionIndicator.frame = bounds.insetBy(dx: 6, dy: 3)
     }
     
     override func drawSelection(in dirtyRect: NSRect) {
         // Skip native blue selection background drawing
     }
     
-    override var wantsUpdateLayer: Bool { true }
+    override func drawBackground(in dirtyRect: NSRect) {
+        // Skip native row background drawing
+    }
     
-    override func updateLayer() {
-        super.updateLayer()
-        selectionIndicator.isHidden = !isSelected
-        selectionIndicator.layer?.backgroundColor = MD3.primaryContainer.cgColor
+    override func draw(_ dirtyRect: NSRect) {
+        // Clear background of the row to transparent before drawing
+        NSColor.clear.set()
+        dirtyRect.fill()
         
-        for sub in subviews {
-            if let cell = sub as? NSTableCellView {
-                if cell is MD3SubscriptionCellView {
-                    selectionIndicator.isHidden = true
+        if isSelected {
+            var shouldDraw = true
+            for sub in subviews {
+                if let cell = sub as? NSTableCellView, cell is MD3SubscriptionCellView {
+                    shouldDraw = false
+                    break
                 }
-                updateCellColors(cell, selected: isSelected)
+            }
+            
+            if shouldDraw {
+                let selectionRect = bounds.insetBy(dx: 6, dy: 3)
+                let path = NSBezierPath(roundedRect: selectionRect, xRadius: 10, yRadius: 10)
+                
+                MD3.primary.withAlphaComponent(0.08).setFill()
+                path.fill()
+                
+                MD3.primary.withAlphaComponent(0.4).setStroke()
+                path.lineWidth = 1.0
+                path.stroke()
             }
         }
+        
+        super.draw(dirtyRect)
     }
     
     override var isSelected: Bool {
         didSet {
             self.needsDisplay = true
-            selectionIndicator.isHidden = !isSelected
-            
             for sub in subviews {
                 if let cell = sub as? NSTableCellView {
-                    if cell is MD3SubscriptionCellView {
-                        selectionIndicator.isHidden = true
-                    }
                     updateCellColors(cell, selected: isSelected)
                 }
             }
@@ -1345,8 +1429,8 @@ final class MD3TableRowView: NSTableRowView {
     private func updateCellColors(_ cell: NSTableCellView, selected: Bool) {
         if let profileCell = cell as? MD3ProfileCellView {
             profileCell.titleLabel.textColor = selected ? MD3.onPrimaryContainer : MD3.onSurface
-        } else if let subCell = cell as? MD3SubscriptionCellView {
-            subCell.updateColors(selected: selected)
+        } else if cell is MD3SubscriptionCellView {
+            // No-op. Selected items are manually controlled inside cells.
         } else if let nodeCell = cell as? MD3NodeCellView {
             nodeCell.titleLabel.textColor = selected ? MD3.onPrimaryContainer : MD3.onSurface
             nodeCell.subtitleLabel.textColor = selected ? MD3.onPrimaryContainer.withAlphaComponent(0.8) : MD3.onSurfaceVariant
@@ -2249,19 +2333,21 @@ final class MD3Dialog: NSView, MD3Themeable {
         card.addSubview(messageLabel)
         
         // Custom View Container
-        contentViewContainer.wantsLayer = true
-        contentViewContainer.translatesAutoresizingMaskIntoConstraints = false
-        card.addSubview(contentViewContainer)
-        
-        if let custom = customView {
-            custom.translatesAutoresizingMaskIntoConstraints = false
-            contentViewContainer.addSubview(custom)
-            NSLayoutConstraint.activate([
-                custom.leadingAnchor.constraint(equalTo: contentViewContainer.leadingAnchor),
-                custom.trailingAnchor.constraint(equalTo: contentViewContainer.trailingAnchor),
-                custom.topAnchor.constraint(equalTo: contentViewContainer.topAnchor),
-                custom.bottomAnchor.constraint(equalTo: contentViewContainer.bottomAnchor)
-            ])
+        if customView != nil {
+            contentViewContainer.wantsLayer = true
+            contentViewContainer.translatesAutoresizingMaskIntoConstraints = false
+            card.addSubview(contentViewContainer)
+            
+            if let custom = customView {
+                custom.translatesAutoresizingMaskIntoConstraints = false
+                contentViewContainer.addSubview(custom)
+                NSLayoutConstraint.activate([
+                    custom.leadingAnchor.constraint(equalTo: contentViewContainer.leadingAnchor),
+                    custom.trailingAnchor.constraint(equalTo: contentViewContainer.trailingAnchor),
+                    custom.topAnchor.constraint(equalTo: contentViewContainer.topAnchor),
+                    custom.bottomAnchor.constraint(equalTo: contentViewContainer.bottomAnchor)
+                ])
+            }
         }
         
         // Action Buttons
@@ -2271,6 +2357,9 @@ final class MD3Dialog: NSView, MD3Themeable {
         cancelButton.action = #selector(cancelClicked)
         cancelButton.translatesAutoresizingMaskIntoConstraints = false
         cancelButton.heightAnchor.constraint(equalToConstant: 40).isActive = true
+        if cancelTitle.isEmpty {
+            cancelButton.isHidden = true
+        }
         
         confirmButton.title = confirmTitle
         confirmButton.style = .filled
@@ -2288,7 +2377,7 @@ final class MD3Dialog: NSView, MD3Themeable {
         card.addSubview(buttonStack)
         
         // 3. Layout constraints
-        NSLayoutConstraint.activate([
+        var constraints = [
             scrimView.leadingAnchor.constraint(equalTo: leadingAnchor),
             scrimView.trailingAnchor.constraint(equalTo: trailingAnchor),
             scrimView.topAnchor.constraint(equalTo: topAnchor),
@@ -2306,14 +2395,23 @@ final class MD3Dialog: NSView, MD3Themeable {
             messageLabel.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -24),
             messageLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 16),
             
-            contentViewContainer.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 24),
-            contentViewContainer.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -24),
-            contentViewContainer.topAnchor.constraint(equalTo: messageLabel.bottomAnchor, constant: 20),
-            
             buttonStack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -24),
-            buttonStack.topAnchor.constraint(equalTo: contentViewContainer.bottomAnchor, constant: 24),
             buttonStack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -24)
-        ])
+        ]
+        
+        if customView != nil {
+            constraints.append(contentsOf: [
+                contentViewContainer.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 24),
+                contentViewContainer.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -24),
+                contentViewContainer.topAnchor.constraint(equalTo: messageLabel.bottomAnchor, constant: 20),
+                
+                buttonStack.topAnchor.constraint(equalTo: contentViewContainer.bottomAnchor, constant: 24)
+            ])
+        } else {
+            constraints.append(buttonStack.topAnchor.constraint(equalTo: messageLabel.bottomAnchor, constant: 24))
+        }
+        
+        NSLayoutConstraint.activate(constraints)
         
         updateColors()
     }
@@ -2362,3 +2460,301 @@ final class MD3Dialog: NSView, MD3Themeable {
         updateColors()
     }
 }
+
+// MARK: - MD3 Checkbox
+
+final class MD3Checkbox: NSControl, MD3Themeable {
+    var title: String = "" {
+        didSet {
+            labelField.stringValue = title
+            invalidateIntrinsicContentSize()
+        }
+    }
+    
+    var isChecked: Bool = false {
+        didSet {
+            updateColors()
+        }
+    }
+    
+    override var isEnabled: Bool {
+        didSet {
+            updateColors()
+        }
+    }
+    
+    private let boxView = NSView()
+    private let checkIcon = NSImageView()
+    private let labelField = NSTextField(labelWithString: "")
+    
+    private var isHovered = false {
+        didSet {
+            updateColors()
+        }
+    }
+    
+    private var trackingArea: NSTrackingArea?
+    
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        translatesAutoresizingMaskIntoConstraints = false
+        setup()
+    }
+    
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        translatesAutoresizingMaskIntoConstraints = false
+        setup()
+    }
+    
+    override var intrinsicContentSize: NSSize {
+        let labelSize = labelField.intrinsicContentSize
+        return NSSize(width: 18 + 8 + labelSize.width, height: 24)
+    }
+    
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let old = trackingArea {
+            removeTrackingArea(old)
+        }
+        let opts: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeAlways, .inVisibleRect]
+        let newArea = NSTrackingArea(rect: bounds, options: opts, owner: self, userInfo: nil)
+        addTrackingArea(newArea)
+        trackingArea = newArea
+    }
+    
+    override func mouseEntered(with event: NSEvent) {
+        guard isEnabled else { return }
+        isHovered = true
+    }
+    
+    override func mouseExited(with event: NSEvent) {
+        guard isEnabled else { return }
+        isHovered = false
+    }
+    
+    override func mouseDown(with event: NSEvent) {
+        guard isEnabled else { return }
+        isChecked.toggle()
+        sendAction(action, to: target)
+    }
+    
+    private func setup() {
+        wantsLayer = true
+        
+        boxView.wantsLayer = true
+        boxView.layer?.cornerRadius = 4
+        boxView.layer?.borderWidth = 2
+        boxView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(boxView)
+        
+        checkIcon.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: nil)
+        checkIcon.imageScaling = .scaleProportionallyDown
+        checkIcon.translatesAutoresizingMaskIntoConstraints = false
+        boxView.addSubview(checkIcon)
+        
+        labelField.font = .systemFont(ofSize: 13)
+        labelField.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(labelField)
+        
+        NSLayoutConstraint.activate([
+            boxView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            boxView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            boxView.widthAnchor.constraint(equalToConstant: 18),
+            boxView.heightAnchor.constraint(equalToConstant: 18),
+            
+            checkIcon.centerXAnchor.constraint(equalTo: boxView.centerXAnchor),
+            checkIcon.centerYAnchor.constraint(equalTo: boxView.centerYAnchor),
+            checkIcon.widthAnchor.constraint(equalToConstant: 12),
+            checkIcon.heightAnchor.constraint(equalToConstant: 12),
+            
+            labelField.leadingAnchor.constraint(equalTo: boxView.trailingAnchor, constant: 8),
+            labelField.centerYAnchor.constraint(equalTo: centerYAnchor),
+            labelField.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+            
+            heightAnchor.constraint(equalToConstant: 24)
+        ])
+        
+        updateColors()
+    }
+    
+    func updateColors() {
+        if isEnabled {
+            alphaValue = 1.0
+            if isChecked {
+                boxView.layer?.backgroundColor = MD3.primary.cgColor
+                boxView.layer?.borderColor = MD3.primary.cgColor
+                checkIcon.isHidden = false
+                checkIcon.contentTintColor = MD3.onPrimary
+            } else {
+                boxView.layer?.backgroundColor = isHovered ? MD3.surfaceContainer.cgColor : NSColor.clear.cgColor
+                boxView.layer?.borderColor = MD3.outline.cgColor
+                checkIcon.isHidden = true
+            }
+            labelField.textColor = MD3.onSurface
+        } else {
+            alphaValue = 0.38
+            if isChecked {
+                boxView.layer?.backgroundColor = MD3.onSurface.withAlphaComponent(0.12).cgColor
+                boxView.layer?.borderColor = NSColor.clear.cgColor
+                checkIcon.isHidden = false
+                checkIcon.contentTintColor = MD3.onSurface.withAlphaComponent(0.38)
+            } else {
+                boxView.layer?.backgroundColor = NSColor.clear.cgColor
+                boxView.layer?.borderColor = MD3.onSurface.withAlphaComponent(0.12).cgColor
+                checkIcon.isHidden = true
+            }
+            labelField.textColor = MD3.onSurface.withAlphaComponent(0.38)
+        }
+    }
+    
+    func themeChanged() {
+        updateColors()
+    }
+    
+    var state: NSControl.StateValue {
+        get {
+            isChecked ? .on : .off
+        }
+        set {
+            isChecked = (newValue == .on)
+        }
+    }
+    
+    convenience init(checkboxWithTitle title: String, target: AnyObject?, action: Selector?) {
+        self.init(frame: .zero)
+        self.title = title
+        self.labelField.stringValue = title
+        self.target = target
+        self.action = action
+        invalidateIntrinsicContentSize()
+    }
+}
+
+// MARK: - MD3 PopUp Button
+
+final class MD3PopUpButton: NSPopUpButton, MD3Themeable {
+    private var isHovered = false {
+        didSet {
+            needsDisplay = true
+        }
+    }
+    
+    private var trackingArea: NSTrackingArea?
+    
+    convenience init() {
+        self.init(frame: .zero, pullsDown: false)
+    }
+    
+    override init(frame buttonFrame: NSRect, pullsDown flag: Bool) {
+        super.init(frame: buttonFrame, pullsDown: flag)
+        setup()
+    }
+    
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setup()
+    }
+    
+    override var intrinsicContentSize: NSSize {
+        let titleString = titleOfSelectedItem ?? ""
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font ?? NSFont.systemFont(ofSize: 13)
+        ]
+        let titleSize = titleString.size(withAttributes: attrs)
+        return NSSize(width: max(100, titleSize.width + 48), height: 36)
+    }
+    
+    override func selectItem(at index: Int) {
+        super.selectItem(at: index)
+        invalidateIntrinsicContentSize()
+        needsDisplay = true
+    }
+    
+    override func selectItem(withTitle title: String) {
+        super.selectItem(withTitle: title)
+        invalidateIntrinsicContentSize()
+        needsDisplay = true
+    }
+    
+    private func setup() {
+        wantsLayer = true
+        isBordered = false
+        font = .systemFont(ofSize: 13, weight: .medium)
+        updateTrackingAreas()
+    }
+    
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let old = trackingArea {
+            removeTrackingArea(old)
+        }
+        let opts: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeAlways, .inVisibleRect]
+        let newArea = NSTrackingArea(rect: bounds, options: opts, owner: self, userInfo: nil)
+        addTrackingArea(newArea)
+        trackingArea = newArea
+    }
+    
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+    }
+    
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+    }
+    
+    override func draw(_ dirtyRect: NSRect) {
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 8, yRadius: 8)
+        
+        if isHovered {
+            MD3.surfaceContainer.setFill()
+        } else {
+            MD3.surfaceContainerLow.setFill()
+        }
+        path.fill()
+        
+        MD3.outlineVariant.setStroke()
+        path.lineWidth = 1.0
+        path.stroke()
+        
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .left
+        
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font ?? NSFont.systemFont(ofSize: 13),
+            .foregroundColor: MD3.onSurface,
+            .paragraphStyle: paragraphStyle
+        ]
+        
+        let titleString = titleOfSelectedItem ?? ""
+        let titleSize = titleString.size(withAttributes: attrs)
+        let titleRect = NSRect(
+            x: 12,
+            y: (bounds.height - titleSize.height) / 2,
+            width: bounds.width - 36,
+            height: titleSize.height
+        )
+        titleString.draw(in: titleRect, withAttributes: attrs)
+        
+        if let img = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil) {
+            img.isTemplate = true
+            let iconSize: CGFloat = 12
+            let iconRect = NSRect(
+                x: bounds.width - 24,
+                y: (bounds.height - iconSize) / 2,
+                width: iconSize,
+                height: iconSize
+            )
+            
+            NSGraphicsContext.current?.saveGraphicsState()
+            MD3.onSurfaceVariant.set()
+            img.draw(in: iconRect, from: .zero, operation: .sourceOver, fraction: 1.0)
+            NSGraphicsContext.current?.restoreGraphicsState()
+        }
+    }
+    
+    func themeChanged() {
+        needsDisplay = true
+    }
+}
+

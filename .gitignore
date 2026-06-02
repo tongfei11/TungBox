@@ -4,3 +4,4 @@ cache.db
 *.app/
 *.dmg
 test_port
+Sources/TungBox/main.swift.bak

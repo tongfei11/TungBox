@@ -1,0 +1,891 @@
+import AppKit
+import Foundation
+import ServiceManagement
+
+extension MainWindowController {
+    
+    func makeSettingsView() -> NSView {
+        let view = NSView()
+        view.wantsLayer = true
+        view.layer?.backgroundColor = MD3.background.cgColor
+        registerThemeObserver { [weak view] in
+            view?.layer?.backgroundColor = MD3.background.cgColor
+        }
+
+        let title = NSTextField(labelWithString: "设置")
+        title.font = .systemFont(ofSize: 30, weight: .bold)
+        title.textColor = MD3.onSurface
+        title.translatesAutoresizingMaskIntoConstraints = false
+        registerThemeObserver { [weak title] in
+            title?.textColor = MD3.onSurface
+        }
+
+        let tabControl = MD3SegmentedControl()
+        tabControl.items = ["基础", "运行", "TUN 设置", "规则集", "外观"]
+        tabControl.selectedSegment = 0
+        tabControl.target = self
+        tabControl.action = #selector(settingsTabChanged(_:))
+        tabControl.translatesAutoresizingMaskIntoConstraints = false
+        tabControl.widthAnchor.constraint(equalToConstant: 380).isActive = true
+        tabControl.heightAnchor.constraint(equalToConstant: 32).isActive = true
+
+        let headerStack = NSStackView(views: [title])
+        headerStack.orientation = .horizontal
+        headerStack.alignment = .centerY
+        headerStack.spacing = 16
+        headerStack.translatesAutoresizingMaskIntoConstraints = false
+
+        let spacer = NSView()
+        spacer.translatesAutoresizingMaskIntoConstraints = false
+        headerStack.addArrangedSubview(spacer)
+        headerStack.addArrangedSubview(tabControl)
+
+        settingsTabView.translatesAutoresizingMaskIntoConstraints = false
+        settingsTabView.wantsLayer = true
+        settingsTabView.layer?.backgroundColor = MD3.background.cgColor
+        registerThemeObserver { [weak self] in
+            self?.settingsTabView.layer?.backgroundColor = MD3.background.cgColor
+        }
+
+        settingsPages = [
+            makeSettingsGeneralPage(),
+            makeSettingsRuntimePage(),
+            makeSettingsTunPage(),
+            makeSettingsRuleSetPage(),
+            makeSettingsAppearancePage()
+        ]
+        
+        if !settingsPages.isEmpty {
+            let firstPage = settingsPages[0]
+            settingsTabView.addSubview(firstPage)
+            firstPage.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                firstPage.leadingAnchor.constraint(equalTo: settingsTabView.leadingAnchor),
+                firstPage.trailingAnchor.constraint(equalTo: settingsTabView.trailingAnchor),
+                firstPage.topAnchor.constraint(equalTo: settingsTabView.topAnchor),
+                firstPage.bottomAnchor.constraint(equalTo: settingsTabView.bottomAnchor)
+            ])
+        }
+
+        view.addSubview(headerStack)
+        view.addSubview(settingsTabView)
+
+        NSLayoutConstraint.activate([
+            headerStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
+            headerStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
+            headerStack.topAnchor.constraint(equalTo: view.topAnchor, constant: 28),
+            headerStack.heightAnchor.constraint(equalToConstant: 38),
+
+            settingsTabView.leadingAnchor.constraint(equalTo: headerStack.leadingAnchor, constant: -20),
+            settingsTabView.trailingAnchor.constraint(equalTo: headerStack.trailingAnchor, constant: 20),
+            settingsTabView.topAnchor.constraint(equalTo: headerStack.bottomAnchor, constant: 20),
+            settingsTabView.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -28)
+        ])
+
+        return view
+    }
+
+    @objc func settingsTabChanged(_ sender: MD3SegmentedControl) {
+        let index = sender.selectedSegment
+        guard index >= 0 && index < settingsPages.count else { return }
+        settingsTabView.subviews.forEach { $0.removeFromSuperview() }
+        let newPage = settingsPages[index]
+        settingsTabView.addSubview(newPage)
+        newPage.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            newPage.leadingAnchor.constraint(equalTo: settingsTabView.leadingAnchor),
+            newPage.trailingAnchor.constraint(equalTo: settingsTabView.trailingAnchor),
+            newPage.topAnchor.constraint(equalTo: settingsTabView.topAnchor),
+            newPage.bottomAnchor.constraint(equalTo: settingsTabView.bottomAnchor)
+        ])
+    }
+
+    func makeSettingsGeneralPage() -> NSView {
+        serviceLabel.font = .systemFont(ofSize: 14, weight: .bold)
+        serviceLabel.textColor = MD3.onSurface
+        serviceLabel.lineBreakMode = .byWordWrapping
+        serviceLabel.maximumNumberOfLines = 0
+        serviceLabel.usesSingleLineMode = false
+        serviceLabel.cell?.wraps = true
+        serviceLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let detailsText = NSTextField(labelWithString: """
+        应用版本: \(TungBoxVersion.current)
+        配置目录: \(store.baseURL.path)
+        Clash API: \(TungBoxConfig.clashAPIListen)
+        """)
+        detailsText.textColor = MD3.onSurfaceVariant
+        detailsText.font = .systemFont(ofSize: 13)
+        detailsText.lineBreakMode = .byWordWrapping
+        detailsText.maximumNumberOfLines = 0
+        detailsText.translatesAutoresizingMaskIntoConstraints = false
+
+        let checkUpdateButton = settingsButton(title: "检查 Core 更新", action: #selector(checkCoreUpdateClicked), style: .tonal)
+        let installLatestButton = settingsButton(title: "安装最新 Core", action: #selector(installLatestCoreClicked), style: .filled)
+        let importCoreButton = settingsButton(title: "导入 sing-box Core", action: #selector(importCoreClicked), style: .filled)
+        let installOldCoreButton = settingsButton(title: "安装旧版 Core（测试）", action: #selector(installOldCoreForTestClicked), style: .outlined)
+        let openCoreFolderButton = settingsButton(title: "打开 Core 目录", action: #selector(openCoreFolderClicked), style: .outlined)
+        let openFolderButton = settingsButton(title: "打开配置目录", action: #selector(openFolderClicked), style: .outlined)
+        let coreButtonGrid = settingsButtonGrid([
+            checkUpdateButton,
+            installLatestButton,
+            importCoreButton,
+            installOldCoreButton,
+            openCoreFolderButton
+        ])
+        return settingsPageStack([
+            settingsPanel(title: "基础信息", views: [detailsText, openFolderButton]),
+            settingsPanel(title: "Core 管理", views: [
+                serviceLabel,
+                coreButtonGrid
+            ])
+        ])
+    }
+
+    func makeSettingsRuntimePage() -> NSView {
+        settingsSystemProxyCheckbox.target = self
+        settingsSystemProxyCheckbox.action = #selector(settingsSystemProxyChanged(_:))
+        settingsSystemProxyCheckbox.state = isSystemProxyEnabled ? .on : .off
+        
+        settingsTunCheckbox.title = "默认开启 TUN 模式"
+        settingsTunCheckbox.target = self
+        settingsTunCheckbox.action = #selector(settingsTunChanged(_:))
+        settingsTunCheckbox.state = isTunEnabled ? .on : .off
+        settingsTunCheckbox.isEnabled = isSystemProxyEnabled
+        
+        settingsLaunchAtLoginCheckbox.title = "开机自启动"
+        settingsLaunchAtLoginCheckbox.target = self
+        settingsLaunchAtLoginCheckbox.action = #selector(settingsLaunchAtLoginChanged(_:))
+        settingsLaunchAtLoginCheckbox.state = isLaunchAtLoginEnabled ? .on : .off
+        
+        settingsStartSilentlyCheckbox.title = "静默启动 (只启动状态栏，不打开控制台UI)"
+        settingsStartSilentlyCheckbox.target = self
+        settingsStartSilentlyCheckbox.action = #selector(settingsStartSilentlyChanged(_:))
+        settingsStartSilentlyCheckbox.state = UserDefaults.standard.bool(forKey: "startSilently") ? .on : .off
+        
+        let hint = NSTextField(labelWithString: "系统代理默认开启后，点击首页代理开关会启动代理服务并接管系统代理。TUN 默认行为在 TUN 设置里配置。")
+        hint.textColor = MD3.onSurfaceVariant
+        hint.font = .systemFont(ofSize: 13)
+        hint.lineBreakMode = .byWordWrapping
+        hint.maximumNumberOfLines = 0
+        hint.translatesAutoresizingMaskIntoConstraints = false
+        return settingsPageStack([settingsPanel(title: "运行默认值", views: [
+            settingsSystemProxyCheckbox,
+            settingsTunCheckbox,
+            settingsLaunchAtLoginCheckbox,
+            settingsStartSilentlyCheckbox,
+            hint
+        ])])
+    }
+
+    func makeSettingsTunPage() -> NSView {
+        tunServiceStatusLabel.font = .systemFont(ofSize: 14, weight: .semibold)
+        tunServiceStatusLabel.textColor = MD3.onSurface
+        tunServiceStatusLabel.lineBreakMode = .byWordWrapping
+        tunServiceStatusLabel.maximumNumberOfLines = 0
+        tunServiceStatusLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        tunServiceLogLabel.textColor = MD3.onSurfaceVariant
+        tunServiceLogLabel.font = .systemFont(ofSize: 13)
+        tunServiceLogLabel.lineBreakMode = .byWordWrapping
+        tunServiceLogLabel.maximumNumberOfLines = 0
+        tunServiceLogLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let installButton = settingsButton(title: "安装 TUN 服务", action: #selector(installTunServiceClicked), style: .filled)
+        let uninstallButton = settingsButton(title: "卸载 TUN 服务", action: #selector(uninstallTunServiceClicked), style: .destructive)
+        let openLogButton = settingsButton(title: "打开 TUN 日志", action: #selector(openTunLogClicked), style: .outlined)
+
+        let hint = NSTextField(labelWithString: "安装 TUN 服务会请求一次管理员授权。服务文件安装 to /Library/Application Support/TungBox 和 /Library/LaunchDaemons；首页 TUN 开关只负责是否启用 TUN，不再临时弹密码启动。")
+        hint.textColor = MD3.onSurfaceVariant
+        hint.font = .systemFont(ofSize: 13)
+        hint.lineBreakMode = .byWordWrapping
+        hint.maximumNumberOfLines = 0
+        hint.translatesAutoresizingMaskIntoConstraints = false
+
+        refreshTunServiceStatus()
+        return settingsPageStack([
+            settingsPanel(title: "TUN 设置", views: [
+                tunServiceStatusLabel,
+                installButton,
+                uninstallButton,
+                openLogButton,
+                tunServiceLogLabel,
+                hint
+            ])
+        ])
+    }
+
+    func makeSettingsRuleSetPage() -> NSView {
+        setupRuleSetURLFields()
+        let ruleSetForm = NSGridView(views: [
+            [settingsLabel("geosite-private"), ruleSetPrivateURLField],
+            [settingsLabel("geosite-cn"), ruleSetCNURLField],
+            [settingsLabel("geoip-cn"), ruleSetGeoIPCNURLField],
+            [settingsLabel("geosite-geolocation-!cn"), ruleSetGeolocationNotCNURLField]
+        ])
+        ruleSetForm.translatesAutoresizingMaskIntoConstraints = false
+        ruleSetForm.column(at: 0).xPlacement = .trailing
+        ruleSetForm.column(at: 1).width = 560
+        ruleSetForm.rowSpacing = 10
+        ruleSetForm.columnSpacing = 10
+        let saveRuleSetButton = settingsButton(title: "保存规则集地址", action: #selector(saveRuleSetURLsClicked))
+        return settingsPageStack([settingsPanel(title: "规则集地址", views: [ruleSetForm, saveRuleSetButton])])
+    }
+
+    func makeSettingsAppearancePage() -> NSView {
+        let themeButton = settingsButton(title: "切换深浅色", action: #selector(toggleThemeClicked), style: .tonal)
+        colorSchemeRows = (0..<MD3.colorSchemes.count).map { index in
+            let row = MD3ColorSchemeRow(index: index)
+            row.translatesAutoresizingMaskIntoConstraints = false
+            row.heightAnchor.constraint(equalToConstant: 36).isActive = true
+            row.isSelected = (index == MD3.currentSchemeIndex)
+            row.onClick = { [weak self] in self?.changeColorScheme(to: index) }
+            return row
+        }
+        
+        let half = (colorSchemeRows.count + 1) / 2
+        let leftRows = Array(colorSchemeRows.prefix(half))
+        let rightRows = Array(colorSchemeRows.suffix(colorSchemeRows.count - half))
+        
+        let leftStack = NSStackView(views: leftRows)
+        leftStack.orientation = .vertical
+        leftStack.spacing = 4
+        leftStack.alignment = .leading
+        leftStack.translatesAutoresizingMaskIntoConstraints = false
+        leftRows.forEach { row in
+            row.leadingAnchor.constraint(equalTo: leftStack.leadingAnchor).isActive = true
+            row.trailingAnchor.constraint(equalTo: leftStack.trailingAnchor).isActive = true
+        }
+        
+        let rightStack = NSStackView(views: rightRows)
+        rightStack.orientation = .vertical
+        rightStack.spacing = 4
+        rightStack.alignment = .leading
+        rightStack.translatesAutoresizingMaskIntoConstraints = false
+        rightRows.forEach { row in
+            row.leadingAnchor.constraint(equalTo: rightStack.leadingAnchor).isActive = true
+            row.trailingAnchor.constraint(equalTo: rightStack.trailingAnchor).isActive = true
+        }
+        
+        let columnsStack = NSStackView(views: [leftStack, rightStack])
+        columnsStack.orientation = .horizontal
+        columnsStack.spacing = 40
+        columnsStack.distribution = .fillEqually
+        columnsStack.alignment = .top
+        columnsStack.translatesAutoresizingMaskIntoConstraints = false
+        columnsStack.widthAnchor.constraint(equalToConstant: 640).isActive = true
+        
+        return settingsPageStack([settingsPanel(title: "外观", views: [themeButton, columnsStack])])
+    }
+
+    private func settingsPageStack(_ cards: [NSView]) -> NSView {
+        let view = MD3SettingsPageView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.wantsLayer = true
+        view.layer?.backgroundColor = MD3.background.cgColor
+        registerThemeObserver { [weak view] in
+            view?.layer?.backgroundColor = MD3.background.cgColor
+        }
+        
+        let stack = NSStackView(views: cards)
+        stack.orientation = .vertical
+        stack.spacing = 16
+        stack.alignment = .width
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+            stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 20),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor, constant: -20)
+        ])
+        
+        cards.forEach { card in
+            card.leadingAnchor.constraint(equalTo: stack.leadingAnchor).isActive = true
+            card.trailingAnchor.constraint(equalTo: stack.trailingAnchor).isActive = true
+        }
+        
+        return view
+    }
+
+    private func settingsPanel(title: String, views: [NSView]) -> NSView {
+        let panel = MD3Panel()
+        panel.type = .filled
+        panel.translatesAutoresizingMaskIntoConstraints = false
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = .systemFont(ofSize: 16, weight: .bold)
+        titleLabel.textColor = MD3.onSurface
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        let stack = NSStackView(views: views)
+        stack.orientation = .vertical
+        stack.spacing = 12
+        stack.alignment = .leading
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        panel.addSubview(titleLabel)
+        panel.addSubview(stack)
+        NSLayoutConstraint.activate([
+            titleLabel.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 20),
+            titleLabel.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -20),
+            titleLabel.topAnchor.constraint(equalTo: panel.topAnchor, constant: 18),
+            stack.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: panel.trailingAnchor, constant: -20),
+            stack.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 16),
+            stack.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -18)
+        ])
+        return panel
+    }
+
+    private func settingsButton(title: String, action: Selector, style: MD3Button.ButtonStyle = .filled) -> MD3Button {
+        let button = MD3Button()
+        button.title = title
+        button.style = style
+        button.target = self
+        button.action = action
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        button.widthAnchor.constraint(greaterThanOrEqualToConstant: 160).isActive = true
+        return button
+    }
+
+    private func settingsButtonGrid(_ buttons: [NSView]) -> NSView {
+        let grid = NSStackView()
+        grid.orientation = .vertical
+        grid.spacing = 10
+        grid.alignment = .width
+        grid.translatesAutoresizingMaskIntoConstraints = false
+
+        for index in stride(from: 0, to: buttons.count, by: 2) {
+            var rowViews = [buttons[index]]
+            if index + 1 < buttons.count {
+                rowViews.append(buttons[index + 1])
+            } else {
+                let spacer = NSView()
+                spacer.translatesAutoresizingMaskIntoConstraints = false
+                rowViews.append(spacer)
+            }
+
+            let row = NSStackView(views: rowViews)
+            row.orientation = .horizontal
+            row.spacing = 12
+            row.distribution = .fillEqually
+            row.alignment = .centerY
+            row.translatesAutoresizingMaskIntoConstraints = false
+            grid.addArrangedSubview(row)
+
+            NSLayoutConstraint.activate([
+                row.leadingAnchor.constraint(equalTo: grid.leadingAnchor),
+                row.trailingAnchor.constraint(equalTo: grid.trailingAnchor)
+            ])
+        }
+
+        grid.widthAnchor.constraint(equalToConstant: 520).isActive = true
+        return grid
+    }
+
+    @objc func checkCoreUpdateClicked() {
+        serviceLabel.stringValue = "sing-box Core：正在检查更新..."
+        Task {
+            do {
+                let release = try await CoreUpdater.latestStableRelease()
+                await MainActor.run { [weak self] in
+                    self?.handleCoreUpdateCheck(release)
+                }
+            } catch {
+                await MainActor.run { [weak self] in
+                    self?.serviceLabel.stringValue = "sing-box Core：检查更新失败\n\(error.localizedDescription)"
+                    self?.showToast("Core 更新检查失败")
+                    self?.showError(error)
+                }
+            }
+        }
+    }
+
+    @objc func installLatestCoreClicked() {
+        serviceLabel.stringValue = "sing-box Core：正在准备安装最新版本..."
+        Task {
+            do {
+                let release = try await CoreUpdater.latestStableRelease()
+                await MainActor.run { [weak self] in
+                    self?.installCoreRelease(release, reason: "最新版本")
+                }
+            } catch {
+                await MainActor.run { [weak self] in
+                    self?.serviceLabel.stringValue = "sing-box Core：获取最新版本失败\n\(error.localizedDescription)"
+                    self?.showToast("获取 Core 最新版本失败")
+                    self?.showError(error)
+                }
+            }
+        }
+    }
+
+    @objc func installOldCoreForTestClicked() {
+        serviceLabel.stringValue = "sing-box Core：正在准备安装测试旧版..."
+        Task {
+            do {
+                let release = try await CoreUpdater.release(version: CoreUpdater.testOldVersion)
+                await MainActor.run { [weak self] in
+                    self?.installCoreRelease(release, reason: "测试旧版")
+                }
+            } catch {
+                await MainActor.run { [weak self] in
+                    self?.serviceLabel.stringValue = "sing-box Core：获取测试旧版失败\n\(error.localizedDescription)"
+                    self?.showToast("获取测试旧版 Core 失败")
+                    self?.showError(error)
+                }
+            }
+        }
+    }
+
+    private func handleCoreUpdateCheck(_ release: CoreRelease) {
+        let current = runner.installedVersionNumber()
+        if let current, Runner.compareVersions(current, release.version) != .orderedAscending {
+            serviceLabel.stringValue = """
+            sing-box Core：已是最新
+            当前版本：\(current)
+            最新版本：\(release.version)
+            """
+            showToast("Core 已是最新版：\(release.version)")
+            appendLog("[Core] 已是最新版：\(release.version)\n")
+            return
+        }
+
+        let currentText = current ?? "未安装"
+        serviceLabel.stringValue = """
+        sing-box Core：发现可更新版本
+        当前版本：\(currentText)
+        最新版本：\(release.version)
+        """
+        showToast("发现 Core 更新：\(currentText) → \(release.version)")
+
+        let dialog = showMD3Dialog(
+            title: "发现 sing-box Core 更新",
+            message: "当前版本：\(currentText)\n最新版本：\(release.version)\n是否现在安装？",
+            customView: nil,
+            confirmTitle: "安装",
+            cancelTitle: "稍后"
+        )
+        dialog.onConfirm = { [weak self, weak dialog] in
+            self?.installCoreRelease(release, reason: "更新")
+            dialog?.dismiss()
+        }
+        dialog.onCancel = { [weak dialog] in
+            dialog?.dismiss()
+        }
+    }
+
+    private func installCoreRelease(_ release: CoreRelease, reason: String) {
+        guard !isProxyRuntimeRunning() else {
+            showToast("请先关闭代理服务，再更新 Core")
+            showError(NSError.user("请先关闭代理服务，再更新 sing-box Core。"))
+            return
+        }
+
+        serviceLabel.stringValue = "sing-box Core：正在安装 \(release.version)..."
+        appendLog("[Core] 开始安装 \(reason)：\(release.version)\n")
+        let coreBinaryURL = store.coreBinaryURL
+
+        Task {
+            do {
+                try await CoreUpdater.install(release, to: coreBinaryURL)
+                await MainActor.run { [weak self] in
+                    self?.appendLog("[Core] 已安装 \(release.version) 到 \(coreBinaryURL.path)\n")
+                    self?.checkSingBoxInstall(showAlert: false)
+                    self?.showToast("Core 已安装：\(release.version)")
+                }
+            } catch {
+                await MainActor.run { [weak self] in
+                    self?.serviceLabel.stringValue = "sing-box Core：安装失败\n\(error.localizedDescription)"
+                    self?.showToast("Core 安装失败")
+                    self?.showError(error)
+                }
+            }
+        }
+    }
+
+    @objc func settingsSystemProxyChanged(_ sender: MD3Checkbox) {
+        isSystemProxyEnabled = sender.state == .on
+        if !isSystemProxyEnabled, isTunEnabled {
+            isTunEnabled = false
+            UserDefaults.standard.set(false, forKey: "tunEnabled")
+            tunSwitch.isOn = false
+        }
+        UserDefaults.standard.set(isSystemProxyEnabled, forKey: "systemProxyEnabled")
+        syncProxyPreferenceControls()
+        if isProxyRuntimeRunning() {
+            if isSystemProxyEnabled {
+                if isTunEnabled {
+                    do {
+                        try applyTunPreference(restartIfRunning: false)
+                    } catch {
+                        showError(error)
+                    }
+                } else {
+                    setSystemProxy(enabled: true, port: getMixedProxyPort())
+                }
+            } else {
+                stopService()
+            }
+        }
+        appendLog("[设置] 系统代理默认值已\(isSystemProxyEnabled ? "开启" : "关闭")\n")
+        refreshStatus()
+    }
+
+    @objc func settingsTunChanged(_ sender: MD3Checkbox) {
+        guard isSystemProxyEnabled else {
+            sender.state = .off
+            showError(NSError.user("请先开启“默认开启系统代理”，再启用 TUN 默认开启。"))
+            return
+        }
+        if sender.state == .on, !TunServiceManager.status(store: store).isInstalled {
+            sender.state = .off
+            showToast("请先安装TUN服务")
+            showError(NSError.user("请先到 设置 > TUN 设置 安装 TUN 服务。"))
+            return
+        }
+        isTunEnabled = sender.state == .on
+        UserDefaults.standard.set(isTunEnabled, forKey: "tunEnabled")
+        tunSwitch.isOn = isTunEnabled
+        syncProxyPreferenceControls()
+        do {
+            if isProxyRuntimeRunning() {
+                try applyTunPreference(restartIfRunning: false)
+            }
+            reconcileSystemProxyForCurrentMode()
+            appendLog("[设置] 随代理开启 TUN 已\(isTunEnabled ? "开启" : "关闭")\n")
+        } catch {
+            isTunEnabled.toggle()
+            UserDefaults.standard.set(isTunEnabled, forKey: "tunEnabled")
+            sender.state = isTunEnabled ? .on : .off
+            tunSwitch.isOn = isTunEnabled
+            syncProxyPreferenceControls()
+            showError(error)
+        }
+        refreshStatus()
+    }
+
+    @objc func settingsLaunchAtLoginChanged(_ sender: MD3Checkbox) {
+        let enabled = sender.state == .on
+        UserDefaults.standard.set(enabled, forKey: "launchAtLoginEnabled")
+        
+        if #available(macOS 13.0, *) {
+            let appService = SMAppService.mainApp
+            do {
+                if enabled {
+                    if appService.status != .enabled {
+                        try appService.register()
+                    }
+                } else {
+                    if appService.status == .enabled {
+                        try appService.unregister()
+                    }
+                }
+                appendLog("[设置] 开机自启动已\(enabled ? "开启" : "关闭")\n")
+            } catch {
+                showError(error)
+                sender.state = enabled ? .off : .on
+                UserDefaults.standard.set(!enabled, forKey: "launchAtLoginEnabled")
+            }
+        } else {
+            let appPath = Bundle.main.bundlePath
+            let script = enabled 
+                ? "tell application \"System Events\" to make new login item at end with properties {path:\"\(appPath)\", hidden:false}"
+                : "tell application \"System Events\" to delete (every login item whose path is \"\(appPath)\")"
+            
+            let appleScript = NSAppleScript(source: script)
+            var errorInfo: NSDictionary?
+            appleScript?.executeAndReturnError(&errorInfo)
+            if let err = errorInfo {
+                let msg = err[NSAppleScript.errorMessage] as? String ?? "AppleScript execution failed"
+                showError(NSError.user(msg))
+                sender.state = enabled ? .off : .on
+                UserDefaults.standard.set(!enabled, forKey: "launchAtLoginEnabled")
+            } else {
+                appendLog("[设置] 开机自启动已\(enabled ? "开启" : "关闭")\n")
+            }
+        }
+        
+        refreshStatus()
+    }
+
+    @objc func settingsStartSilentlyChanged(_ sender: MD3Checkbox) {
+        let enabled = sender.state == .on
+        UserDefaults.standard.set(enabled, forKey: "startSilently")
+        appendLog("[设置] 静默启动已\(enabled ? "开启" : "关闭")\n")
+        refreshStatus()
+    }
+
+    @objc func installTunServiceClicked() {
+        do {
+            try TunServiceManager.install(store: store)
+            appendLog("[TUN] TUN 服务已安装\n")
+            showToast("TUN 服务已安装")
+            checkSingBoxInstall(showAlert: false)
+            refreshTunServiceStatus()
+            refreshStatus()
+        } catch {
+            tunServiceLogLabel.stringValue = "最近状态：安装失败\n\(error.localizedDescription)"
+            showError(error)
+        }
+    }
+
+    @objc func uninstallTunServiceClicked() {
+        do {
+            isTunEnabled = false
+            UserDefaults.standard.set(false, forKey: "tunEnabled")
+            try TunServiceManager.uninstall(store: store)
+            appendLog("[TUN] TUN 服务已卸载\n")
+            showToast("TUN 服务已卸载")
+            syncProxyPreferenceControls()
+            refreshTunServiceStatus()
+            refreshStatus()
+        } catch {
+            tunServiceLogLabel.stringValue = "最近状态：卸载失败\n\(error.localizedDescription)"
+            showError(error)
+        }
+    }
+
+    @objc func openTunLogClicked() {
+        if FileManager.default.fileExists(atPath: TunServiceManager.logURL.path) {
+            NSWorkspace.shared.open(TunServiceManager.logURL)
+        } else {
+            showToast("暂无 TUN 日志")
+        }
+    }
+
+    func syncProxyPreferenceControls() {
+        serviceSwitch.isOn = isProxyRuntimeRunning() && isSystemProxyEnabled
+        tunSwitch.isOn = isTunEnabled
+        tunSwitch.isEnabled = isSystemProxyEnabled || isProxyRuntimeRunning()
+        settingsSystemProxyCheckbox.state = isSystemProxyEnabled ? .on : .off
+        settingsTunCheckbox.state = isTunEnabled ? .on : .off
+        settingsTunCheckbox.isEnabled = isSystemProxyEnabled
+        settingsLaunchAtLoginCheckbox.state = isLaunchAtLoginEnabled ? .on : .off
+        settingsStartSilentlyCheckbox.state = UserDefaults.standard.bool(forKey: "startSilently") ? .on : .off
+        refreshTunServiceStatus()
+    }
+
+    func reconcileSystemProxyForCurrentMode() {
+        guard isProxyRuntimeRunning() else { return }
+        if isTunEnabled {
+            setSystemProxy(enabled: false, port: getMixedProxyPort())
+        } else {
+            setSystemProxy(enabled: isSystemProxyEnabled, port: getMixedProxyPort())
+        }
+    }
+
+    func isProxyRuntimeRunning() -> Bool {
+        runner.isRunning || TunServiceManager.status(store: store).isRunning
+    }
+
+    func currentProxyPID() -> Int32? {
+        runner.pid ?? TunServiceManager.activeSingBoxPID(store: store)
+    }
+
+    func refreshTunServiceStatus() {
+        let status = TunServiceManager.status(store: store)
+        tunServiceStatusLabel.stringValue = "TUN 服务状态：\(status.displayText)"
+        if FileManager.default.fileExists(atPath: TunServiceManager.logURL.path),
+           let text = try? String(contentsOf: TunServiceManager.logURL, encoding: .utf8) {
+            let lines = text.components(separatedBy: .newlines).filter { !$0.isEmpty }
+            tunServiceLogLabel.stringValue = "最近状态：\(lines.suffix(3).joined(separator: "\n"))"
+        } else {
+            tunServiceLogLabel.stringValue = "最近状态：暂无日志"
+        }
+    }
+
+    @objc func showLogsFromHomeClicked() {
+        selectPage(at: 5)
+    }
+
+    func changeColorScheme(to index: Int) {
+        MD3.currentSchemeIndex = index
+        for row in colorSchemeRows {
+            row.isSelected = (row.index == index)
+        }
+        notifyThemeChanged()
+        appendLog("[TungBox] 已切换配色方案为: \(MD3.colorSchemes[index].name)\n")
+    }
+
+    @objc func tableClicked() {
+        guard table.selectedRow >= 0 else { return }
+        selectProfile(at: table.selectedRow)
+    }
+
+    @objc func newClicked() {
+        let name = "配置 \(profiles.count + 1)"
+        createProfile(named: name, content: defaultConfig())
+    }
+
+    @objc func importClicked() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.canChooseDirectories = false
+        if panel.runModal() == .OK, let url = panel.url, let text = try? String(contentsOf: url) {
+            createProfile(named: url.deletingPathExtension().lastPathComponent, content: text)
+        }
+    }
+
+    @objc func deleteClicked() {
+        guard let index = selectedIndex else { return }
+        let profile = profiles[index]
+        try? FileManager.default.removeItem(at: store.configURL(for: profile))
+        profiles.remove(at: index)
+        store.saveProfiles(profiles)
+        table.reloadData()
+        selectedIndex = nil
+        editor.string = ""
+        if !profiles.isEmpty { selectProfile(at: min(index, profiles.count - 1)) }
+    }
+
+    func checkSingBoxInstall(showAlert: Bool) {
+        if let binary = runner.findSingBox() {
+            let result = runner.versionResult()
+            let versionLine: String
+            if let result, result.status == 0,
+               let firstLine = result.output.components(separatedBy: .newlines).first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+                versionLine = firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            } else {
+                let output = result?.output.trimmingCharacters(in: .whitespacesAndNewlines)
+                versionLine = output?.isEmpty == false ? "版本读取失败：\(output!)" : "版本读取失败"
+            }
+            detectedCoreVersion = versionLine
+            serviceLabel.stringValue = "sing-box Core：已就绪 · \(versionLine)"
+            serviceLabel.invalidateIntrinsicContentSize()
+            appendLog("[TungBox] 检测到 \(versionLine) @ \(binary)\n")
+        } else {
+            detectedCoreVersion = "未找到"
+            serviceLabel.stringValue = """
+            sing-box Core：未找到
+            可选处理：
+            1. 使用 Homebrew 安装：brew install sing-box
+            2. 在这里导入一个 sing-box 可执行文件
+            3. 发布包时把 sing-box 放到 App 的 Resources/Core/sing-box
+            """
+            if showAlert {
+                showError(NSError.user("未检测到 sing-box Core。请在 设置 > 基础 > Core 管理 中导入 sing-box，或安装：brew install sing-box"))
+            }
+        }
+        serviceLabel.invalidateIntrinsicContentSize()
+        refreshHomeFeatureStatus()
+    }
+
+    func setupRuleSetURLFields() {
+        let fields = [
+            (ruleSetPrivateURLField, TungBoxConfig.ruleSetPrivate),
+            (ruleSetCNURLField, TungBoxConfig.ruleSetCN),
+            (ruleSetGeoIPCNURLField, TungBoxConfig.ruleSetGeoIPCN),
+            (ruleSetGeolocationNotCNURLField, TungBoxConfig.ruleSetGeolocationNotCN)
+        ]
+        for (field, tag) in fields {
+            field.stringValue = TungBoxConfig.ruleSetURL(for: tag)
+            field.placeholderString = TungBoxConfig.defaultRuleSetURLs[tag]
+            field.translatesAutoresizingMaskIntoConstraints = false
+            field.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        }
+    }
+
+    func settingsLabel(_ title: String) -> NSTextField {
+        let label = NSTextField(labelWithString: title)
+        label.font = .systemFont(ofSize: 12, weight: .medium)
+        label.textColor = MD3.onSurfaceVariant
+        label.translatesAutoresizingMaskIntoConstraints = false
+        registerThemeObserver { [weak label] in
+            label?.textColor = MD3.onSurfaceVariant
+        }
+        return label
+    }
+
+    @objc func saveRuleSetURLsClicked() {
+        let values = [
+            (TungBoxConfig.ruleSetPrivate, ruleSetPrivateURLField.stringValue),
+            (TungBoxConfig.ruleSetCN, ruleSetCNURLField.stringValue),
+            (TungBoxConfig.ruleSetGeoIPCN, ruleSetGeoIPCNURLField.stringValue),
+            (TungBoxConfig.ruleSetGeolocationNotCN, ruleSetGeolocationNotCNURLField.stringValue)
+        ]
+        for (tag, value) in values {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.isEmpty || URL(string: trimmed) != nil else {
+                showError(NSError.user("\(tag) 不是有效 URL"))
+                return
+            }
+            TungBoxConfig.setRuleSetURL(trimmed, for: tag)
+        }
+        setupRuleSetURLFields()
+        appendLog("[规则集] 已保存规则集获取地址。留空时使用订阅地址；订阅没有时使用内置默认地址。\n")
+    }
+
+    @objc func toggleThemeClicked() {
+        MD3.isDark.toggle()
+        NSApp.appearance = NSAppearance(named: MD3.isDark ? .darkAqua : .aqua)
+        notifyThemeChanged()
+        appendLog("[TungBox] 已切换到\(MD3.isDark ? "深色" : "浅色")外观\n")
+    }
+
+    @discardableResult
+    @MainActor
+    func showMD3Dialog(
+        title: String,
+        message: String,
+        customView: NSView?,
+        confirmTitle: String = "确定",
+        cancelTitle: String = "取消"
+    ) -> MD3Dialog {
+        guard let contentView = window?.contentView else { fatalError("No content view") }
+        let dialog = MD3Dialog(
+            title: title,
+            message: message,
+            customView: customView,
+            confirmTitle: confirmTitle,
+            cancelTitle: cancelTitle
+        )
+        dialog.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(dialog)
+        
+        NSLayoutConstraint.activate([
+            dialog.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            dialog.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            dialog.topAnchor.constraint(equalTo: contentView.topAnchor),
+            dialog.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
+        ])
+        
+        dialog.present()
+        return dialog
+    }
+
+    @objc func openFolderClicked() {
+        NSWorkspace.shared.open(store.baseURL)
+    }
+
+    @objc func openCoreFolderClicked() {
+        NSWorkspace.shared.open(store.coreURL)
+    }
+
+    @objc func importCoreClicked() {
+        let panel = NSOpenPanel()
+        panel.title = "选择 sing-box Core"
+        panel.message = "请选择 sing-box 或 singbox 可执行文件。TungBox 会复制一份到自己的 Core 目录。"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        if panel.runModal() == .OK, let source = panel.url {
+            do {
+                if FileManager.default.fileExists(atPath: store.coreBinaryURL.path) {
+                    try FileManager.default.removeItem(at: store.coreBinaryURL)
+                }
+                try FileManager.default.copyItem(at: source, to: store.coreBinaryURL)
+                try FileManager.default.copyItem(at: source, to: store.coreBinaryURL)
+                try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: store.coreBinaryURL.path)
+                appendLog("[Core] 已导入 sing-box Core：\(store.coreBinaryURL.path)\n")
+                checkSingBoxInstall(showAlert: true)
+            } catch {
+                showError(NSError.user("导入 sing-box Core 失败：\(error.localizedDescription)"))
+            }
+        }
+    }
+}
+
+final class MD3SettingsPageView: NSView, MD3Themeable {
+    func themeChanged() {
+        self.needsDisplay = true
+    }
+}

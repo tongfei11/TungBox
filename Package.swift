@@ -12,6 +12,9 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "TungBox",
+            exclude: [
+                "main.swift.bak"
+            ],
             resources: [
                 .process("Resources")
             ]
