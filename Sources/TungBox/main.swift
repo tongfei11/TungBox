@@ -154,6 +154,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             self?.refreshStatus()
         }
 
+        // Apply persisted theme
+        NSApp.appearance = NSAppearance(named: MD3.isDark ? .darkAqua : .aqua)
+
         guard let content = window?.contentView else { return }
 
         content.wantsLayer = true
@@ -260,6 +263,43 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
         checkSingBoxInstall(showAlert: true)
         refreshSubscriptionBadge()
+        restoreWindowState()
+        detectProxyConflicts()
+    }
+
+    func detectProxyConflicts() {
+        let ports: [(Int, String)] = [
+            (7890, "Clash / sing-box mixed"),
+            (7891, "Clash / sing-box HTTP"),
+            (7892, "Clash / sing-box SOCKS"),
+            (9090, "Clash 控制器"),
+            (9091, "sing-box 控制器"),
+            (1080, "SOCKS 代理"),
+            (8080, "HTTP 代理"),
+            (5353, "mDNSResponder"),
+        ]
+        var conflicts: [String] = []
+        for (port, name) in ports {
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+            task.arguments = ["-i", "tcp:\(port)", "-sTCP:LISTEN", "-F", "c"]
+            let pipe = Pipe()
+            task.standardOutput = pipe; task.standardError = pipe
+            try? task.run(); task.waitUntilExit()
+            let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            if output.contains("p") {
+                let names = output.components(separatedBy: "\n").filter { $0.hasPrefix("c") }.map { String($0.dropFirst()) }
+                let processName = names.first ?? "未知"
+                if !processName.lowercased().contains("tungbox") {
+                    conflicts.append("端口 \(port) (\(name)) 已被 \(processName) 占用")
+                }
+            }
+        }
+        if !conflicts.isEmpty {
+            appendLog("[冲突] 检测到端口冲突：\n\(conflicts.map { "  - \($0)" }.joined(separator: "\n"))\n")
+            let msg = conflicts.prefix(3).joined(separator: "\n")
+            showError(NSError.user("检测到代理端口冲突：\n\n\(msg)\n\n请先关闭相关软件再启动 TungBox 代理。"))
+        }
     }
 
     func normalizeProxyPreferences() {
@@ -533,6 +573,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         if index == 6 {
             checkSingBoxInstall(showAlert: false)
         }
+        UserDefaults.standard.set(index, forKey: "lastSelectedPage")
         window?.contentView?.refreshSubviews()
     }
     func startService() {
@@ -1584,8 +1625,33 @@ extension MainWindowController: NSSplitViewDelegate {
 
 extension MainWindowController {
     func windowWillClose(_ notification: Notification) {
+        saveWindowFrame()
         NSApp.setActivationPolicy(.accessory)
         appendLog("[窗口] 控制台已关闭，TungBox 保留在状态栏后台运行。\n")
+    }
+
+    func windowDidEndLiveResize(_ notification: Notification) { saveWindowFrame() }
+    func windowDidMove(_ notification: Notification) { saveWindowFrame() }
+
+    func saveWindowFrame() {
+        guard let frame = window?.frame else { return }
+        UserDefaults.standard.set(NSStringFromRect(frame), forKey: "windowFrame")
+    }
+
+    func restoreWindowState() {
+        // Restore frame
+        if let saved = UserDefaults.standard.string(forKey: "windowFrame"),
+           !saved.isEmpty {
+            let rect = NSRectFromString(saved)
+            if rect.width >= 400 && rect.height >= 300 {
+                window?.setFrame(rect, display: true)
+            }
+        }
+        // Restore last tab
+        let lastPage = UserDefaults.standard.integer(forKey: "lastSelectedPage")
+        if lastPage > 0, lastPage < pages.numberOfTabViewItems {
+            selectPage(at: lastPage)
+        }
     }
 
     func showConsoleWindow() {

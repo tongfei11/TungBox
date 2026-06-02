@@ -44,7 +44,7 @@ enum MD3 {
         get { _isDark }
         set { _isDark = newValue }
     }
-    private static var _isDark = false
+    private static var _isDark = UserDefaults.standard.bool(forKey: "appearanceIsDark")
 
     static let colorSchemes: [MD3ColorScheme] = [
         MD3ColorScheme(

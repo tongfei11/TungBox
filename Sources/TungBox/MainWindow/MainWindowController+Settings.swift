@@ -854,6 +854,7 @@ extension MainWindowController {
 
     @objc func toggleThemeClicked() {
         MD3.isDark.toggle()
+        UserDefaults.standard.set(MD3.isDark, forKey: "appearanceIsDark")
         NSApp.appearance = NSAppearance(named: MD3.isDark ? .darkAqua : .aqua)
         notifyThemeChanged()
         appendLog("[TungBox] 已切换到\(MD3.isDark ? "深色" : "浅色")外观\n")
