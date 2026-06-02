@@ -132,38 +132,23 @@ extension MainWindowController {
     }
 
     func subscriptionZeroStateLabel(panel: NSView) -> NSTextField {
-        let label = NSTextField(labelWithString: "暂无订阅\n\n点击「添加订阅」导入机场链接或 sing-box 订阅地址。\n支持 sing-box JSON、Base64 编码的节点列表等格式。")
+        let label = NSTextField(labelWithString: "暂无订阅\n\n点击「添加订阅」导入机场链接或 sing-box 订阅地址。\n支持 sing-box JSON、Clash YAML 等格式。")
         label.font = .systemFont(ofSize: 14, weight: .regular)
         label.textColor = MD3.onSurfaceVariant
         label.alignment = .center
         label.lineBreakMode = .byWordWrapping
         label.maximumNumberOfLines = 0
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.tag = 9_001
         registerThemeObserver { [weak label] in
             label?.textColor = MD3.onSurfaceVariant
         }
+        zeroStateView = label
         return label
     }
 
     func refreshSubscriptionEmptyState() {
-        if let zeroState = viewWithTag(9_001) {
-            zeroState.isHidden = !subscriptions.isEmpty
-            subscriptionTable.isHidden = subscriptions.isEmpty
-        }
-    }
-
-    func viewWithTag(_ tag: Int) -> NSView? {
-        guard let content = window?.contentView else { return nil }
-        return findTaggedView(tag, in: content)
-    }
-
-    func findTaggedView(_ tag: Int, in root: NSView) -> NSView? {
-        if root.tag == tag { return root }
-        for subview in root.subviews {
-            if let found = findTaggedView(tag, in: subview) { return found }
-        }
-        return nil
+        zeroStateView?.isHidden = !subscriptions.isEmpty
+        subscriptionTable.isHidden = subscriptions.isEmpty
     }
 
     @objc func addSubscriptionClicked() {
