@@ -73,6 +73,13 @@ TungBox 是 [sing-box](https://github.com/SagerNet/sing-box) 的 macOS 原生客
 - 手动导入可执行文件
 - GitHub Release 版本号自动识别
 
+### 日志
+
+- 运行时实时日志输出
+- 按级别过滤（INFO / WARN / ERROR / DEBUG）
+- 关键词搜索，显示匹配条数
+- 一键复制到剪贴板 / 清空
+
 ### 其他
 
 - 状态栏菜单：系统代理、TUN、出站模式、代理组快速切换

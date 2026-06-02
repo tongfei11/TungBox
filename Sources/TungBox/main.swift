@@ -93,6 +93,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     weak var zeroStateView: NSView?
     let connectionFilterField = MD3TextField()
     var editingRuleID: UUID?
+    var logLevelButtons: [NSButton]?
+    var logBuffer = ""
     
     let serviceSwitch = MD3Switch()
     let tunSwitch = MD3Switch()
