@@ -28,7 +28,25 @@ extension MainWindowController {
         addButton.translatesAutoresizingMaskIntoConstraints = false
         addButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
         addButton.widthAnchor.constraint(equalToConstant: 120).isActive = true
-        
+
+        let importFileButton = MD3Button()
+        importFileButton.title = "从文件导入"
+        importFileButton.style = .outlined
+        importFileButton.target = self
+        importFileButton.action = #selector(importSubscriptionFileClicked)
+        importFileButton.translatesAutoresizingMaskIntoConstraints = false
+        importFileButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        importFileButton.widthAnchor.constraint(equalToConstant: 120).isActive = true
+
+        let importClipboardButton = MD3Button()
+        importClipboardButton.title = "从剪贴板"
+        importClipboardButton.style = .outlined
+        importClipboardButton.target = self
+        importClipboardButton.action = #selector(importSubscriptionFromClipboardClicked)
+        importClipboardButton.translatesAutoresizingMaskIntoConstraints = false
+        importClipboardButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        importClipboardButton.widthAnchor.constraint(equalToConstant: 120).isActive = true
+
         let updateButton = MD3Button()
         updateButton.title = "更新选中"
         updateButton.style = .tonal
@@ -37,7 +55,7 @@ extension MainWindowController {
         updateButton.translatesAutoresizingMaskIntoConstraints = false
         updateButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
         updateButton.widthAnchor.constraint(equalToConstant: 120).isActive = true
-        
+
         let deleteButton = MD3Button()
         deleteButton.title = "删除订阅"
         deleteButton.style = .destructive
@@ -47,7 +65,7 @@ extension MainWindowController {
         deleteButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
         deleteButton.widthAnchor.constraint(equalToConstant: 120).isActive = true
 
-        let buttons = NSStackView(views: [addButton, updateButton, deleteButton])
+        let buttons = NSStackView(views: [addButton, importFileButton, importClipboardButton, updateButton, deleteButton])
         buttons.orientation = .horizontal
         buttons.spacing = 12
         buttons.translatesAutoresizingMaskIntoConstraints = false
@@ -495,5 +513,107 @@ extension MainWindowController {
         guard let selectedIndex, profiles.indices.contains(selectedIndex) else { return nil }
         let profileID = profiles[selectedIndex].id
         return subscriptions.first { $0.profileID == profileID }
+    }
+
+    // MARK: - File / Clipboard import
+
+    @objc func importSubscriptionFileClicked() {
+        let panel = NSOpenPanel()
+        panel.title = "导入订阅文件"
+        panel.message = "选择本地订阅配置文件（JSON、YAML 或 Base64 文本）"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.json, .yaml, .text, .plainText]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            let content = try String(contentsOf: url, encoding: .utf8)
+            let nodes = try SubscriptionImporter.extractNodesFromAnyFormat(content)
+            let config = try SubscriptionImporter.singBoxConfig(from: content, profileName: url.deletingPathExtension().lastPathComponent)
+            let newName = url.deletingPathExtension().lastPathComponent
+            let subscription = Subscription(id: UUID(), name: newName, url: url.absoluteString, profileID: nil, updatedAt: Date())
+            subscriptions.append(subscription)
+            store.saveSubscriptions(subscriptions)
+            applySubscriptionConfig(config, at: subscriptions.count - 1)
+            subscriptionTable.reloadData()
+            refreshSubscriptionBadge()
+            appendLog("[订阅] 从文件导入 \(newName)（\(nodes.count) 个节点）\n")
+        } catch {
+            showError(NSError.user("文件导入失败：\(error.localizedDescription)"))
+        }
+    }
+
+    @objc func importSubscriptionFromClipboardClicked() {
+        guard let text = NSPasteboard.general.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !text.isEmpty else {
+            showError(NSError.user("剪贴板为空，请先复制订阅链接或配置内容。"))
+            return
+        }
+
+        // URL in clipboard → pre-fill add dialog
+        if let url = URL(string: text), ["http", "https"].contains(url.scheme?.lowercased()) {
+            let nameField = MD3TextField()
+            nameField.placeholderString = "订阅名称 (如: 机场名)"
+            nameField.translatesAutoresizingMaskIntoConstraints = false
+            nameField.widthAnchor.constraint(equalToConstant: 432).isActive = true
+            nameField.heightAnchor.constraint(equalToConstant: 36).isActive = true
+
+            let urlField = MD3TextField()
+            urlField.stringValue = text
+            urlField.translatesAutoresizingMaskIntoConstraints = false
+            urlField.widthAnchor.constraint(equalToConstant: 432).isActive = true
+            urlField.heightAnchor.constraint(equalToConstant: 36).isActive = true
+
+            let stack = NSStackView(views: [nameField, urlField])
+            stack.orientation = .vertical; stack.spacing = 12; stack.alignment = .leading
+            stack.translatesAutoresizingMaskIntoConstraints = false
+            let container = NSView()
+            container.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(stack)
+            NSLayoutConstraint.activate([
+                stack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                stack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                stack.topAnchor.constraint(equalTo: container.topAnchor),
+                stack.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+                container.widthAnchor.constraint(equalToConstant: 432),
+                container.heightAnchor.constraint(equalToConstant: 84)
+            ])
+
+            let dialog = showMD3Dialog(title: "从剪贴板添加", message: "检测到剪贴板内容是订阅链接。", customView: container)
+            dialog.window?.initialFirstResponder = nameField
+            dialog.onConfirm = { [weak self, weak nameField, weak urlField, weak dialog] in
+                guard let self, let n = nameField?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty,
+                      let u = urlField?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines), !u.isEmpty else { return }
+                self.addSubscription(name: n, url: u); dialog?.dismiss()
+            }
+            dialog.onCancel = { [weak dialog] in dialog?.dismiss() }
+            return
+        }
+
+        // Config text (JSON/YAML) in clipboard → direct import
+        do {
+            let nodes = try SubscriptionImporter.extractNodesFromAnyFormat(text)
+            let config = try SubscriptionImporter.singBoxConfig(from: text, profileName: "剪贴板导入")
+            let subscription = Subscription(id: UUID(), name: "剪贴板导入", url: "clipboard://", profileID: nil, updatedAt: Date())
+            subscriptions.append(subscription)
+            store.saveSubscriptions(subscriptions)
+            applySubscriptionConfig(config, at: subscriptions.count - 1)
+            subscriptionTable.reloadData()
+            refreshSubscriptionBadge()
+            appendLog("[订阅] 从剪贴板导入（\(nodes.count) 个节点）\n")
+        } catch {
+            showError(NSError.user("剪贴板内容无法识别。请复制订阅链接（http/https）或完整的配置内容（JSON / YAML）。"))
+        }
+    }
+
+    private func addSubscription(name: String, url: String) {
+        let subscription = Subscription(id: UUID(), name: name, url: url, profileID: nil, updatedAt: nil)
+        subscriptions.append(subscription)
+        store.saveSubscriptions(subscriptions)
+        subscriptionTable.reloadData()
+        refreshSubscriptionBadge()
+        appendLog("[订阅] 已添加 \(name)\n")
+        refreshSubscription(at: subscriptions.count - 1)
     }
 }
