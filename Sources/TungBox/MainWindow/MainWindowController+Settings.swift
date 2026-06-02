@@ -501,10 +501,11 @@ extension MainWindowController {
     }
 
     func installCoreRelease(_ release: CoreRelease, reason: String) {
-        guard !isProxyRuntimeRunning() else {
-            showToast("请先关闭代理服务，再更新 Core")
-            showError(NSError.user("请先关闭代理服务，再更新 sing-box Core。"))
-            return
+        let wasRunning = isProxyRuntimeRunning()
+        if wasRunning {
+            stopService()
+            showToast("已暂停代理服务以安装 Core")
+            appendLog("[Core] 暂停代理服务以便安装 \(release.version)\n")
         }
 
         serviceLabel.stringValue = "sing-box Core：正在安装 \(release.version)..."
@@ -517,7 +518,9 @@ extension MainWindowController {
                 await MainActor.run { [weak self] in
                     self?.appendLog("[Core] 已安装 \(release.version) 到 \(coreBinaryURL.path)\n")
                     self?.checkSingBoxInstall(showAlert: false)
-                    self?.showToast("Core 已安装：\(release.version)")
+                    self?.showToast(wasRunning
+                        ? "Core 已更新至 \(release.version)，请手动重启代理"
+                        : "Core 已安装：\(release.version)")
                 }
             } catch {
                 await MainActor.run { [weak self] in
