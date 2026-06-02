@@ -194,6 +194,17 @@ clear_finder_info
 sign_app
 verify_signature
 
+# The .icns alone doesn't always refresh in Finder. Use NSWorkspace.setIcon as a
+# post-sign step to force the icon into the file's metadata without invalidating the signature.
+echo "Forcing Finder icon..."
+python3 -c "
+import AppKit
+icon = AppKit.NSImage.alloc().initWithContentsOfFile_('$ROOT_DIR/Sources/TungBox/Resources/Tray/logo.png')
+if icon:
+    AppKit.NSWorkspace.sharedWorkspace().setIcon_forFile_options_(icon, '$APP_DIR', 0)
+    print('Finder icon set.')
+" 2>/dev/null || echo "Warning: NSWorkspace.setIcon failed, Finder icon may be delayed."
+
 DMG_NAME="${PRODUCT}-${RELEASE_VERSION}-macos-arm64"
 DMG_PATH="$ROOT_DIR/dist/${DMG_NAME}.dmg"
 

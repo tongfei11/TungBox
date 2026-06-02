@@ -241,6 +241,14 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         if let logoUrl = AppResources.url(forResource: "logo", withExtension: "png", subdirectory: "Tray"),
            let logoImage = NSImage(contentsOf: logoUrl) {
             NSApplication.shared.applicationIconImage = logoImage
+
+            // One-time: force Finder to show our icon (CFBundleIconFile may be stale)
+            if !UserDefaults.standard.bool(forKey: "finderIconApplied") {
+                let iconApplied = NSWorkspace.shared.setIcon(logoImage, forFile: Bundle.main.bundlePath, options: [])
+                if iconApplied {
+                    UserDefaults.standard.set(true, forKey: "finderIconApplied")
+                }
+            }
         }
 
         checkSingBoxInstall(showAlert: true)
