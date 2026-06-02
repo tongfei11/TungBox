@@ -263,42 +263,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
         checkSingBoxInstall(showAlert: true)
         refreshSubscriptionBadge()
-        detectProxyConflicts()
-    }
-
-    func detectProxyConflicts() {
-        let ports: [(Int, String)] = [
-            (7890, "Clash / sing-box mixed"),
-            (7891, "Clash / sing-box HTTP"),
-            (7892, "Clash / sing-box SOCKS"),
-            (9090, "Clash 控制器"),
-            (9091, "sing-box 控制器"),
-            (1080, "SOCKS 代理"),
-            (8080, "HTTP 代理"),
-            (5353, "mDNSResponder"),
-        ]
-        var conflicts: [String] = []
-        for (port, name) in ports {
-            let task = Process()
-            task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-            task.arguments = ["-i", "tcp:\(port)", "-sTCP:LISTEN", "-F", "c"]
-            let pipe = Pipe()
-            task.standardOutput = pipe; task.standardError = pipe
-            try? task.run(); task.waitUntilExit()
-            let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            if output.contains("p") {
-                let names = output.components(separatedBy: "\n").filter { $0.hasPrefix("c") }.map { String($0.dropFirst()) }
-                let processName = names.first ?? "未知"
-                if !processName.lowercased().contains("tungbox") {
-                    conflicts.append("端口 \(port) (\(name)) 已被 \(processName) 占用")
-                }
-            }
-        }
-        if !conflicts.isEmpty {
-            appendLog("[冲突] 检测到端口冲突：\n\(conflicts.map { "  - \($0)" }.joined(separator: "\n"))\n")
-            let msg = conflicts.prefix(3).joined(separator: "\n")
-            showError(NSError.user("检测到代理端口冲突：\n\n\(msg)\n\n请先关闭相关软件再启动 TungBox 代理。"))
-        }
     }
 
     func normalizeProxyPreferences() {

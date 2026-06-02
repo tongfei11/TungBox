@@ -100,7 +100,10 @@ extension MainWindowController {
         panel.translatesAutoresizingMaskIntoConstraints = false
         panel.addSubview(scroll)
 
+        view.addSubview(title)
+        view.addSubview(subtitle)
         view.addSubview(ruleToolbar)
+        view.addSubview(panel)
 
         NSLayoutConstraint.activate([
             title.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),

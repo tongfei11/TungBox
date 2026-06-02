@@ -4,11 +4,12 @@ import Foundation
 extension MainWindowController {
     
     func setupStatusItem() {
-        let item = NSStatusBar.system.statusItem(withLength: 28)
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         configureStatusButton(item.button)
         let menu = NSMenu()
         menu.delegate = self
         item.menu = menu
+        item.isVisible = true
         statusItem = item
     }
 
@@ -129,11 +130,12 @@ extension MainWindowController {
         guard let button else { return }
         if let image = trayIcon() {
             button.image = image
-            button.title = ""
+            button.title = "TB"
         } else {
             button.image = nil
             button.title = "TB"
         }
+        button.imagePosition = .imageLeft
         button.imageScaling = .scaleProportionallyDown
         button.toolTip = TungBoxVersion.display
     }
