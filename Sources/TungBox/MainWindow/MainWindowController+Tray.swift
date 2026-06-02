@@ -130,12 +130,11 @@ extension MainWindowController {
         guard let button else { return }
         if let image = trayIcon() {
             button.image = image
-            button.title = "TB"
+            button.title = ""
         } else {
             button.image = nil
             button.title = "TB"
         }
-        button.imagePosition = .imageLeft
         button.imageScaling = .scaleProportionallyDown
         button.toolTip = TungBoxVersion.display
     }
