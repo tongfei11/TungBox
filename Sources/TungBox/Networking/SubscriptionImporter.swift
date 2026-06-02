@@ -49,7 +49,12 @@ enum SubscriptionImporter {
         guard !nodes.isEmpty else {
             throw NSError.user("订阅内容里没有可用的 sing-box 节点。请确认 Xboard 模板输出 outbounds。")
         }
-        let config = try generateManagedConfig(profileName: profileName, nodes: nodes, subscriptionRuleSetURLs: parsed.ruleSetURLs)
+        var config = try generateManagedConfig(profileName: profileName, nodes: nodes, subscriptionRuleSetURLs: parsed.ruleSetURLs)
+
+        // Auto-fix deprecated sing-box fields for compatibility with newer Core
+        let (fixed, _) = ConfigCompatibilityChecker.autoFix(config: config)
+        config = fixed
+
         return try renderJSON(config)
     }
 

@@ -453,6 +453,18 @@ extension MainWindowController {
         guard subscriptions.indices.contains(index) else { return }
         var subscription = subscriptions[index]
         let profileName = "订阅 - \(subscription.name)"
+
+        // Compatibility check
+        if let configData = config.data(using: .utf8),
+           let configObj = try? JSONSerialization.jsonObject(with: configData) as? [String: Any] {
+            let issues = ConfigCompatibilityChecker.check(config: configObj)
+            if !issues.isEmpty {
+                for issue in issues {
+                    appendLog("[兼容性] [\(issue.severity.rawValue)] \(issue.path): \(issue.message)\n")
+                }
+            }
+        }
+
         let mergedConfig: String
         do {
             mergedConfig = try renderConfig(try applyCustomRules(to: config, subscriptionID: subscription.id))
