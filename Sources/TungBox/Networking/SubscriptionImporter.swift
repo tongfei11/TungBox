@@ -59,21 +59,102 @@ enum SubscriptionImporter {
     }
 
     private static func parseSubscription(_ text: String) throws -> (config: [String: Any], ruleSetURLs: [String: String]) {
-        let candidates = [
-            text.trimmingCharacters(in: .whitespacesAndNewlines),
-            decodeBase64(text.trimmingCharacters(in: .whitespacesAndNewlines)) ?? ""
-        ].filter { !$0.isEmpty }
+        let format = SubscriptionFormatParser.detectFormat(text)
 
-        for candidate in candidates {
-            guard let config = jsonObject(from: candidate) else { continue }
-            let nodes = extractNodes(fromConfig: config)
-            if !nodes.isEmpty {
-                return (config, extractRuleSetURLs(fromConfig: config))
+        // sing-box JSON: use existing logic (config structure + rule sets already present)
+        if format == .singBoxJSON {
+            let candidates = [
+                text.trimmingCharacters(in: .whitespacesAndNewlines),
+                decodeBase64(text.trimmingCharacters(in: .whitespacesAndNewlines)) ?? ""
+            ].filter { !$0.isEmpty }
+
+            for candidate in candidates {
+                guard let config = jsonObject(from: candidate) else { continue }
+                let nodes = extractNodes(fromConfig: config)
+                if !nodes.isEmpty {
+                    return (config, extractRuleSetURLs(fromConfig: config))
+                }
             }
         }
 
-        throw NSError.user("订阅内容里没有可用的 sing-box 节点。请确认 Xboard 模板输出 outbounds。")
+        // Clash YAML / share links: extract nodes, wrap in minimal config
+        let nodes: [[String: Any]]
+        switch format {
+        case .singBoxJSON:
+            throw NSError.user("订阅内容看起来是 sing-box JSON 格式，但未找到可用的 outbounds 节点。请确认 Xboard 模板正确输出 outbounds。")
+        case .clashYAML:
+            nodes = try SubscriptionFormatParser.parseClashProxies(text)
+        case .unknown:
+            throw NSError.user("无法识别订阅格式。支持：\n• sing-box JSON（Xboard 面板模板输出）\n• Clash YAML（机场通用订阅格式）\n\nTungBox 仅支持订阅链接（http/https）导入，不支持单条节点分享链接（vmess:// / trojan:// 等）。\n\n当前内容预览：\(text.prefix(300))")
+        }
+
+        guard !nodes.isEmpty else {
+            throw NSError.user("解析到 0 个可用节点，请检查订阅内容是否有效。")
+        }
+
+        // Wrap extracted nodes in a minimal config with route + DNS
+        let nodeTags = nodes.compactMap { $0["tag"] as? String }
+        let config: [String: Any] = [
+            "outbounds": [[
+                "type": "urltest",
+                "tag": TungBoxConfig.tagAuto,
+                "outbounds": nodeTags,
+                "url": TungBoxConfig.urlTestURL,
+                "interval": "3m",
+                "tolerance": 50,
+                "idle_timeout": "10m",
+                "interrupt_exist_connections": true
+            ], [
+                "type": "selector",
+                "tag": TungBoxConfig.tagManual,
+                "outbounds": [TungBoxConfig.tagAuto] + nodeTags,
+                "default": TungBoxConfig.tagAuto,
+                "interrupt_exist_connections": true
+            ]] + nodes + [
+                ["type": "direct", "tag": TungBoxConfig.tagDirect],
+                ["type": "block", "tag": TungBoxConfig.tagBlock]
+            ],
+            "dns": basicDNS(),
+            "route": basicRoute(),
+            "log": ["level": "info", "timestamp": true],
+            "experimental": ["cache_file": ["enabled": true], "clash_api": ["external_controller": TungBoxConfig.clashAPIListen, "default_mode": "Rule"]],
+            "inbounds": [["type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": TungBoxConfig.mixedPort]]
+        ]
+        return (config, [:])
     }
+
+    private static func basicDNS() -> [String: Any] {[
+        "servers": [
+            ["type": "udp", "tag": "dns-local", "server": "223.5.5.5", "server_port": 53],
+            ["type": "udp", "tag": "dns-proxy", "server": "1.1.1.1", "server_port": 53, "detour": TungBoxConfig.tagManual]
+        ],
+        "rules": [
+            ["rule_set": [TungBoxConfig.ruleSetCN, TungBoxConfig.ruleSetPrivate], "server": "dns-local"],
+            ["rule_set": TungBoxConfig.ruleSetGeolocationNotCN, "server": "dns-proxy"]
+        ],
+        "final": "dns-proxy",
+        "strategy": "prefer_ipv4"
+    ]}
+
+    private static func basicRoute() -> [String: Any] {[
+        "rule_set": [
+            ["type": "remote", "tag": TungBoxConfig.ruleSetPrivate, "format": "binary", "url": TungBoxConfig.resolvedRuleSetURL(for: TungBoxConfig.ruleSetPrivate, subscriptionURLs: [:]), "download_detour": TungBoxConfig.tagDirect, "update_interval": "7d"],
+            ["type": "remote", "tag": TungBoxConfig.ruleSetCN, "format": "binary", "url": TungBoxConfig.resolvedRuleSetURL(for: TungBoxConfig.ruleSetCN, subscriptionURLs: [:]), "download_detour": TungBoxConfig.tagManual, "update_interval": "1d"],
+            ["type": "remote", "tag": TungBoxConfig.ruleSetGeolocationNotCN, "format": "binary", "url": TungBoxConfig.resolvedRuleSetURL(for: TungBoxConfig.ruleSetGeolocationNotCN, subscriptionURLs: [:]), "download_detour": TungBoxConfig.tagManual, "update_interval": "1d"],
+            ["type": "remote", "tag": TungBoxConfig.ruleSetGeoIPCN, "format": "binary", "url": TungBoxConfig.resolvedRuleSetURL(for: TungBoxConfig.ruleSetGeoIPCN, subscriptionURLs: [:]), "download_detour": TungBoxConfig.tagManual, "update_interval": "1d"]
+        ],
+        "rules": [
+            ["action": "sniff"],
+            ["protocol": "dns", "action": "hijack-dns"],
+            ["rule_set": TungBoxConfig.ruleSetPrivate, "outbound": TungBoxConfig.tagDirect],
+            ["rule_set": [TungBoxConfig.ruleSetCN, TungBoxConfig.ruleSetGeoIPCN], "outbound": TungBoxConfig.tagDirect],
+            ["rule_set": TungBoxConfig.ruleSetGeolocationNotCN, "outbound": TungBoxConfig.tagManual],
+            ["ip_cidr": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "169.254.0.0/16", "224.0.0.0/4", "fc00::/7", "fe80::/10", "::1/128"], "outbound": TungBoxConfig.tagDirect]
+        ],
+        "final": TungBoxConfig.tagManual,
+        "default_domain_resolver": "dns-local",
+        "auto_detect_interface": true
+    ]}
 
     private static func extractRuleSetURLs(fromConfig config: [String: Any]) -> [String: String] {
         guard let route = config["route"] as? [String: Any],

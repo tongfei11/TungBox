@@ -371,8 +371,11 @@ extension MainWindowController {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             do {
                 let content = try SubscriptionImporter.fetch(urlString: subscription.url)
+                let format = SubscriptionFormatParser.detectFormat(content)
+                let nodes = try SubscriptionImporter.extractNodesFromAnyFormat(content)
                 let config = try SubscriptionImporter.singBoxConfig(from: content, profileName: subscription.name)
                 DispatchQueue.main.async {
+                    self?.appendLog("[订阅] 检测到 \(format.rawValue) 格式，\(nodes.count) 个节点\n")
                     self?.applySubscriptionConfig(config, at: index)
                 }
             } catch {

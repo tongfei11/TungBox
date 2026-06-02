@@ -35,7 +35,7 @@ TungBox 是 [sing-box](https://github.com/SagerNet/sing-box) 的 macOS 原生客
 ### 订阅
 
 - 添加、编辑、删除、刷新订阅
-- 支持 sing-box JSON、Base64 编码节点列表
+- 支持 sing-box JSON（Xboard 模板）、Clash YAML（机场通用格式）
 - 按订阅自动生成托管配置文件
 - 订阅自动定时刷新
 
