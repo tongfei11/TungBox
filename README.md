@@ -117,4 +117,3 @@ MIT License
 ## 致谢
 
 - [sing-box](https://github.com/SagerNet/sing-box) — 核心代理引擎
-- [Clash Verge Rev](https://github.com/clash-verge-rev/clash-verge-rev) — UI 设计参考

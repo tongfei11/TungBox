@@ -2,7 +2,7 @@
 
 最后更新：2026-06-02 | 当前版本 v0.1.1(0038)
 
-TungBox 是面向 macOS 的 sing-box 图形客户端。参考竞品：Clash Verge Rev（开源/社区驱动）、Surge（商业/iOS-first）、ShadowsocksX-NG（轻量单协议）。
+TungBox 是面向 macOS 的 sing-box 图形客户端，目标是为日常代理需求提供开箱即用的体验。
 
 ## 已完成 ✅
 
@@ -33,9 +33,7 @@ TungBox 是面向 macOS 的 sing-box 图形客户端。参考竞品：Clash Verg
 - [ ] **Core 更新链路回归**：最新版/旧版/下载失败/无 Core 四个场景各自走通，提示文案可理解。
 - [ ] **应用图标显示**：确认桌面/Dock/Launchpad/Finder 四项均正确加载 `.icns`（当前 `.icns` 已生成，需验证 Finder 刷新后生效）。
 
-## P1 — 竞品对齐（Clash Verge Rev 参照）
-
-Clash Verge Rev 是当前 macOS 开源代理客户端标杆，以下为其核心功能中 TungBox 尚缺或未完整的。
+## P1 — 功能增强
 
 ### 订阅 & 配置
 
@@ -66,9 +64,7 @@ Clash Verge Rev 是当前 macOS 开源代理客户端标杆，以下为其核心
 - [ ] **日志分级过滤 + 搜索**：支持按 INFO/WARN/ERROR/DEBUG 过滤 + 关键词搜索（当前仅追加 + 清空）。
 - [ ] **日志导出**：支持复制。
 
-## P2 — 差异化 & 体验
-
-参考 Surge 和 Clash Verge Rev 中提升日常使用感受但非阻塞的功能。
+## P2 — 体验增强
 
 - [ ] **流量统计持久化**：今日 / 近 7 天 / 近 30 天流量柱状图在重启后仍有数据（当前仅在内存中累积）。
 - [ ] **代理冲突检测**：启动时检测 Surge / Clash / 其他代理端口占用并弹窗提示关闭。
