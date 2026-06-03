@@ -357,6 +357,8 @@ extension MainWindowController {
         stack.spacing = 16
         stack.alignment = .width
         stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.setContentHuggingPriority(.required, for: .vertical)
+        stack.setContentCompressionResistancePriority(.required, for: .vertical)
         content.addSubview(stack)
         view.addSubview(scroll)
         NSLayoutConstraint.activate([
@@ -366,7 +368,6 @@ extension MainWindowController {
             scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor),
 
             content.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
-            content.heightAnchor.constraint(greaterThanOrEqualTo: scroll.contentView.heightAnchor),
 
             stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
             stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
