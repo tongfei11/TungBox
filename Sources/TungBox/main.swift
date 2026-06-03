@@ -210,7 +210,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         setupMain(main)
         setupStatusItem()
         startSubscriptionTimer()
-        checkAppUpdateInBackground(showResult: false)
 
         // Configure profile table in memory since it's no longer on screen
         table.backgroundColor = .clear
@@ -1668,6 +1667,7 @@ extension MainWindowController {
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        checkAppUpdateInBackground()
         appendLog("[窗口] 已从状态栏恢复控制台。\n")
     }
 }
