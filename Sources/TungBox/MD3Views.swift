@@ -1636,6 +1636,140 @@ final class MD3SidebarItem: NSView, MD3Themeable {
     }
 }
 
+final class MD3AppVersionFooter: NSControl, MD3Themeable {
+    private let versionLabel = NSTextField(labelWithString: "")
+    private let badgeLabel = NSTextField(labelWithString: "NEW")
+    private var badgeLeadingConstraint: NSLayoutConstraint?
+    private var badgeWidthConstraint: NSLayoutConstraint?
+    private var trackingArea: NSTrackingArea?
+    private var isHovered = false {
+        didSet { updateColors() }
+    }
+    private var isPressed = false {
+        didSet { updateColors() }
+    }
+
+    var versionText: String = "" {
+        didSet {
+            versionLabel.stringValue = versionText
+            invalidateIntrinsicContentSize()
+        }
+    }
+
+    var showsNewBadge: Bool = false {
+        didSet {
+            badgeLabel.isHidden = !showsNewBadge
+            badgeLeadingConstraint?.constant = showsNewBadge ? 6 : 0
+            badgeWidthConstraint?.constant = showsNewBadge ? 34 : 0
+            invalidateIntrinsicContentSize()
+        }
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setup()
+    }
+
+    private func setup() {
+        wantsLayer = true
+        layer?.cornerRadius = 10
+
+        versionLabel.font = .systemFont(ofSize: 13, weight: .medium)
+        versionLabel.maximumNumberOfLines = 1
+        versionLabel.lineBreakMode = .byTruncatingTail
+        versionLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        badgeLabel.font = .systemFont(ofSize: 9, weight: .bold)
+        badgeLabel.alignment = .center
+        badgeLabel.maximumNumberOfLines = 1
+        badgeLabel.wantsLayer = true
+        badgeLabel.layer?.cornerRadius = 6
+        badgeLabel.layer?.masksToBounds = true
+        badgeLabel.translatesAutoresizingMaskIntoConstraints = false
+        badgeLabel.isHidden = true
+
+        addSubview(versionLabel)
+        addSubview(badgeLabel)
+
+        let leadingConstraint = badgeLabel.leadingAnchor.constraint(equalTo: versionLabel.trailingAnchor, constant: 0)
+        let widthConstraint = badgeLabel.widthAnchor.constraint(equalToConstant: 0)
+        badgeLeadingConstraint = leadingConstraint
+        badgeWidthConstraint = widthConstraint
+
+        NSLayoutConstraint.activate([
+            versionLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 0),
+            versionLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            leadingConstraint,
+            badgeLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+            badgeLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            widthConstraint,
+            badgeLabel.heightAnchor.constraint(equalToConstant: 16)
+        ])
+
+        updateColors()
+    }
+
+    override var intrinsicContentSize: NSSize {
+        let attributes: [NSAttributedString.Key: Any] = [.font: versionLabel.font ?? NSFont.systemFont(ofSize: 13)]
+        let versionWidth = ceil((versionText as NSString).size(withAttributes: attributes).width)
+        let badgeWidth: CGFloat = showsNewBadge ? 40 : 0
+        return NSSize(width: versionWidth + badgeWidth, height: 28)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self, userInfo: nil)
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        isPressed = false
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        isPressed = true
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        defer { isPressed = false }
+        guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+        guard let action else { return }
+        NSApp.sendAction(action, to: target, from: self)
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+
+    func themeChanged() {
+        updateColors()
+    }
+
+    private func updateColors() {
+        versionLabel.textColor = MD3.onSurfaceVariant
+        badgeLabel.textColor = MD3.onPrimary
+        badgeLabel.layer?.backgroundColor = MD3.primary.cgColor
+        layer?.backgroundColor = (isHovered || isPressed)
+            ? MD3.surfaceContainer.cgColor
+            : NSColor.clear.cgColor
+    }
+}
+
 // MARK: - MD3 Split View
 final class MD3SplitView: NSSplitView {
     override var dividerColor: NSColor {
@@ -2793,4 +2927,3 @@ final class MD3PopUpButton: NSPopUpButton, MD3Themeable {
         needsDisplay = true
     }
 }
-

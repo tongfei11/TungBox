@@ -123,6 +123,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var connectionRefreshTime: Date = .distantPast
     var settingsPages: [NSView] = []
     let settingsTabView = NSView()
+    let appVersionFooter = MD3AppVersionFooter()
+    var latestAppRelease: AppRelease?
+    var appUpdateCheckState: AppUpdateCheckState = .notChecked
     private weak var toastView: NSView?
 
     func registerThemeObserver(_ observer: @escaping () -> Void) {
@@ -207,6 +210,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         setupMain(main)
         setupStatusItem()
         startSubscriptionTimer()
+        checkAppUpdateInBackground(showResult: false)
 
         // Configure profile table in memory since it's no longer on screen
         table.backgroundColor = .clear
@@ -350,18 +354,18 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             button.trailingAnchor.constraint(equalTo: nav.trailingAnchor).isActive = true
         }
 
-        let footer = NSTextField(labelWithString: "TungBox v\(TungBoxVersion.release)")
-        footer.font = .systemFont(ofSize: 13, weight: .medium)
-        footer.textColor = MD3.onSurfaceVariant
-        footer.maximumNumberOfLines = 1
-        footer.translatesAutoresizingMaskIntoConstraints = false
-        registerThemeObserver { [weak footer] in
-            footer?.textColor = MD3.onSurfaceVariant
+        appVersionFooter.versionText = "TungBox v\(TungBoxVersion.release)"
+        appVersionFooter.target = self
+        appVersionFooter.action = #selector(appVersionFooterClicked)
+        appVersionFooter.translatesAutoresizingMaskIntoConstraints = false
+        appVersionFooter.heightAnchor.constraint(equalToConstant: 28).isActive = true
+        registerThemeObserver { [weak self] in
+            self?.appVersionFooter.themeChanged()
         }
 
         view.addSubview(title)
         view.addSubview(nav)
-        view.addSubview(footer)
+        view.addSubview(appVersionFooter)
 
         NSLayoutConstraint.activate([
             title.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 28),
@@ -372,9 +376,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             nav.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -18),
             nav.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 30),
 
-            footer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 28),
-            footer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
-            footer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -28)
+            appVersionFooter.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 28),
+            appVersionFooter.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -20),
+            appVersionFooter.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -24)
         ])
     }
 

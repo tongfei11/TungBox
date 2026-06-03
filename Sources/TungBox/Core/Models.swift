@@ -74,6 +74,23 @@ struct CoreRelease {
     var downloadURL: URL
 }
 
+struct AppRelease {
+    var version: String
+    var tag: String
+    var name: String
+    var body: String
+    var htmlURL: URL
+    var publishedAt: Date?
+}
+
+enum AppUpdateCheckState {
+    case notChecked
+    case checking
+    case upToDate(AppRelease)
+    case available(AppRelease)
+    case failed(String)
+}
+
 enum TungBoxConfig {
     static let tagAuto = "自动选择"
     static let tagManual = "节点选择"

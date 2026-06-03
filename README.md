@@ -21,7 +21,7 @@
 
 TungBox 是 [sing-box](https://github.com/SagerNet/sing-box) 的 macOS 原生客户端，使用 Swift 6 + AppKit 构建，适配 macOS 13 及以上版本。支持订阅管理、规则分流、节点选择、TUN 模式、状态栏控制等日常代理需求。发布包内置 sing-box Core，开箱即用。
 
-> Release 版本 **0.1.2** · 当前编译版本 **0.1.2(0069)**
+> Release 版本 **0.1.2** · 当前编译版本 **0.1.2(0070)**
 
 ## 功能
 
@@ -87,6 +87,7 @@ TungBox 是 [sing-box](https://github.com/SagerNet/sing-box) 的 macOS 原生客
 - 后台运行：关闭窗口最小化到状态栏，点击恢复
 - 开机自启动 + 静默启动（仅状态栏）
 - MD3 深浅色主题
+- 左下角版本区检测 GitHub Release 应用更新
 - 代理端口冲突检测
 - 流量统计持久化
 - 订阅配置兼容性检查
