@@ -148,6 +148,7 @@ extension MainWindowController {
             clearConnections()
             return
         }
+        guard statsTimer == nil else { return }
         if connectionsRefreshTimer == nil {
             connectionsRefreshTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
                 Task { @MainActor [weak self] in
@@ -202,13 +203,20 @@ extension MainWindowController {
 
     func applyConnections(_ list: [ConnectionInfo], detail: String) {
         let now = Date()
+        let hasPreviousSnapshot = connectionRefreshTime != .distantPast && !prevConnections.isEmpty
         let elapsed = max(now.timeIntervalSince(connectionRefreshTime), 0.5)
 
         var speedMap: [String: (up: Int, down: Int)] = [:]
+        var deltaUpload = 0
+        var deltaDownload = 0
         for prev in prevConnections {
             if let curr = list.first(where: { $0.id == prev.id }) {
                 let upSpeed = max(0, curr.upload - prev.upload)
                 let downSpeed = max(0, curr.download - prev.download)
+                if hasPreviousSnapshot {
+                    deltaUpload += upSpeed
+                    deltaDownload += downSpeed
+                }
                 speedMap[curr.id] = (
                     Int(Double(upSpeed) / elapsed),
                     Int(Double(downSpeed) / elapsed)
@@ -227,6 +235,21 @@ extension MainWindowController {
         connectionRefreshTime = now
         connectionsTable.reloadData()
         updateConnectionsCard(value: "\(connections.count)", detail: detail)
+
+        let uploadSpeed = speedMap.values.reduce(0) { $0 + $1.up }
+        let downloadSpeed = speedMap.values.reduce(0) { $0 + $1.down }
+        updateRealtimeTraffic(uploadSpeed: uploadSpeed, downloadSpeed: downloadSpeed, deltaUpload: deltaUpload, deltaDownload: deltaDownload)
+    }
+
+    func updateRealtimeTraffic(uploadSpeed: Int, downloadSpeed: Int, deltaUpload: Int, deltaDownload: Int) {
+        uploadValueLabel.stringValue = "\(formatBytes(uploadSpeed))/s"
+        downloadValueLabel.stringValue = "\(formatBytes(downloadSpeed))/s"
+
+        guard deltaUpload > 0 || deltaDownload > 0 else { return }
+        totalUploadBytes += deltaUpload
+        totalDownloadBytes += deltaDownload
+        recordTraffic(upload: deltaUpload, download: deltaDownload)
+        updateTrafficLabels()
     }
 
     @objc func closeSingleConnectionClicked(_ sender: Any) {

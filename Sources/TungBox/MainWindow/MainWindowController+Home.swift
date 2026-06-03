@@ -432,7 +432,6 @@ extension MainWindowController {
         
         Task {
             let apiConnections = try? await ClashAPI.connections()
-            let traffic = (try? await ClashAPI.traffic()) ?? (0, 0)
             let proxiesObj = (try? await ClashAPI.proxies())
             
             let rssValue = await withCheckedContinuation { (continuation: CheckedContinuation<String, Never>) in
@@ -484,19 +483,10 @@ extension MainWindowController {
                 // 1. Update connections card
                 self.updateConnectionsCard(value: "\(connectionCount)", detail: "内存占用: \(rssValue)")
                 
-                // 2. Update real-time speeds
-                let upSpeedStr = self.formatBytes(traffic.0)
-                let downSpeedStr = self.formatBytes(traffic.1)
-                self.uploadValueLabel.stringValue = "\(upSpeedStr)/s"
-                self.downloadValueLabel.stringValue = "\(downSpeedStr)/s"
-                
-                // 3. Update session totals
-                let deltaUp = traffic.0 * 2
-                let deltaDown = traffic.1 * 2
-                self.totalUploadBytes += deltaUp
-                self.totalDownloadBytes += deltaDown
-                self.recordTraffic(upload: deltaUp, download: deltaDown)
-                self.updateTrafficLabels()
+                if apiConnections == nil {
+                    self.uploadValueLabel.stringValue = "—"
+                    self.downloadValueLabel.stringValue = "—"
+                }
             }
         }
     }
