@@ -116,6 +116,20 @@ enum TunServiceManager {
         }
     }
 
+    static func reload(store: Store) throws {
+        guard status(store: store).isInstalled else {
+            throw NSError.user("TUN 服务未安装。请先安装 TUN 服务。")
+        }
+        let command = [
+            "launchctl kickstart -k system/\(label) >/dev/null 2>&1",
+            "launchctl bootout system/\(label) >/dev/null 2>&1 || true; launchctl bootstrap system \(shellQuote(plistPath)); launchctl enable system/\(label)"
+        ].joined(separator: " || ")
+        let result = runAppleScript(command)
+        if result.status != 0 {
+            throw NSError.user(result.output.isEmpty ? "重载 TUN 服务失败" : result.output)
+        }
+    }
+
     static func enable(store: Store, configText: String) throws {
         guard status(store: store).isInstalled else {
             throw NSError.user("TUN 服务未安装。请先到 设置 > TUN 设置 安装 TUN 服务。")

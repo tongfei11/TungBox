@@ -224,9 +224,16 @@ extension MainWindowController {
         tunServiceLogLabel.maximumNumberOfLines = 0
         tunServiceLogLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        let installButton = settingsButton(title: "安装 TUN 服务", action: #selector(installTunServiceClicked), style: .filled)
-        let uninstallButton = settingsButton(title: "卸载 TUN 服务", action: #selector(uninstallTunServiceClicked), style: .destructive)
+        configureSettingsButton(tunServiceToggleButton, title: "安装 TUN 服务", action: #selector(toggleTunServiceInstallClicked), style: .filled)
+        configureSettingsButton(tunServiceReinstallButton, title: "重新安装 TUN 服务", action: #selector(reinstallTunServiceClicked), style: .outlined)
+        configureSettingsButton(tunServiceReloadButton, title: "重载 TUN 服务", action: #selector(reloadTunServiceClicked), style: .tonal)
         let openLogButton = settingsButton(title: "打开 TUN 日志", action: #selector(openTunLogClicked), style: .outlined)
+        let tunButtonGrid = settingsButtonGrid([
+            tunServiceToggleButton,
+            tunServiceReinstallButton,
+            tunServiceReloadButton,
+            openLogButton
+        ])
 
         let hint = NSTextField(labelWithString: "安装 TUN 服务会请求一次管理员授权。服务文件安装 to /Library/Application Support/TungBox 和 /Library/LaunchDaemons；首页 TUN 开关只负责是否启用 TUN，不再临时弹密码启动。")
         hint.textColor = MD3.onSurfaceVariant
@@ -239,9 +246,7 @@ extension MainWindowController {
         return settingsPageStack([
             settingsPanel(title: "TUN 设置", views: [
                 tunServiceStatusLabel,
-                installButton,
-                uninstallButton,
-                openLogButton,
+                tunButtonGrid,
                 tunServiceLogLabel,
                 hint
             ])
@@ -388,6 +393,12 @@ extension MainWindowController {
 
     private func settingsButton(title: String, action: Selector, style: MD3Button.ButtonStyle = .filled) -> MD3Button {
         let button = MD3Button()
+        configureSettingsButton(button, title: title, action: action, style: style)
+        return button
+    }
+
+    @discardableResult
+    private func configureSettingsButton(_ button: MD3Button, title: String, action: Selector, style: MD3Button.ButtonStyle = .filled) -> MD3Button {
         button.title = title
         button.style = style
         button.target = self
@@ -653,6 +664,14 @@ extension MainWindowController {
         refreshStatus()
     }
 
+    @objc func toggleTunServiceInstallClicked() {
+        if TunServiceManager.status(store: store).isInstalled {
+            uninstallTunServiceClicked()
+        } else {
+            installTunServiceClicked()
+        }
+    }
+
     @objc func installTunServiceClicked() {
         do {
             try TunServiceManager.install(store: store)
@@ -679,6 +698,45 @@ extension MainWindowController {
             refreshStatus()
         } catch {
             tunServiceLogLabel.stringValue = "最近状态：卸载失败\n\(error.localizedDescription)"
+            showError(error)
+        }
+    }
+
+    @objc func reinstallTunServiceClicked() {
+        do {
+            let shouldRestoreTun = isTunEnabled
+            if TunServiceManager.status(store: store).isInstalled {
+                try TunServiceManager.uninstall(store: store)
+            }
+            try TunServiceManager.install(store: store)
+            if shouldRestoreTun {
+                try TunServiceManager.enable(store: store, configText: editor.string)
+            }
+            appendLog("[TUN] TUN 服务已重新安装\n")
+            showToast("TUN 服务已重新安装")
+            checkSingBoxInstall(showAlert: false)
+            syncProxyPreferenceControls()
+            refreshTunServiceStatus()
+            refreshStatus()
+        } catch {
+            tunServiceLogLabel.stringValue = "最近状态：重新安装失败\n\(error.localizedDescription)"
+            showError(error)
+        }
+    }
+
+    @objc func reloadTunServiceClicked() {
+        do {
+            if isTunEnabled {
+                try applyTunPreference(restartIfRunning: false)
+                try TunServiceManager.enable(store: store, configText: editor.string)
+            }
+            try TunServiceManager.reload(store: store)
+            appendLog("[TUN] TUN 服务已重载\n")
+            showToast("TUN 服务已重载")
+            refreshTunServiceStatus()
+            refreshStatus()
+        } catch {
+            tunServiceLogLabel.stringValue = "最近状态：重载失败\n\(error.localizedDescription)"
             showError(error)
         }
     }
@@ -731,6 +789,10 @@ extension MainWindowController {
     func refreshTunServiceStatus() {
         let status = TunServiceManager.status(store: store)
         tunServiceStatusLabel.stringValue = "TUN 服务状态：\(status.displayText)"
+        tunServiceToggleButton.title = status.isInstalled ? "卸载 TUN 服务" : "安装 TUN 服务"
+        tunServiceToggleButton.style = status.isInstalled ? .destructive : .filled
+        tunServiceReinstallButton.isEnabled = status.isInstalled
+        tunServiceReloadButton.isEnabled = status.isInstalled
         if FileManager.default.fileExists(atPath: TunServiceManager.logURL.path),
            let text = try? String(contentsOf: TunServiceManager.logURL, encoding: .utf8) {
             let lines = text.components(separatedBy: .newlines).filter { !$0.isEmpty }
