@@ -2700,6 +2700,10 @@ final class MD3PopUpButton: NSPopUpButton, MD3Themeable {
     private func setup() {
         wantsLayer = true
         isBordered = false
+        if let popUpCell = cell as? NSPopUpButtonCell {
+            popUpCell.arrowPosition = .noArrow
+            popUpCell.isBordered = false
+        }
         font = .systemFont(ofSize: 13, weight: .medium)
         updateTrackingAreas()
     }
@@ -2724,7 +2728,9 @@ final class MD3PopUpButton: NSPopUpButton, MD3Themeable {
     }
     
     override func draw(_ dirtyRect: NSRect) {
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 8, yRadius: 8)
+        let isHighlighted = cell?.isHighlighted == true
+        let inset: CGFloat = isHighlighted ? 1.5 : 1.0
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: inset, dy: inset), xRadius: 8, yRadius: 8)
         
         if isHovered {
             MD3.surfaceContainer.setFill()
@@ -2733,8 +2739,11 @@ final class MD3PopUpButton: NSPopUpButton, MD3Themeable {
         }
         path.fill()
         
-        MD3.outlineVariant.setStroke()
-        path.lineWidth = 1.0
+        let strokeColor = isHighlighted ? MD3.primary : MD3.outlineVariant
+        let strokeWidth: CGFloat = isHighlighted ? 2.0 : 1.0
+        
+        strokeColor.setStroke()
+        path.lineWidth = strokeWidth
         path.stroke()
         
         let paragraphStyle = NSMutableParagraphStyle()
@@ -2756,21 +2765,28 @@ final class MD3PopUpButton: NSPopUpButton, MD3Themeable {
         )
         titleString.draw(in: titleRect, withAttributes: attrs)
         
-        if let img = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil) {
-            img.isTemplate = true
-            let iconSize: CGFloat = 12
-            let iconRect = NSRect(
-                x: bounds.width - 24,
-                y: (bounds.height - iconSize) / 2,
-                width: iconSize,
-                height: iconSize
-            )
-            
-            NSGraphicsContext.current?.saveGraphicsState()
-            MD3.onSurfaceVariant.set()
-            img.draw(in: iconRect, from: .zero, operation: .sourceOver, fraction: 1.0)
-            NSGraphicsContext.current?.restoreGraphicsState()
+        // Draw custom chevron arrow
+        let isFlipped = self.isFlipped
+        let iconCenterX = bounds.width - 18
+        let iconCenterY = bounds.height / 2
+        
+        let pathArrow = NSBezierPath()
+        pathArrow.lineWidth = 1.5
+        pathArrow.lineCapStyle = .round
+        pathArrow.lineJoinStyle = .round
+        
+        if isFlipped {
+            pathArrow.move(to: NSPoint(x: iconCenterX - 4, y: iconCenterY - 2))
+            pathArrow.line(to: NSPoint(x: iconCenterX, y: iconCenterY + 2))
+            pathArrow.line(to: NSPoint(x: iconCenterX + 4, y: iconCenterY - 2))
+        } else {
+            pathArrow.move(to: NSPoint(x: iconCenterX - 4, y: iconCenterY + 2))
+            pathArrow.line(to: NSPoint(x: iconCenterX, y: iconCenterY - 2))
+            pathArrow.line(to: NSPoint(x: iconCenterX + 4, y: iconCenterY + 2))
         }
+        
+        MD3.onSurfaceVariant.setStroke()
+        pathArrow.stroke()
     }
     
     func themeChanged() {
