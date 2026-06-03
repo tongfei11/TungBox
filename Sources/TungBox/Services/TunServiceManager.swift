@@ -40,8 +40,14 @@ enum TunServiceManager {
     static let plistPath = "/Library/LaunchDaemons/\(label).plist"
     static let scriptPath = "\(installDirectoryPath)/tun-service.sh"
     static let corePath = "\(installDirectoryPath)/sing-box"
+    static let configPath = "\(installDirectoryPath)/tun-daemon.json"
+    static let flagPath = "\(installDirectoryPath)/tun-enabled"
     static let pidPath = "\(installDirectoryPath)/tun-service.pid"
     static let logPath = "\(installDirectoryPath)/tun-service.log"
+    static let stdoutPath = "\(installDirectoryPath)/tun-service.out.log"
+    static let stderrPath = "\(installDirectoryPath)/tun-service.err.log"
+    static let legacyStdoutPath = "/tmp/\(label).out.log"
+    static let legacyStderrPath = "/tmp/\(label).err.log"
 
     static var logURL: URL {
         URL(fileURLWithPath: logPath)
@@ -56,6 +62,9 @@ enum TunServiceManager {
         }
         guard FileManager.default.isExecutableFile(atPath: corePath) else {
             return .abnormal("Core 路径错误")
+        }
+        guard installedServiceDefinitionIsCurrent() else {
+            return .abnormal("服务版本过旧，请重新安装 TUN 服务")
         }
         if let pid = activeSingBoxPID(store: store), Darwin.kill(pid, 0) == 0 {
             return .installedRunning
@@ -76,23 +85,26 @@ enum TunServiceManager {
         guard FileManager.default.isExecutableFile(atPath: store.coreBinaryURL.path) else {
             throw NSError.user("请先在 Core 管理中导入或安装 sing-box Core。")
         }
+        try? FileManager.default.removeItem(at: store.tunRequestFlagURL)
+        try? FileManager.default.removeItem(at: store.tunRequestConfigURL)
         let tempScript = FileManager.default.temporaryDirectory.appendingPathComponent("\(label).sh")
         try writeServiceScript(store: store, to: tempScript)
         let plist = launchDaemonPlist(scriptPath: scriptPath)
         let tempPlist = FileManager.default.temporaryDirectory.appendingPathComponent("\(label).plist")
         try plist.write(to: tempPlist, atomically: true, encoding: .utf8)
         let command = [
+            "launchctl bootout system/\(label) >/dev/null 2>&1 || true",
             "mkdir -p \(shellQuote(installDirectoryPath))",
             "cp \(shellQuote(tempScript.path)) \(shellQuote(scriptPath))",
             "cp \(shellQuote(store.coreBinaryURL.path)) \(shellQuote(corePath))",
             "cp \(shellQuote(tempPlist.path)) \(shellQuote(plistPath))",
-            "touch \(shellQuote(logPath))",
-            "chown root:wheel \(shellQuote(scriptPath)) \(shellQuote(corePath)) \(shellQuote(logPath)) \(shellQuote(plistPath))",
+            "rm -f \(shellQuote(flagPath)) \(shellQuote(legacyStdoutPath)) \(shellQuote(legacyStderrPath))",
+            "touch \(shellQuote(logPath)) \(shellQuote(stdoutPath)) \(shellQuote(stderrPath))",
+            "chown root:wheel \(shellQuote(installDirectoryPath)) \(shellQuote(scriptPath)) \(shellQuote(corePath)) \(shellQuote(logPath)) \(shellQuote(stdoutPath)) \(shellQuote(stderrPath)) \(shellQuote(plistPath))",
             "chmod 755 \(shellQuote(installDirectoryPath))",
             "chmod 755 \(shellQuote(scriptPath)) \(shellQuote(corePath))",
-            "chmod 644 \(shellQuote(logPath))",
+            "chmod 644 \(shellQuote(logPath)) \(shellQuote(stdoutPath)) \(shellQuote(stderrPath))",
             "chmod 644 \(shellQuote(plistPath))",
-            "launchctl bootout system/\(label) >/dev/null 2>&1 || true",
             "launchctl bootstrap system \(shellQuote(plistPath))",
             "launchctl enable system/\(label)"
         ].joined(separator: "; ")
@@ -105,10 +117,18 @@ enum TunServiceManager {
     }
 
     static func uninstall(store: Store) throws {
-        try disable(store: store)
+        try? FileManager.default.removeItem(at: store.tunRequestFlagURL)
+        try? FileManager.default.removeItem(at: store.tunRequestConfigURL)
         let command = [
+            "rm -f \(shellQuote(flagPath))",
+            stopChildCommand(),
+            "launchctl disable system/\(label) >/dev/null 2>&1 || true",
             "launchctl bootout system/\(label) >/dev/null 2>&1 || true",
-            "rm -f \(shellQuote(plistPath)) \(shellQuote(scriptPath)) \(shellQuote(corePath)) \(shellQuote(pidPath)) \(shellQuote(logPath))"
+            "pkill -TERM -f \(shellQuote(scriptPath)) >/dev/null 2>&1 || true",
+            "sleep 0.3",
+            "pkill -KILL -f \(shellQuote(scriptPath)) >/dev/null 2>&1 || true",
+            "rm -f \(shellQuote(plistPath)) \(shellQuote(scriptPath)) \(shellQuote(corePath)) \(shellQuote(configPath)) \(shellQuote(flagPath)) \(shellQuote(pidPath)) \(shellQuote(logPath)) \(shellQuote(stdoutPath)) \(shellQuote(stderrPath)) \(shellQuote(legacyStdoutPath)) \(shellQuote(legacyStderrPath))",
+            "rmdir \(shellQuote(installDirectoryPath)) >/dev/null 2>&1 || true"
         ].joined(separator: "; ")
         let result = runAppleScript(command)
         if result.status != 0 {
@@ -134,23 +154,60 @@ enum TunServiceManager {
         guard status(store: store).isInstalled else {
             throw NSError.user("TUN 服务未安装。请先到 设置 > TUN 设置 安装 TUN 服务。")
         }
-        try configText.write(to: store.tunConfigURL, atomically: true, encoding: .utf8)
-        FileManager.default.createFile(atPath: store.tunEnabledFlagURL.path, contents: Data(), attributes: nil)
+        try configText.write(to: store.tunRequestConfigURL, atomically: true, encoding: .utf8)
+        if !FileManager.default.fileExists(atPath: store.tunRequestFlagURL.path) {
+            FileManager.default.createFile(atPath: store.tunRequestFlagURL.path, contents: Data())
+        }
     }
 
     static func disable(store: Store) throws {
-        try? FileManager.default.removeItem(at: store.tunEnabledFlagURL)
+        guard status(store: store).isInstalled else { return }
+        try? FileManager.default.removeItem(at: store.tunRequestFlagURL)
     }
 
     private static func writeServiceScript(store: Store, to url: URL) throws {
         let script = """
         #!/bin/sh
         CORE=\(shellQuote(corePath))
-        CONFIG=\(shellQuote(store.tunConfigURL.path))
-        FLAG=\(shellQuote(store.tunEnabledFlagURL.path))
+        CONFIG=\(shellQuote(configPath))
+        FLAG=\(shellQuote(flagPath))
+        REQUEST_CONFIG=\(shellQuote(store.tunRequestConfigURL.path))
+        REQUEST_FLAG=\(shellQuote(store.tunRequestFlagURL.path))
         PIDFILE=\(shellQuote(pidPath))
         LOG=\(shellQuote(logPath))
         CHILD=""
+
+        is_safe_root_file() {
+          path="$1"
+          [ -L "$path" ] && return 1
+          [ -f "$path" ] || return 1
+          [ "$(stat -f '%Su' "$path" 2>/dev/null)" = "root" ] || return 1
+          [ -z "$(find "$path" -prune \\( -perm -002 -o -perm -020 \\) -print 2>/dev/null)" ] || return 1
+          return 0
+        }
+
+        has_request() {
+          [ -L "$REQUEST_FLAG" ] && return 1
+          [ -L "$REQUEST_CONFIG" ] && return 1
+          [ -f "$REQUEST_FLAG" ] || return 1
+          [ -f "$REQUEST_CONFIG" ] || return 1
+          return 0
+        }
+
+        sync_requested_config() {
+          has_request || return 1
+          if ! "$CORE" check -c "$REQUEST_CONFIG" >> "$LOG" 2>&1; then
+            echo "$(date '+%Y-%m-%d %H:%M:%S') requested TUN config check failed" >> "$LOG"
+            return 1
+          fi
+          cp "$REQUEST_CONFIG" "$CONFIG"
+          chown root:wheel "$CONFIG"
+          chmod 600 "$CONFIG"
+          touch "$FLAG"
+          chown root:wheel "$FLAG"
+          chmod 600 "$FLAG"
+          return 0
+        }
 
         cleanup() {
           if [ -n "$CHILD" ] && kill -0 "$CHILD" >/dev/null 2>&1; then
@@ -164,17 +221,32 @@ enum TunServiceManager {
 
         echo "$(date '+%Y-%m-%d %H:%M:%S') TUN service started" >> "$LOG"
         while true; do
-          if [ -f "$FLAG" ] && [ -x "$CORE" ] && [ -f "$CONFIG" ]; then
+          if ! has_request; then
+            rm -f "$FLAG" "$PIDFILE"
+            sleep 1
+            continue
+          fi
+
+          if sync_requested_config && is_safe_root_file "$FLAG" && is_safe_root_file "$CONFIG" && [ -x "$CORE" ]; then
             echo "$(date '+%Y-%m-%d %H:%M:%S') starting sing-box TUN" >> "$LOG"
             "$CORE" run -c "$CONFIG" >> "$LOG" 2>&1 &
             CHILD=$!
             echo "$CHILD" > "$PIDFILE"
             while kill -0 "$CHILD" >/dev/null 2>&1; do
-              if [ ! -f "$FLAG" ]; then
+              if ! has_request; then
                 echo "$(date '+%Y-%m-%d %H:%M:%S') stopping sing-box TUN" >> "$LOG"
+                rm -f "$FLAG"
                 kill "$CHILD" >/dev/null 2>&1 || true
                 wait "$CHILD" >/dev/null 2>&1 || true
                 break
+              fi
+              if [ "$REQUEST_CONFIG" -nt "$CONFIG" ]; then
+                echo "$(date '+%Y-%m-%d %H:%M:%S') reloading sing-box TUN config" >> "$LOG"
+                if sync_requested_config; then
+                  kill "$CHILD" >/dev/null 2>&1 || true
+                  wait "$CHILD" >/dev/null 2>&1 || true
+                  break
+                fi
               fi
               sleep 1
             done
@@ -209,11 +281,31 @@ enum TunServiceManager {
           <key>KeepAlive</key>
           <true/>
           <key>StandardOutPath</key>
-          <string>/tmp/\(label).out.log</string>
+          <string>\(xmlEscape(stdoutPath))</string>
           <key>StandardErrorPath</key>
-          <string>/tmp/\(label).err.log</string>
+          <string>\(xmlEscape(stderrPath))</string>
         </dict>
         </plist>
+        """
+    }
+
+    private static func installedServiceDefinitionIsCurrent() -> Bool {
+        guard let script = try? String(contentsOfFile: scriptPath),
+              let plist = try? String(contentsOfFile: plistPath) else {
+            return false
+        }
+        return script.contains(configPath)
+            && script.contains(flagPath)
+            && script.contains("REQUEST_CONFIG=")
+            && script.contains("REQUEST_FLAG=")
+            && script.contains("sync_requested_config")
+            && plist.contains(stdoutPath)
+            && plist.contains(stderrPath)
+    }
+
+    private static func stopChildCommand() -> String {
+        """
+        if [ -f \(shellQuote(pidPath)) ]; then PID=$(cat \(shellQuote(pidPath)) 2>/dev/null || true); case "$PID" in ''|*[!0-9]*) ;; *) kill "$PID" >/dev/null 2>&1 || true; sleep 0.3; kill -KILL "$PID" >/dev/null 2>&1 || true ;; esac; fi
         """
     }
 

@@ -1,9 +1,26 @@
+import CryptoKit
 import Foundation
 
 enum CoreUpdater {
     static let stableLatestURL = URL(string: "https://github.com/SagerNet/sing-box/releases/latest")!
     static let releaseBaseURL = URL(string: "https://github.com/SagerNet/sing-box/releases/download")!
     static let testOldVersion = "1.12.22"
+    static let pinnedLatestVersion = "1.13.12"
+
+    private static let trustedSHA256: [String: [String: String]] = [
+        "1.13.12": [
+            "arm64": "43eef86f0ea4a79c3696974f397a963c46a457ee46d1ffac9aa913944a5fc986",
+            "amd64": "f3275316451bf1983bc059599c69c8ed0232d53a619d15cfd535f95cc9a4477a"
+        ],
+        "1.12.22": [
+            "arm64": "974d924c36af92a9aecab5e630555764aa665fb8210e58a48c01faec5d55de0f",
+            "amd64": "950072cf2f1e0d4aa216116e0b1f9f7542aa953c1487b55516ea9d04bd73bbc6"
+        ],
+        "1.11.10": [
+            "arm64": "577ab24957f3530458042c8087e6817c276b4b03bee55c72fcb0ce3226652a43",
+            "amd64": "ddecca3aa83bfc831e6de120e44fe26924e2eed978538e8c216dabdc838e733d"
+        ]
+    ]
 
     static func latestStableRelease() async throws -> CoreRelease {
         let tag = try await latestStableTag()
@@ -18,12 +35,21 @@ enum CoreUpdater {
 
         let tag = "v\(rawVersion)"
         let arch = platformAssetArch()
+        guard let expectedSHA256 = trustedSHA256[rawVersion]?[arch] else {
+            throw NSError.user("暂不支持安装未校验的 sing-box Core \(rawVersion)（\(arch)）。请等待 TungBox 更新可信摘要后再安装。")
+        }
         let assetName = "sing-box-\(rawVersion)-darwin-\(arch).tar.gz"
         let downloadURL = releaseBaseURL
             .appendingPathComponent(tag)
             .appendingPathComponent(assetName)
 
-        return CoreRelease(version: rawVersion, tag: tag, assetName: assetName, downloadURL: downloadURL)
+        return CoreRelease(
+            version: rawVersion,
+            tag: tag,
+            assetName: assetName,
+            downloadURL: downloadURL,
+            sha256: expectedSHA256
+        )
     }
 
     static func install(_ release: CoreRelease, to coreBinaryURL: URL) async throws {
@@ -34,6 +60,7 @@ enum CoreUpdater {
 
         let archiveURL = tempDirectory.appendingPathComponent(release.assetName)
         let data = try await fetchData(from: release.downloadURL)
+        try verifySHA256(data: data, expected: release.sha256, version: release.version)
         try data.write(to: archiveURL, options: .atomic)
 
         let extractDirectory = tempDirectory.appendingPathComponent("extract", isDirectory: true)
@@ -43,6 +70,7 @@ enum CoreUpdater {
         guard let binaryURL = findExtractedBinary(in: extractDirectory) else {
             throw NSError.user("下载包中没有找到 sing-box 可执行文件")
         }
+        try verifyExtractedBinary(at: binaryURL, expectedVersion: release.version)
 
         let coreDirectory = coreBinaryURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: coreDirectory, withIntermediateDirectories: true)
@@ -150,5 +178,34 @@ enum CoreUpdater {
             return url
         }
         return nil
+    }
+
+    private static func verifySHA256(data: Data, expected: String, version: String) throws {
+        let digest = SHA256.hash(data: data)
+            .map { String(format: "%02x", $0) }
+            .joined()
+        guard digest.lowercased() == expected.lowercased() else {
+            throw NSError.user("sing-box Core \(version) 下载校验失败：SHA256 不匹配。")
+        }
+    }
+
+    private static func verifyExtractedBinary(at url: URL, expectedVersion: String) throws {
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+
+        let process = Process()
+        process.executableURL = url
+        process.arguments = ["version"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        try process.run()
+        process.waitUntilExit()
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let output = String(data: data, encoding: .utf8) ?? ""
+        guard process.terminationStatus == 0,
+              output.contains("sing-box version \(expectedVersion)") || output.contains("version \(expectedVersion)") else {
+            throw NSError.user("sing-box Core 版本校验失败：期望 \(expectedVersion)，实际输出 \(output.prefix(160))")
+        }
     }
 }

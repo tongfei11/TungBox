@@ -29,8 +29,8 @@ final class Store {
     let ruleSetsURL: URL
     let coreURL: URL
     let coreBinaryURL: URL
-    let tunConfigURL: URL
-    let tunEnabledFlagURL: URL
+    let tunRequestConfigURL: URL
+    let tunRequestFlagURL: URL
     let logURL: URL
 
     init() {
@@ -42,8 +42,8 @@ final class Store {
         ruleSetsURL = baseURL.appendingPathComponent("rule-sets", isDirectory: true)
         coreURL = baseURL.appendingPathComponent("core", isDirectory: true)
         coreBinaryURL = coreURL.appendingPathComponent("sing-box")
-        tunConfigURL = baseURL.appendingPathComponent("tun-daemon.json")
-        tunEnabledFlagURL = baseURL.appendingPathComponent("tun-enabled")
+        tunRequestConfigURL = baseURL.appendingPathComponent("tun-request.json")
+        tunRequestFlagURL = baseURL.appendingPathComponent("tun-request-enabled")
         logURL = baseURL.appendingPathComponent("sing-box.log")
         try? FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: ruleSetsURL, withIntermediateDirectories: true)

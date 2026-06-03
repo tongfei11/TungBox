@@ -241,7 +241,7 @@ extension MainWindowController {
             openLogButton
         ])
 
-        let hint = NSTextField(labelWithString: "安装 TUN 服务会请求一次管理员授权。服务文件安装 to /Library/Application Support/TungBox 和 /Library/LaunchDaemons；首页 TUN 开关只负责是否启用 TUN，不再临时弹密码启动。")
+        let hint = NSTextField(labelWithString: "安装、卸载、重装和重载 TUN 服务会请求管理员授权。首页 TUN 开关只负责启用或关闭本用户的控制请求；TUN 服务校验配置后使用 /Library/Application Support/TungBox 下的 root-owned 运行配置。")
         hint.textColor = MD3.onSurfaceVariant
         hint.font = .systemFont(ofSize: 13)
         hint.lineBreakMode = .byWordWrapping
