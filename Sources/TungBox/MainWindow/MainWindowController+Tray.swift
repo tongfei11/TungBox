@@ -103,22 +103,10 @@ extension MainWindowController {
     }
 
     func trayIcon() -> NSImage? {
-        let name: String
-        if !isProxyRuntimeRunning() {
-            name = "off"
-        } else if isTunEnabled {
-            name = "tun"
-        } else {
-            let mode = readMode(from: parseConfigObject(from: editor.string) ?? [:]).lowercased()
-            switch mode {
-            case "direct": name = "direct"
-            case "global": name = "global"
-            default: name = "rule"
-            }
-        }
+        let name = isProxyRuntimeRunning() ? "on" : "off"
         guard let url = AppResources.url(forResource: name, withExtension: "png", subdirectory: "Tray"),
               let image = NSImage(contentsOf: url) else { return nil }
-        image.size = NSSize(width: 18, height: 18)
+        image.size = NSSize(width: 20, height: 20)
         return image
     }
 
