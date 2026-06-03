@@ -14,6 +14,7 @@ CORE_DIR="$RESOURCES_DIR/Core"
 
 RELEASE_VERSION="$(awk -F'"' '/static let release/ { print $2; exit }' Sources/TungBox/Core/AppMetadata.swift)"
 BUILD_NUMBER="$(awk -F'"' '/static let build/ { print $2; exit }' Sources/TungBox/Core/AppMetadata.swift)"
+PINNED_CORE_VERSION="${TUNGBOX_CORE_VERSION:-v1.13.12}"
 
 clear_finder_info() {
   command -v xattr >/dev/null 2>&1 || return 0
@@ -85,20 +86,20 @@ build_core() {
   local gopath
   gopath="$(go env GOPATH)"
 
-  # Resolve latest sing-box version for version injection
+  # Release builds pin the core version for reproducible artifacts.
   local core_version
-  if core_version="$(go list -m -json github.com/sagernet/sing-box@latest 2>/dev/null | awk -F'"' '/"Version"/ {print $4}')" && [[ -n "$core_version" ]]; then
+  if core_version="$(go list -m -json "github.com/sagernet/sing-box@${PINNED_CORE_VERSION}" 2>/dev/null | awk -F'"' '/"Version"/ {print $4}')" && [[ -n "$core_version" ]]; then
     echo "sing-box ${core_version} identified, building..." >&2
   else
-    core_version="unknown"
-    echo "Failed to resolve sing-box version, building with 'unknown'..." >&2
+    echo "Failed to resolve pinned sing-box version: ${PINNED_CORE_VERSION}" >&2
+    return 1
   fi
 
   local tags="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale"
   local ldflags="-X 'github.com/sagernet/sing-box/constant.Version=${core_version}' -s -w -buildid="
   echo "Building stripped sing-box core (tags: ${tags}, version: ${core_version})..." >&2
   env CGO_ENABLED=0 go install -ldflags="$ldflags" -tags "$tags" \
-    github.com/sagernet/sing-box/cmd/sing-box@latest
+    "github.com/sagernet/sing-box/cmd/sing-box@${core_version}"
 
   local binary="$gopath/bin/sing-box"
 

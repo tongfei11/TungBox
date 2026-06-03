@@ -1,0 +1,6 @@
+id,severity,title,status
+C1,high,TUN root daemon reads user-writable config and enable flag,validated
+C2,medium,LaunchDaemon stdout/stderr paths are predictable files under /tmp,validated
+C3,medium,Downloaded sing-box Core is installed without checksum or signature verification,validated
+C4,low,Local Clash API is exposed without a random secret,validated_hardening
+C5,low,Subscription URLs and proxy credentials are stored in plaintext user config,validated_hardening
