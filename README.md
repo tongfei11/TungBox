@@ -17,6 +17,10 @@
 
 ---
 
+<p align="center">
+  <img src="assets/tungbox-home.png" alt="TungBox 首页" width="900">
+</p>
+
 ## 简介
 
 TungBox 是 [sing-box](https://github.com/SagerNet/sing-box) 的 macOS 原生客户端，使用 Swift 6 + AppKit 构建，适配 macOS 13 及以上版本。支持订阅管理、规则分流、节点选择、TUN 模式、状态栏控制等日常代理需求。发布包内置 sing-box Core，开箱即用。
