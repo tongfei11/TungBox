@@ -19,9 +19,9 @@
 
 ## 简介
 
-TungBox 是 [sing-box](https://github.com/SagerNet/sing-box) 的 macOS 原生客户端，使用 Swift 6 + AppKit 构建，适配 macOS 13 及以上版本。支持订阅管理、规则分流、节点选择、TUN 模式、状态栏控制等日常代理需求。内置 sing-box Core，开箱即用。
+TungBox 是 [sing-box](https://github.com/SagerNet/sing-box) 的 macOS 原生客户端，使用 Swift 6 + AppKit 构建，适配 macOS 13 及以上版本。支持订阅管理、规则分流、节点选择、TUN 模式、状态栏控制等日常代理需求。发布包内置 sing-box Core，开箱即用。
 
-> 当前版本 **0.1.2(0068)** — 核心代理功能已稳定，日常使用可用。
+> Release 版本 **0.1.2** · 当前编译版本 **0.1.2(0069)**
 
 ## 功能
 
@@ -62,8 +62,8 @@ TungBox 是 [sing-box](https://github.com/SagerNet/sing-box) 的 macOS 原生客
 
 ### TUN
 
-- LaunchDaemon 安装 / 卸载
-- 启用 / 禁用无感切换
+- LaunchDaemon 安装 / 卸载 / 重新安装 / 重载
+- 首页启用 / 禁用无感切换
 - 退出时不误停 TUN Daemon，崩溃时自动恢复
 
 ### Core 管理
@@ -72,6 +72,7 @@ TungBox 是 [sing-box](https://github.com/SagerNet/sing-box) 的 macOS 原生客
 - 安装最新版 / 旧版测试
 - 手动导入 Core
 - GitHub Release 版本号自动识别
+- 独立 Core 管理页
 
 ### 日志
 
@@ -87,10 +88,10 @@ TungBox 是 [sing-box](https://github.com/SagerNet/sing-box) 的 macOS 原生客
 - 开机自启动 + 静默启动（仅状态栏）
 - MD3 深浅色主题
 - 代理端口冲突检测
-- 窗口状态记忆（大小 / 位置 / Tab）
 - 流量统计持久化
 - 订阅配置兼容性检查
 - Clash YAML 订阅识别转换
+- 设置页分为常规 / Core / TUN 设置 / 规则集 / 外观
 
 ## 安装
 
@@ -99,35 +100,6 @@ TungBox 是 [sing-box](https://github.com/SagerNet/sing-box) 的 macOS 原生客
 首次打开时，macOS Gatekeeper 可能提示"无法验证开发者"。请在 **系统设置 → 隐私与安全性** 中点击"仍要打开"。
 
 > TungBox 内置 sing-box Core，无需额外安装。TUN 功能需要管理员密码授权安装系统服务。
-
-## 构建
-
-```bash
-# 要求 Xcode 16+ / Swift 6.0+
-git clone https://github.com/tongfei11/TungBox.git
-cd TungBox
-
-# 调试运行
-swift run
-
-# 发布打包
-bash script/package_app.sh
-# → dist/TungBox-x.x.x-macos-arm64.dmg
-```
-
-## 项目结构
-
-```
-Sources/TungBox/
-├── Core/              # 数据模型、存储、工具
-├── MainWindow/        # 各页面视图控制器扩展
-├── Networking/        # Clash API 客户端、订阅导入
-├── Services/          # sing-box Runner、Core 更新、TUN 管理
-├── MD3Views.swift     # MD3 设计系统组件
-└── main.swift         # 入口 + 窗口管理
-script/
-└── package_app.sh     # 打包脚本
-```
 
 ## 许可
 

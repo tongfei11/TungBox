@@ -20,9 +20,19 @@ clear_finder_info() {
 
   local attempt
   for attempt in 1 2 3 4 5; do
-    xattr -cr "$APP_DIR" 2>/dev/null || true
-    find "$APP_DIR" -depth -exec xattr -d com.apple.FinderInfo {} \; 2>/dev/null || true
+    while IFS= read -r -d '' item; do
+      xattr -c "$item" 2>/dev/null || true
+      xattr -d com.apple.FinderInfo "$item" 2>/dev/null || true
+      xattr -d com.apple.macl "$item" 2>/dev/null || true
+      xattr -d 'com.apple.fileprovider.fpfs#P' "$item" 2>/dev/null || true
+      xattr -d com.apple.quarantine "$item" 2>/dev/null || true
+    done < <(find "$APP_DIR" -depth -print0)
+
+    xattr -c "$APP_DIR" 2>/dev/null || true
     xattr -d com.apple.FinderInfo "$APP_DIR" 2>/dev/null || true
+    xattr -d com.apple.macl "$APP_DIR" 2>/dev/null || true
+    xattr -d 'com.apple.fileprovider.fpfs#P' "$APP_DIR" 2>/dev/null || true
+    xattr -d com.apple.quarantine "$APP_DIR" 2>/dev/null || true
 
     if ! xattr -lr "$APP_DIR" 2>/dev/null | grep -q "com.apple.FinderInfo"; then
       return 0
@@ -194,24 +204,14 @@ clear_finder_info
 sign_app
 verify_signature
 
-# The .icns alone doesn't always refresh in Finder. Use NSWorkspace.setIcon as a
-# post-sign step to force the icon into the file's metadata without invalidating the signature.
-echo "Forcing Finder icon..."
-python3 -c "
-import AppKit
-icon = AppKit.NSImage.alloc().initWithContentsOfFile_('$ROOT_DIR/Sources/TungBox/Resources/Tray/logo.png')
-if icon:
-    AppKit.NSWorkspace.sharedWorkspace().setIcon_forFile_options_(icon, '$APP_DIR', 0)
-    print('Finder icon set.')
-" 2>/dev/null || echo "Warning: NSWorkspace.setIcon failed, Finder icon may be delayed."
-
 DMG_NAME="${PRODUCT}-${RELEASE_VERSION}-macos-arm64"
 DMG_PATH="$ROOT_DIR/dist/${DMG_NAME}.dmg"
 
 echo "Creating DMG: ${DMG_NAME}.dmg..."
 DMG_TEMP=$(mktemp -d)
 ln -sf /Applications "$DMG_TEMP/Applications"
-cp -R "$APP_DIR" "$DMG_TEMP/"
+ditto --noextattr --noqtn "$APP_DIR" "$DMG_TEMP/${PRODUCT}.app"
+/usr/bin/codesign --verify --deep --strict --verbose=2 "$DMG_TEMP/${PRODUCT}.app"
 
 hdiutil create \
   -volname "${PRODUCT}" \
@@ -231,5 +231,11 @@ if [[ -f "$DMG_PATH" ]]; then
   # Clean up old zip
   rm -f "$ROOT_DIR/dist/${DMG_NAME}.zip" "$ROOT_DIR/dist/${DMG_NAME}.zip.sha256"
 fi
+
+# hdiutil/Finder can attach metadata to the working app after the release image is
+# created. Clean and re-sign the local copy so follow-up verification stays green.
+clear_finder_info
+sign_app
+verify_signature
 
 echo "Packaged: $APP_DIR"
