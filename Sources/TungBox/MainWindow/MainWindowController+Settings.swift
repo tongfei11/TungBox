@@ -358,7 +358,14 @@ extension MainWindowController {
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = .systemFont(ofSize: 16, weight: .bold)
         titleLabel.textColor = MD3.onSurface
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.maximumNumberOfLines = 1
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.setContentHuggingPriority(.required, for: .vertical)
+        titleLabel.setContentCompressionResistancePriority(.required, for: .vertical)
+        registerThemeObserver { [weak titleLabel] in
+            titleLabel?.textColor = MD3.onSurface
+        }
         let stack = NSStackView(views: views)
         stack.orientation = .vertical
         stack.spacing = 12
@@ -370,6 +377,7 @@ extension MainWindowController {
             titleLabel.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 20),
             titleLabel.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -20),
             titleLabel.topAnchor.constraint(equalTo: panel.topAnchor, constant: 18),
+            titleLabel.heightAnchor.constraint(greaterThanOrEqualToConstant: 24),
             stack.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
             stack.trailingAnchor.constraint(lessThanOrEqualTo: panel.trailingAnchor, constant: -20),
             stack.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 16),
