@@ -47,7 +47,7 @@ extension MainWindowController {
         clearButton.action = #selector(clearLogsClicked)
         clearButton.translatesAutoresizingMaskIntoConstraints = false
         clearButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
-        clearButton.widthAnchor.constraint(equalToConstant: 72).isActive = true
+        clearButton.widthAnchor.constraint(equalToConstant: 80).isActive = true
 
         let copyButton = MD3Button()
         copyButton.title = "复制"
@@ -56,7 +56,7 @@ extension MainWindowController {
         copyButton.action = #selector(copyLogsClicked)
         copyButton.translatesAutoresizingMaskIntoConstraints = false
         copyButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
-        copyButton.widthAnchor.constraint(equalToConstant: 72).isActive = true
+        copyButton.widthAnchor.constraint(equalToConstant: 80).isActive = true
 
         let levelStack = NSStackView(views: levelButtons)
         levelStack.orientation = .horizontal; levelStack.spacing = 4; levelStack.alignment = .centerY

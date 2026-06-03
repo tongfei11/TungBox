@@ -49,7 +49,7 @@ extension MainWindowController {
         closeButton.action = #selector(closeAllConnectionsClicked)
         closeButton.translatesAutoresizingMaskIntoConstraints = false
         closeButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
-        closeButton.widthAnchor.constraint(equalToConstant: 100).isActive = true
+        closeButton.widthAnchor.constraint(equalToConstant: 120).isActive = true
 
         let buttons = NSStackView(views: [refreshButton, closeButton])
         buttons.orientation = .horizontal

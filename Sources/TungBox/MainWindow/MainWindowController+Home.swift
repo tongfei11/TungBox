@@ -145,7 +145,7 @@ extension MainWindowController {
         trafficPeriodControl.selectedSegment = 0
         trafficPeriodControl.translatesAutoresizingMaskIntoConstraints = false
         trafficPeriodControl.widthAnchor.constraint(equalToConstant: 210).isActive = true
-        trafficPeriodControl.heightAnchor.constraint(equalToConstant: 26).isActive = true
+        trafficPeriodControl.heightAnchor.constraint(equalToConstant: 36).isActive = true
 
         trafficStatsValueLabel.font = .systemFont(ofSize: 28, weight: .bold)
         trafficStatsValueLabel.textColor = MD3.primary
@@ -268,7 +268,7 @@ extension MainWindowController {
         button.target = self
         button.action = action
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        button.heightAnchor.constraint(equalToConstant: 36).isActive = true
         return button
     }
 

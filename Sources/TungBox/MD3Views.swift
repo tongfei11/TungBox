@@ -2376,7 +2376,7 @@ final class MD3Dialog: NSView, MD3Themeable {
         cancelButton.target = self
         cancelButton.action = #selector(cancelClicked)
         cancelButton.translatesAutoresizingMaskIntoConstraints = false
-        cancelButton.heightAnchor.constraint(equalToConstant: 40).isActive = true
+        cancelButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
         if cancelTitle.isEmpty {
             cancelButton.isHidden = true
         }
@@ -2386,7 +2386,7 @@ final class MD3Dialog: NSView, MD3Themeable {
         confirmButton.target = self
         confirmButton.action = #selector(confirmClicked)
         confirmButton.translatesAutoresizingMaskIntoConstraints = false
-        confirmButton.heightAnchor.constraint(equalToConstant: 40).isActive = true
+        confirmButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
         
         buttonStack.orientation = .horizontal
         buttonStack.spacing = 8

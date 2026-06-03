@@ -27,7 +27,7 @@ extension MainWindowController {
         tabControl.action = #selector(settingsTabChanged(_:))
         tabControl.translatesAutoresizingMaskIntoConstraints = false
         tabControl.widthAnchor.constraint(equalToConstant: 380).isActive = true
-        tabControl.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        tabControl.heightAnchor.constraint(equalToConstant: 36).isActive = true
 
         let headerStack = NSStackView(views: [title])
         headerStack.orientation = .horizontal
