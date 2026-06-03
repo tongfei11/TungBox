@@ -350,7 +350,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             button.trailingAnchor.constraint(equalTo: nav.trailingAnchor).isActive = true
         }
 
-        let footer = NSTextField(labelWithString: TungBoxVersion.display)
+        let footer = NSTextField(labelWithString: "TungBox v\(TungBoxVersion.release)")
         footer.font = .systemFont(ofSize: 13, weight: .medium)
         footer.textColor = MD3.onSurfaceVariant
         footer.maximumNumberOfLines = 1

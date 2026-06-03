@@ -173,7 +173,6 @@ extension MainWindowController {
         refreshRow.translatesAutoresizingMaskIntoConstraints = false
 
         return settingsPageStack([
-            settingsPanel(title: "基础信息", views: [detailsText, openFolderButton]),
             settingsPanel(title: "代理启动配置", views: [
                 settingsSystemProxyCheckbox,
                 settingsTunCheckbox,
@@ -184,6 +183,7 @@ extension MainWindowController {
                 settingsStartSilentlyCheckbox
             ]),
             settingsPanel(title: "订阅", views: [refreshRow]),
+            settingsPanel(title: "软件信息", views: [detailsText, openFolderButton])
         ])
     }
 
@@ -348,7 +348,7 @@ extension MainWindowController {
         scroll.autohidesScrollers = true
         scroll.borderType = .noBorder
 
-        let content = NSView()
+        let content = MD3SettingsDocumentView()
         content.translatesAutoresizingMaskIntoConstraints = false
         scroll.documentView = content
         
@@ -377,6 +377,12 @@ extension MainWindowController {
         cards.forEach { card in
             card.leadingAnchor.constraint(equalTo: stack.leadingAnchor).isActive = true
             card.trailingAnchor.constraint(equalTo: stack.trailingAnchor).isActive = true
+        }
+
+        DispatchQueue.main.async { [weak scroll] in
+            guard let scroll else { return }
+            scroll.contentView.scroll(to: .zero)
+            scroll.reflectScrolledClipView(scroll.contentView)
         }
         
         return view
@@ -1042,4 +1048,8 @@ final class MD3SettingsPageView: NSView, MD3Themeable {
     func themeChanged() {
         self.needsDisplay = true
     }
+}
+
+final class MD3SettingsDocumentView: NSView {
+    override var isFlipped: Bool { true }
 }
