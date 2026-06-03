@@ -21,7 +21,7 @@ extension MainWindowController {
         }
 
         let tabControl = MD3SegmentedControl()
-        tabControl.items = ["基础", "运行", "TUN 设置", "规则集", "外观"]
+        tabControl.items = ["常规", "Core", "TUN 设置", "规则集", "外观"]
         tabControl.selectedSegment = 0
         tabControl.target = self
         tabControl.action = #selector(settingsTabChanged(_:))
@@ -49,7 +49,7 @@ extension MainWindowController {
 
         settingsPages = [
             makeSettingsGeneralPage(),
-            makeSettingsRuntimePage(),
+            makeSettingsCorePage(),
             makeSettingsTunPage(),
             makeSettingsRuleSetPage(),
             makeSettingsAppearancePage()
@@ -101,14 +101,6 @@ extension MainWindowController {
     }
 
     func makeSettingsGeneralPage() -> NSView {
-        serviceLabel.font = .systemFont(ofSize: 14, weight: .bold)
-        serviceLabel.textColor = MD3.onSurface
-        serviceLabel.lineBreakMode = .byWordWrapping
-        serviceLabel.maximumNumberOfLines = 0
-        serviceLabel.usesSingleLineMode = false
-        serviceLabel.cell?.wraps = true
-        serviceLabel.translatesAutoresizingMaskIntoConstraints = false
-
         let detailsText = NSTextField(labelWithString: """
         应用版本: \(TungBoxVersion.current)
         配置目录: \(store.baseURL.path)
@@ -120,19 +112,34 @@ extension MainWindowController {
         detailsText.maximumNumberOfLines = 0
         detailsText.translatesAutoresizingMaskIntoConstraints = false
 
-        let checkUpdateButton = settingsButton(title: "检查 Core 更新", action: #selector(checkCoreUpdateClicked), style: .tonal)
-        let installLatestButton = settingsButton(title: "安装最新 Core", action: #selector(installLatestCoreClicked), style: .filled)
-        let importCoreButton = settingsButton(title: "导入 sing-box Core", action: #selector(importCoreClicked), style: .filled)
-        let installOldCoreButton = settingsButton(title: "安装旧版 Core（测试）", action: #selector(installOldCoreForTestClicked), style: .outlined)
-        let openCoreFolderButton = settingsButton(title: "打开 Core 目录", action: #selector(openCoreFolderClicked), style: .outlined)
         let openFolderButton = settingsButton(title: "打开配置目录", action: #selector(openFolderClicked), style: .outlined)
-        let coreButtonGrid = settingsButtonGrid([
-            checkUpdateButton,
-            installLatestButton,
-            importCoreButton,
-            installOldCoreButton,
-            openCoreFolderButton
-        ])
+
+        settingsSystemProxyCheckbox.target = self
+        settingsSystemProxyCheckbox.action = #selector(settingsSystemProxyChanged(_:))
+        settingsSystemProxyCheckbox.state = isSystemProxyDefaultEnabled ? .on : .off
+
+        settingsTunCheckbox.title = "默认开启 TUN 模式"
+        settingsTunCheckbox.target = self
+        settingsTunCheckbox.action = #selector(settingsTunChanged(_:))
+        settingsTunCheckbox.state = isTunEnabled ? .on : .off
+        settingsTunCheckbox.isEnabled = isSystemProxyDefaultEnabled
+
+        settingsLaunchAtLoginCheckbox.title = "开机自启动"
+        settingsLaunchAtLoginCheckbox.target = self
+        settingsLaunchAtLoginCheckbox.action = #selector(settingsLaunchAtLoginChanged(_:))
+        settingsLaunchAtLoginCheckbox.state = isLaunchAtLoginEnabled ? .on : .off
+
+        settingsStartSilentlyCheckbox.title = "静默启动 (只启动状态栏，不打开控制台UI)"
+        settingsStartSilentlyCheckbox.target = self
+        settingsStartSilentlyCheckbox.action = #selector(settingsStartSilentlyChanged(_:))
+        settingsStartSilentlyCheckbox.state = UserDefaults.standard.bool(forKey: "startSilently") ? .on : .off
+
+        let proxyHint = NSTextField(labelWithString: "TUN 默认开启依赖系统代理默认开启；如果系统代理默认关闭，TUN 默认开启不可选。")
+        proxyHint.textColor = MD3.onSurfaceVariant
+        proxyHint.font = .systemFont(ofSize: 13)
+        proxyHint.lineBreakMode = .byWordWrapping
+        proxyHint.maximumNumberOfLines = 0
+        proxyHint.translatesAutoresizingMaskIntoConstraints = false
 
         // Subscription auto-refresh interval
         let refreshLabel = settingsLabel("订阅自动刷新间隔")
@@ -161,48 +168,47 @@ extension MainWindowController {
 
         return settingsPageStack([
             settingsPanel(title: "基础信息", views: [detailsText, openFolderButton]),
+            settingsPanel(title: "代理启动配置", views: [
+                settingsSystemProxyCheckbox,
+                settingsTunCheckbox,
+                proxyHint
+            ]),
+            settingsPanel(title: "软件启动配置", views: [
+                settingsLaunchAtLoginCheckbox,
+                settingsStartSilentlyCheckbox
+            ]),
             settingsPanel(title: "订阅", views: [refreshRow]),
+        ])
+    }
+
+    func makeSettingsCorePage() -> NSView {
+        serviceLabel.font = .systemFont(ofSize: 14, weight: .bold)
+        serviceLabel.textColor = MD3.onSurface
+        serviceLabel.lineBreakMode = .byWordWrapping
+        serviceLabel.maximumNumberOfLines = 0
+        serviceLabel.usesSingleLineMode = false
+        serviceLabel.cell?.wraps = true
+        serviceLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let checkUpdateButton = settingsButton(title: "检查 Core 更新", action: #selector(checkCoreUpdateClicked), style: .tonal)
+        let installLatestButton = settingsButton(title: "安装最新 Core", action: #selector(installLatestCoreClicked), style: .filled)
+        let importCoreButton = settingsButton(title: "导入 sing-box Core", action: #selector(importCoreClicked), style: .filled)
+        let installOldCoreButton = settingsButton(title: "安装旧版 Core（测试）", action: #selector(installOldCoreForTestClicked), style: .outlined)
+        let openCoreFolderButton = settingsButton(title: "打开 Core 目录", action: #selector(openCoreFolderClicked), style: .outlined)
+        let coreButtonGrid = settingsButtonGrid([
+            checkUpdateButton,
+            installLatestButton,
+            importCoreButton,
+            installOldCoreButton,
+            openCoreFolderButton
+        ])
+
+        return settingsPageStack([
             settingsPanel(title: "Core 管理", views: [
                 serviceLabel,
                 coreButtonGrid
             ])
         ])
-    }
-
-    func makeSettingsRuntimePage() -> NSView {
-        settingsSystemProxyCheckbox.target = self
-        settingsSystemProxyCheckbox.action = #selector(settingsSystemProxyChanged(_:))
-        settingsSystemProxyCheckbox.state = isSystemProxyDefaultEnabled ? .on : .off
-        
-        settingsTunCheckbox.title = "默认开启 TUN 模式"
-        settingsTunCheckbox.target = self
-        settingsTunCheckbox.action = #selector(settingsTunChanged(_:))
-        settingsTunCheckbox.state = isTunEnabled ? .on : .off
-        settingsTunCheckbox.isEnabled = isSystemProxyDefaultEnabled
-        
-        settingsLaunchAtLoginCheckbox.title = "开机自启动"
-        settingsLaunchAtLoginCheckbox.target = self
-        settingsLaunchAtLoginCheckbox.action = #selector(settingsLaunchAtLoginChanged(_:))
-        settingsLaunchAtLoginCheckbox.state = isLaunchAtLoginEnabled ? .on : .off
-        
-        settingsStartSilentlyCheckbox.title = "静默启动 (只启动状态栏，不打开控制台UI)"
-        settingsStartSilentlyCheckbox.target = self
-        settingsStartSilentlyCheckbox.action = #selector(settingsStartSilentlyChanged(_:))
-        settingsStartSilentlyCheckbox.state = UserDefaults.standard.bool(forKey: "startSilently") ? .on : .off
-        
-        let hint = NSTextField(labelWithString: "系统代理默认开启后，点击首页代理开关会启动代理服务并接管系统代理。TUN 默认行为在 TUN 设置里配置。")
-        hint.textColor = MD3.onSurfaceVariant
-        hint.font = .systemFont(ofSize: 13)
-        hint.lineBreakMode = .byWordWrapping
-        hint.maximumNumberOfLines = 0
-        hint.translatesAutoresizingMaskIntoConstraints = false
-        return settingsPageStack([settingsPanel(title: "运行默认值", views: [
-            settingsSystemProxyCheckbox,
-            settingsTunCheckbox,
-            settingsLaunchAtLoginCheckbox,
-            settingsStartSilentlyCheckbox,
-            hint
-        ])])
     }
 
     func makeSettingsTunPage() -> NSView {
@@ -256,7 +262,17 @@ extension MainWindowController {
         ruleSetForm.rowSpacing = 10
         ruleSetForm.columnSpacing = 10
         let saveRuleSetButton = settingsButton(title: "保存规则集地址", action: #selector(saveRuleSetURLsClicked))
-        return settingsPageStack([settingsPanel(title: "规则集地址", views: [ruleSetForm, saveRuleSetButton])])
+        let refreshRuleSetsButton = settingsButton(title: "刷新规则集", action: #selector(refreshRuleSetsManuallyClicked), style: .filled)
+        let clearRuleSetsButton = settingsButton(title: "清空规则集缓存", action: #selector(clearRuleSetCacheClicked), style: .outlined)
+        let cacheButtonGrid = settingsButtonGrid([
+            refreshRuleSetsButton,
+            clearRuleSetsButton
+        ])
+
+        return settingsPageStack([
+            settingsPanel(title: "规则集地址", views: [ruleSetForm, saveRuleSetButton]),
+            settingsPanel(title: "规则集缓存", views: [cacheButtonGrid])
+        ])
     }
 
     func makeSettingsAppearancePage() -> NSView {

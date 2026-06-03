@@ -47,28 +47,12 @@ extension MainWindowController {
         addRuleButton.translatesAutoresizingMaskIntoConstraints = false
         addRuleButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
 
-        let refreshRuleSetsButton = MD3Button()
-        refreshRuleSetsButton.title = "刷新规则集"
-        refreshRuleSetsButton.style = .outlined
-        refreshRuleSetsButton.target = self
-        refreshRuleSetsButton.action = #selector(refreshRuleSetsManuallyClicked)
-        refreshRuleSetsButton.translatesAutoresizingMaskIntoConstraints = false
-        refreshRuleSetsButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
-
-        let clearRuleSetsButton = MD3Button()
-        clearRuleSetsButton.title = "清空缓存"
-        clearRuleSetsButton.style = .outlined
-        clearRuleSetsButton.target = self
-        clearRuleSetsButton.action = #selector(clearRuleSetCacheClicked)
-        clearRuleSetsButton.translatesAutoresizingMaskIntoConstraints = false
-        clearRuleSetsButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
-
-        let ruleToolbar = NSStackView(views: [ruleSearchField, addRuleButton, refreshRuleSetsButton, clearRuleSetsButton])
+        let ruleToolbar = NSStackView(views: [ruleSearchField, addRuleButton])
         ruleToolbar.orientation = .horizontal
         ruleToolbar.spacing = 12
         ruleToolbar.alignment = .centerY
         ruleToolbar.translatesAutoresizingMaskIntoConstraints = false
-        ruleSearchField.widthAnchor.constraint(equalToConstant: 200).isActive = true
+        ruleSearchField.widthAnchor.constraint(equalToConstant: 320).isActive = true
 
         let scroll = NSScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
