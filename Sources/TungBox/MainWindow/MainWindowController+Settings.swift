@@ -340,18 +340,38 @@ extension MainWindowController {
         registerThemeObserver { [weak view] in
             view?.layer?.backgroundColor = MD3.background.cgColor
         }
+
+        let scroll = NSScrollView()
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.borderType = .noBorder
+
+        let content = NSView()
+        content.translatesAutoresizingMaskIntoConstraints = false
+        scroll.documentView = content
         
         let stack = NSStackView(views: cards)
         stack.orientation = .vertical
         stack.spacing = 16
         stack.alignment = .width
         stack.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(stack)
+        content.addSubview(stack)
+        view.addSubview(scroll)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
-            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
-            stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 20),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor, constant: -20)
+            scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scroll.topAnchor.constraint(equalTo: view.topAnchor),
+            scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+
+            content.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+            content.heightAnchor.constraint(greaterThanOrEqualTo: scroll.contentView.heightAnchor),
+
+            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
+            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
+            stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 20),
+            stack.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -20)
         ])
         
         cards.forEach { card in
