@@ -145,7 +145,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             defer: false
         )
         window.title = "TungBox"
-        window.titleVisibility = .visible
+        window.titleVisibility = .hidden
         window.isReleasedWhenClosed = false
         window.center()
         self.init(window: window)
@@ -165,6 +165,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
         // Apply persisted theme
         NSApp.appearance = NSAppearance(named: MD3.isDark ? .darkAqua : .aqua)
+        configureCenteredWindowTitle()
 
         guard let content = window?.contentView else { return }
 
@@ -533,6 +534,37 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     }
     @objc func navClicked(_ sender: MD3SidebarItem) {
         selectPage(at: sender.tag)
+    }
+
+    private func configureCenteredWindowTitle() {
+        guard let window,
+              let closeButton = window.standardWindowButton(.closeButton),
+              let titlebarView = closeButton.superview else { return }
+
+        window.title = "TungBox"
+        window.titleVisibility = .hidden
+
+        let titleIdentifier = NSUserInterfaceItemIdentifier("TungBoxCenteredWindowTitle")
+        titlebarView.subviews
+            .filter { $0.identifier == titleIdentifier }
+            .forEach { $0.removeFromSuperview() }
+
+        let titleLabel = NSTextField(labelWithString: "TungBox")
+        titleLabel.identifier = titleIdentifier
+        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.textColor = .labelColor
+        titleLabel.alignment = .center
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.maximumNumberOfLines = 1
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titlebarView.addSubview(titleLabel)
+
+        NSLayoutConstraint.activate([
+            titleLabel.centerXAnchor.constraint(equalTo: titlebarView.centerXAnchor),
+            titleLabel.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
+            titleLabel.widthAnchor.constraint(lessThanOrEqualTo: titlebarView.widthAnchor, constant: -240),
+            titleLabel.heightAnchor.constraint(equalToConstant: 20)
+        ])
     }
 
     func selectPage(at index: Int) {
