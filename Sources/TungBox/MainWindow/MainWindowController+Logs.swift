@@ -32,9 +32,9 @@ extension MainWindowController {
         )
 
         let levels: [(String, String)] = [("INFO", "INFO"), ("WARN", "WARN"), ("ERROR", "ERROR"), ("DEBUG", "DEBUG")]
-        var levelButtons: [NSButton] = []
+        var levelButtons: [MD3Checkbox] = []
         for (title, _) in levels {
-            let btn = NSButton(checkboxWithTitle: title, target: self, action: #selector(refreshLogDisplay))
+            let btn = MD3Checkbox(checkboxWithTitle: title, target: self, action: #selector(refreshLogDisplay))
             btn.state = .on
             btn.translatesAutoresizingMaskIntoConstraints = false
             levelButtons.append(btn)
