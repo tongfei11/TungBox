@@ -144,7 +144,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             backing: .buffered,
             defer: false
         )
-        window.title = TungBoxVersion.display
+        window.title = "TungBox"
+        window.titleVisibility = .visible
         window.isReleasedWhenClosed = false
         window.center()
         self.init(window: window)

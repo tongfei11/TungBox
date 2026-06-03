@@ -110,7 +110,13 @@ extension MainWindowController {
         detailsText.font = .systemFont(ofSize: 13)
         detailsText.lineBreakMode = .byWordWrapping
         detailsText.maximumNumberOfLines = 0
+        detailsText.usesSingleLineMode = false
+        detailsText.cell?.wraps = true
+        detailsText.cell?.isScrollable = false
         detailsText.translatesAutoresizingMaskIntoConstraints = false
+        detailsText.setContentHuggingPriority(.required, for: .vertical)
+        detailsText.setContentCompressionResistancePriority(.required, for: .vertical)
+        detailsText.heightAnchor.constraint(greaterThanOrEqualToConstant: 58).isActive = true
 
         let openFolderButton = settingsButton(title: "打开配置目录", action: #selector(openFolderClicked), style: .outlined)
 
