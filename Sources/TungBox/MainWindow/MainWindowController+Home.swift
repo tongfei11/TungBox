@@ -431,7 +431,7 @@ extension MainWindowController {
         }
         
         Task {
-            let apiConnections = (try? await ClashAPI.connections()) ?? []
+            let apiConnections = try? await ClashAPI.connections()
             let traffic = (try? await ClashAPI.traffic()) ?? (0, 0)
             let proxiesObj = (try? await ClashAPI.proxies())
             
@@ -453,7 +453,7 @@ extension MainWindowController {
             
             let connectionCount = await withCheckedContinuation { (continuation: CheckedContinuation<Int, Never>) in
                 DispatchQueue.global(qos: .background).async {
-                    if !apiConnections.isEmpty {
+                    if let apiConnections {
                         continuation.resume(returning: apiConnections.count)
                     } else {
                         let lsof = self.runProcessAndGetOutput("/usr/sbin/lsof", args: ["-i", "-a", "-p", "\(pid)", "-n", "-P"])
@@ -468,8 +468,9 @@ extension MainWindowController {
                 guard let self = self else { return }
                 guard self.isProxyRuntimeRunning() else { return }
                 
-                self.connections = apiConnections
-                self.connectionsTable.reloadData()
+                if let apiConnections {
+                    self.applyConnections(apiConnections, detail: "实时刷新")
+                }
                 
                 // Sync delays and active node from Clash API
                 self.lastProxiesObj = proxiesObj

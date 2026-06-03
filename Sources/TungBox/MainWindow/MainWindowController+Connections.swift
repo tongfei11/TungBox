@@ -142,6 +142,93 @@ extension MainWindowController {
         connectionsTable.reloadData()
     }
 
+    func startConnectionsRefreshTimer() {
+        guard isProxyRuntimeRunning() else {
+            stopConnectionsRefreshTimer()
+            clearConnections()
+            return
+        }
+        if connectionsRefreshTimer == nil {
+            connectionsRefreshTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.refreshConnections(showErrors: false)
+                }
+            }
+        }
+    }
+
+    func stopConnectionsRefreshTimer() {
+        connectionsRefreshTimer?.invalidate()
+        connectionsRefreshTimer = nil
+    }
+
+    func clearConnections() {
+        connections.removeAll()
+        prevConnections.removeAll()
+        connectionRefreshTime = .distantPast
+        connectionsTable.reloadData()
+        updateConnectionsCard(value: "0", detail: "服务未运行")
+    }
+
+    func refreshConnections(showErrors: Bool) {
+        guard isProxyRuntimeRunning() else {
+            clearConnections()
+            return
+        }
+        guard !isRefreshingConnections else { return }
+        isRefreshingConnections = true
+        Task {
+            defer {
+                Task { @MainActor [weak self] in
+                    self?.isRefreshingConnections = false
+                }
+            }
+            do {
+                let list = try await ClashAPI.connections()
+                await MainActor.run {
+                    applyConnections(list, detail: "实时刷新")
+                }
+            } catch {
+                await MainActor.run {
+                    appendLog("[连接] 刷新失败：\(error.localizedDescription)\n")
+                    updateConnectionsCard(value: "\(connections.count)", detail: "刷新超时，保留上次结果")
+                    if showErrors {
+                        showToast("连接刷新失败：\(error.localizedDescription)")
+                    }
+                }
+            }
+        }
+    }
+
+    func applyConnections(_ list: [ConnectionInfo], detail: String) {
+        let now = Date()
+        let elapsed = max(now.timeIntervalSince(connectionRefreshTime), 0.5)
+
+        var speedMap: [String: (up: Int, down: Int)] = [:]
+        for prev in prevConnections {
+            if let curr = list.first(where: { $0.id == prev.id }) {
+                let upSpeed = max(0, curr.upload - prev.upload)
+                let downSpeed = max(0, curr.download - prev.download)
+                speedMap[curr.id] = (
+                    Int(Double(upSpeed) / elapsed),
+                    Int(Double(downSpeed) / elapsed)
+                )
+            }
+        }
+
+        connections = list.map { conn in
+            var c = conn
+            c.uploadSpeed = speedMap[conn.id]?.up ?? 0
+            c.downloadSpeed = speedMap[conn.id]?.down ?? 0
+            return c
+        }
+
+        prevConnections = list
+        connectionRefreshTime = now
+        connectionsTable.reloadData()
+        updateConnectionsCard(value: "\(connections.count)", detail: detail)
+    }
+
     @objc func closeSingleConnectionClicked(_ sender: Any) {
         let row = connectionsTable.clickedRow
         guard row >= 0 else { return }
@@ -165,47 +252,7 @@ extension MainWindowController {
     }
 
     @objc func refreshConnectionsClicked() {
-        guard isProxyRuntimeRunning() else {
-            connections.removeAll()
-            prevConnections.removeAll()
-            connectionsTable.reloadData()
-            return
-        }
-        Task {
-            do {
-                let list = try await ClashAPI.connections()
-                let now = Date()
-                let elapsed = max(now.timeIntervalSince(connectionRefreshTime), 0.5)
-
-                // Calculate per-connection speed
-                var speedMap: [String: (up: Int, down: Int)] = [:]
-                for prev in prevConnections {
-                    if let curr = list.first(where: { $0.id == prev.id }) {
-                        let upSpeed = max(0, curr.upload - prev.upload)
-                        let downSpeed = max(0, curr.download - prev.download)
-                        speedMap[curr.id] = (
-                            Int(Double(upSpeed) / elapsed),
-                            Int(Double(downSpeed) / elapsed)
-                        )
-                    }
-                }
-
-                // Attach speeds to connection info
-                connections = list.map { conn in
-                    var c = conn
-                    c.uploadSpeed = speedMap[conn.id]?.up ?? 0
-                    c.downloadSpeed = speedMap[conn.id]?.down ?? 0
-                    return c
-                }
-
-                prevConnections = list
-                connectionRefreshTime = now
-                connectionsTable.reloadData()
-                updateConnectionsCard(value: "\(connections.count)", detail: "已刷新")
-            } catch {
-                showError(error)
-            }
-        }
+        refreshConnections(showErrors: true)
     }
 
     @objc func closeAllConnectionsClicked() {

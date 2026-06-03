@@ -54,8 +54,9 @@ extension MainWindowController {
             guard rows.indices.contains(row), let columnID = tableColumn?.identifier.rawValue else { return nil }
             return makeRuleCell(for: rows[row], columnID: columnID)
         } else if tableView == connectionsTable {
-            guard connections.indices.contains(row), let columnID = tableColumn?.identifier.rawValue else { return nil }
-            return makeConnectionCell(for: connections[row], columnID: columnID)
+            let rows = filteredConnections()
+            guard rows.indices.contains(row), let columnID = tableColumn?.identifier.rawValue else { return nil }
+            return makeConnectionCell(for: rows[row], columnID: columnID)
         } else {
             let identifier = NSUserInterfaceItemIdentifier("ProfileCell")
             let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? MD3ProfileCellView ?? MD3ProfileCellView(frame: .zero)

@@ -93,6 +93,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     }
     var detectedCoreVersion = "检测中"
     var subscriptionTimer: Timer?
+    var connectionsRefreshTimer: Timer?
+    var isRefreshingConnections = false
     weak var zeroStateView: NSView?
     let connectionFilterField = MD3TextField()
     var editingRuleID: UUID?
@@ -538,6 +540,12 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         if index == 6 {
             checkSingBoxInstall(showAlert: false)
         }
+        if index == 4 {
+            startConnectionsRefreshTimer()
+            refreshConnections(showErrors: false)
+        } else {
+            stopConnectionsRefreshTimer()
+        }
         window?.contentView?.refreshSubviews()
     }
     func startService() {
@@ -558,6 +566,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
         do {
             try applyTunPreference(restartIfRunning: false)
+            try ensureRuntimeAPISupport()
             let url = try saveCurrent()
             
             var currentNode = "默认"
@@ -578,6 +587,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 appendLog("[TUN] 已交给 TUN 服务启动 sing-box\n")
                 setSystemProxy(enabled: false, port: getMixedProxyPort())
                 refreshStatus()
+                scheduleConnectionsRefreshAfterStart()
                 return
             }
             try runner.start(config: url, elevated: false)
@@ -587,10 +597,33 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             setSystemProxy(enabled: isSystemProxyEnabled && !isTunEnabled, port: port)
             
             refreshStatus()
+            scheduleConnectionsRefreshAfterStart()
         } catch {
             showError(error)
             serviceSwitch.isOn = false
         }
+    }
+
+    func ensureRuntimeAPISupport() throws {
+        guard var config = parseConfigObject(from: editor.string) else { return }
+        let currentMode = readMode(from: config)
+        config = ensureModeSupport(in: config, mode: Mode(value: currentMode, displayName: modeDisplayName(currentMode)))
+        editor.string = try renderConfig(config)
+    }
+
+    func scheduleConnectionsRefreshAfterStart() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            guard let self, self.isProxyRuntimeRunning() else { return }
+            if self.isConnectionsPageSelected() {
+                self.startConnectionsRefreshTimer()
+            }
+            self.refreshConnections(showErrors: false)
+        }
+    }
+
+    func isConnectionsPageSelected() -> Bool {
+        guard let item = pages.selectedTabViewItem else { return false }
+        return pages.indexOfTabViewItem(item) == 4
     }
 
     func ensureCoreAvailableForStart() -> Bool {
@@ -1340,8 +1373,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         } else {
             currentNodeNameLabel.stringValue = "未连接"
             currentNodeDelayLabel.stringValue = "—"
-            connections.removeAll()
-            connectionsTable.reloadData()
+            clearConnections()
+            stopConnectionsRefreshTimer()
             stopStatsTimer()
         }
     }
