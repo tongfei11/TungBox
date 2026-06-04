@@ -40,7 +40,7 @@ extension MainWindowController {
         accessoryStack.translatesAutoresizingMaskIntoConstraints = false
 
         let captureLabel = NSTextField(labelWithString: "接管方式")
-        captureLabel.font = .systemFont(ofSize: 13, weight: .medium)
+        captureLabel.font = .systemFont(ofSize: 13, weight: .bold)
         captureLabel.textColor = MD3.onSurfaceVariant
         captureLabel.translatesAutoresizingMaskIntoConstraints = false
         registerThemeObserver { [weak captureLabel] in
@@ -52,14 +52,22 @@ extension MainWindowController {
         homeSystemProxyRadio.state = isTunEnabled ? .off : .on
         homeTunRadio.state = isTunEnabled ? .on : .off
 
-        let captureModeRow = NSStackView(views: [captureLabel, homeSystemProxyRadio, homeTunRadio])
-        captureModeRow.orientation = .horizontal
-        captureModeRow.spacing = 16
-        captureModeRow.alignment = .centerY
-        captureModeRow.translatesAutoresizingMaskIntoConstraints = false
-        captureModeRow.setCustomSpacing(16, after: captureLabel)
+        let systemProxyOption = makeOptionWithHint(radio: homeSystemProxyRadio, hint: "设置系统 HTTP/Socks5 代理，接管常规软件流量")
+        let tunOption = makeOptionWithHint(radio: homeTunRadio, hint: "创建虚拟网卡接管全局 IP 流量，支持终端和游戏")
 
-        let serviceCard = homeCard(title: "代理服务", titleAccessoryView: accessoryStack, views: [captureModeRow])
+        let captureOptionsStack = NSStackView(views: [systemProxyOption, tunOption])
+        captureOptionsStack.orientation = .vertical
+        captureOptionsStack.spacing = 8
+        captureOptionsStack.alignment = .leading
+        captureOptionsStack.translatesAutoresizingMaskIntoConstraints = false
+
+        let captureRow = NSStackView(views: [captureLabel, captureOptionsStack])
+        captureRow.orientation = .horizontal
+        captureRow.spacing = 16
+        captureRow.alignment = .top
+        captureRow.translatesAutoresizingMaskIntoConstraints = false
+
+        let serviceCard = homeCard(title: "代理服务", titleAccessoryView: accessoryStack, views: [captureRow])
 
         modeControl.items = ["直连/绕过代理", "全局代理", "规则判定"]
         modeControl.target = self
@@ -581,5 +589,28 @@ extension MainWindowController {
         } catch {
             showError(error)
         }
+    }
+
+    private func makeOptionWithHint(radio: MD3RadioButton, hint: String) -> NSStackView {
+        let hintLabel = NSTextField(labelWithString: hint)
+        hintLabel.font = .systemFont(ofSize: 11)
+        hintLabel.textColor = MD3.onSurfaceVariant
+        hintLabel.lineBreakMode = .byTruncatingTail
+        hintLabel.maximumNumberOfLines = 1
+        hintLabel.translatesAutoresizingMaskIntoConstraints = false
+        registerThemeObserver { [weak hintLabel] in
+            hintLabel?.textColor = MD3.onSurfaceVariant
+        }
+        
+        let stack = NSStackView(views: [radio, hintLabel])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 2
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        
+        NSLayoutConstraint.activate([
+            hintLabel.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: 28)
+        ])
+        return stack
     }
 }
