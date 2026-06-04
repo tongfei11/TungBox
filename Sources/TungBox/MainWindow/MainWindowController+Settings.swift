@@ -615,7 +615,7 @@ extension MainWindowController {
         refreshStatus()
     }
 
-    @objc func settingsCaptureModeChanged(_ sender: NSButton) {
+    @objc func settingsCaptureModeChanged(_ sender: MD3RadioButton) {
         setCaptureMode(tunEnabled: sender.tag == 1, source: "设置")
     }
 

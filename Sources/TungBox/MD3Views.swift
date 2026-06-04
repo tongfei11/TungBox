@@ -2927,3 +2927,175 @@ final class MD3PopUpButton: NSPopUpButton, MD3Themeable {
         needsDisplay = true
     }
 }
+
+// MARK: - MD3 Radio Button
+
+final class MD3RadioButton: NSControl, MD3Themeable {
+    var title: String = "" {
+        didSet {
+            labelField.stringValue = title
+            invalidateIntrinsicContentSize()
+        }
+    }
+    
+    var isSelected: Bool = false {
+        didSet {
+            updateColors()
+        }
+    }
+    
+    override var isEnabled: Bool {
+        didSet {
+            updateColors()
+        }
+    }
+    
+    private let radioOuter = NSView()
+    private let radioInner = NSView()
+    private let labelField = NSTextField(labelWithString: "")
+    
+    private var isHovered = false {
+        didSet {
+            updateColors()
+        }
+    }
+    
+    private var trackingArea: NSTrackingArea?
+    
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        translatesAutoresizingMaskIntoConstraints = false
+        setup()
+    }
+    
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        translatesAutoresizingMaskIntoConstraints = false
+        setup()
+    }
+    
+    override var intrinsicContentSize: NSSize {
+        let labelSize = labelField.intrinsicContentSize
+        return NSSize(width: 20 + 8 + labelSize.width, height: 24)
+    }
+    
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let old = trackingArea {
+            removeTrackingArea(old)
+        }
+        let opts: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeAlways, .inVisibleRect]
+        let newArea = NSTrackingArea(rect: bounds, options: opts, owner: self, userInfo: nil)
+        addTrackingArea(newArea)
+        trackingArea = newArea
+    }
+    
+    override func mouseEntered(with event: NSEvent) {
+        guard isEnabled else { return }
+        isHovered = true
+    }
+    
+    override func mouseExited(with event: NSEvent) {
+        guard isEnabled else { return }
+        isHovered = false
+    }
+    
+    override func mouseDown(with event: NSEvent) {
+        guard isEnabled else { return }
+        if !isSelected {
+            isSelected = true
+            sendAction(action, to: target)
+        }
+    }
+    
+    private func setup() {
+        wantsLayer = true
+        
+        radioOuter.wantsLayer = true
+        radioOuter.layer?.cornerRadius = 10
+        radioOuter.layer?.borderWidth = 2
+        radioOuter.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(radioOuter)
+        
+        radioInner.wantsLayer = true
+        radioInner.layer?.cornerRadius = 5
+        radioInner.translatesAutoresizingMaskIntoConstraints = false
+        radioOuter.addSubview(radioInner)
+        
+        labelField.font = .systemFont(ofSize: 13, weight: .medium)
+        labelField.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(labelField)
+        
+        NSLayoutConstraint.activate([
+            radioOuter.leadingAnchor.constraint(equalTo: leadingAnchor),
+            radioOuter.centerYAnchor.constraint(equalTo: centerYAnchor),
+            radioOuter.widthAnchor.constraint(equalToConstant: 20),
+            radioOuter.heightAnchor.constraint(equalToConstant: 20),
+            
+            radioInner.centerXAnchor.constraint(equalTo: radioOuter.centerXAnchor),
+            radioInner.centerYAnchor.constraint(equalTo: radioOuter.centerYAnchor),
+            radioInner.widthAnchor.constraint(equalToConstant: 10),
+            radioInner.heightAnchor.constraint(equalToConstant: 10),
+            
+            labelField.leadingAnchor.constraint(equalTo: radioOuter.trailingAnchor, constant: 8),
+            labelField.centerYAnchor.constraint(equalTo: centerYAnchor),
+            labelField.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+            
+            heightAnchor.constraint(equalToConstant: 24)
+        ])
+        
+        updateColors()
+    }
+    
+    func updateColors() {
+        if isEnabled {
+            alphaValue = 1.0
+            if isSelected {
+                radioOuter.layer?.borderColor = MD3.primary.cgColor
+                radioOuter.layer?.backgroundColor = isHovered ? MD3.primary.withAlphaComponent(0.08).cgColor : NSColor.clear.cgColor
+                radioInner.layer?.backgroundColor = MD3.primary.cgColor
+                radioInner.isHidden = false
+            } else {
+                radioOuter.layer?.borderColor = MD3.outline.cgColor
+                radioOuter.layer?.backgroundColor = isHovered ? MD3.onSurface.withAlphaComponent(0.08).cgColor : NSColor.clear.cgColor
+                radioInner.layer?.backgroundColor = NSColor.clear.cgColor
+                radioInner.isHidden = true
+            }
+            labelField.textColor = MD3.onSurface
+        } else {
+            alphaValue = 0.38
+            if isSelected {
+                radioOuter.layer?.borderColor = MD3.onSurface.withAlphaComponent(0.38).cgColor
+                radioInner.layer?.backgroundColor = MD3.onSurface.withAlphaComponent(0.38).cgColor
+                radioInner.isHidden = false
+            } else {
+                radioOuter.layer?.borderColor = MD3.onSurface.withAlphaComponent(0.38).cgColor
+                radioInner.isHidden = true
+            }
+            labelField.textColor = MD3.onSurface.withAlphaComponent(0.38)
+        }
+    }
+    
+    func themeChanged() {
+        updateColors()
+    }
+    
+    var state: NSControl.StateValue {
+        get {
+            isSelected ? .on : .off
+        }
+        set {
+            isSelected = (newValue == .on)
+        }
+    }
+    
+    convenience init(radioButtonWithTitle title: String, target: AnyObject?, action: Selector?) {
+        self.init(frame: .zero)
+        self.title = title
+        self.labelField.stringValue = title
+        self.target = target
+        self.action = action
+        invalidateIntrinsicContentSize()
+    }
+}
+

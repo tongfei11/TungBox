@@ -100,10 +100,10 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var logBuffer = ""
     
     let serviceSwitch = MD3Switch()
-    let homeSystemProxyRadio = NSButton(radioButtonWithTitle: "系统代理", target: nil, action: nil)
-    let homeTunRadio = NSButton(radioButtonWithTitle: "TUN 模式", target: nil, action: nil)
-    let settingsSystemProxyRadio = NSButton(radioButtonWithTitle: "系统代理", target: nil, action: nil)
-    let settingsTunRadio = NSButton(radioButtonWithTitle: "TUN 模式", target: nil, action: nil)
+    let homeSystemProxyRadio = MD3RadioButton(radioButtonWithTitle: "系统代理", target: nil, action: nil)
+    let homeTunRadio = MD3RadioButton(radioButtonWithTitle: "TUN 模式", target: nil, action: nil)
+    let settingsSystemProxyRadio = MD3RadioButton(radioButtonWithTitle: "系统代理", target: nil, action: nil)
+    let settingsTunRadio = MD3RadioButton(radioButtonWithTitle: "TUN 模式", target: nil, action: nil)
     let settingsSystemProxyCheckbox = MD3Checkbox(checkboxWithTitle: "默认开启代理服务", target: nil, action: nil)
     let settingsLaunchAtLoginCheckbox = MD3Checkbox(checkboxWithTitle: "开机自启动", target: nil, action: nil)
     let settingsStartSilentlyCheckbox = MD3Checkbox(checkboxWithTitle: "静默启动", target: nil, action: nil)

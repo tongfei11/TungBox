@@ -533,20 +533,14 @@ extension MainWindowController {
         }
     }
 
-    @objc func homeCaptureModeChanged(_ sender: NSButton) {
+    @objc func homeCaptureModeChanged(_ sender: MD3RadioButton) {
         setCaptureMode(tunEnabled: sender.tag == 1, source: "首页")
     }
 
-    func configureCaptureRadio(_ radio: NSButton, tag: Int, action: Selector) {
+    func configureCaptureRadio(_ radio: MD3RadioButton, tag: Int, action: Selector) {
         radio.tag = tag
         radio.target = self
         radio.action = action
-        radio.font = .systemFont(ofSize: 13, weight: .medium)
-        radio.contentTintColor = MD3.onSurface
-        radio.translatesAutoresizingMaskIntoConstraints = false
-        registerThemeObserver { [weak radio] in
-            radio?.contentTintColor = MD3.onSurface
-        }
     }
 
     func setCaptureMode(tunEnabled: Bool, source: String) {
