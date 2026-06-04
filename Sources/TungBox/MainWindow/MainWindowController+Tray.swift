@@ -150,7 +150,7 @@ extension MainWindowController {
         if !isTunEnabled && !isSystemProxyEnabled {
             isSystemProxyEnabled = true
         }
-        if !isTunEnabled, !TunServiceManager.status(store: store).isInstalled {
+        if !isTunEnabled, !TunServiceManager.status(store: store).isUsable {
             showToast("请先安装 TUN 服务")
             showError(NSError.user("TUN 服务未安装。请先到 设置 > TUN 设置 安装 TUN 服务。"))
             return

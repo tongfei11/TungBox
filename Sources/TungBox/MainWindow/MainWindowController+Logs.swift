@@ -205,6 +205,7 @@ extension MainWindowController {
 
     @objc func clearLogsClicked() {
         logBuffer = ""
+        logLineCount = 0
         logs.string = ""
         logCountLabel.stringValue = "显示 0 条"
         refreshHomeFeatureStatus()
@@ -223,8 +224,8 @@ extension MainWindowController {
 
     func appendLog(_ text: String) {
         logBuffer += text
-        refreshLogDisplay()
-        logs.scrollToEndOfDocument(nil)
-        logStatusLabel.stringValue = "日志：\(logBuffer.components(separatedBy: .newlines).filter { !$0.isEmpty }.count) 行"
+        logLineCount += text.components(separatedBy: .newlines).filter { !$0.isEmpty }.count
+        logStatusLabel.stringValue = "日志：\(logLineCount) 行"
+        scheduleLogRefresh()
     }
 }

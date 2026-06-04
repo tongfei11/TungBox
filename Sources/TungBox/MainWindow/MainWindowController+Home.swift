@@ -291,7 +291,7 @@ extension MainWindowController {
         coreStatusLabel.stringValue = "sing-box Core：\(detectedCoreVersion)"
         logStatusLabel.stringValue = "日志：\(logs.string.components(separatedBy: .newlines).filter { !$0.isEmpty }.count) 行"
         tunRuntimeStatusLabel.stringValue = isTunEnabled
-            ? (TunServiceManager.status(store: store).isInstalled ? "TUN 服务：已安装，随代理开启" : "TUN 服务：未安装")
+            ? (TunServiceManager.status(store: store).isUsable ? "TUN 服务：已安装，随代理开启" : "TUN 服务：不可用，请重新安装")
             : "TUN 权限：未启用"
     }
 
@@ -549,7 +549,7 @@ extension MainWindowController {
             showError(NSError.user("请先开启系统代理，再启用 TUN 模式。"))
             return
         }
-        if sender.isOn, !TunServiceManager.status(store: store).isInstalled {
+        if sender.isOn, !TunServiceManager.status(store: store).isUsable {
             sender.isOn = false
             showToast("请先安装 TUN 服务")
             showError(NSError.user("TUN 服务未安装。请先到 设置 > TUN 设置 安装 TUN 服务。"))

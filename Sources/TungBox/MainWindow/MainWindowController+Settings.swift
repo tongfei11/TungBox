@@ -619,7 +619,7 @@ extension MainWindowController {
             showError(NSError.user("请先开启“默认开启系统代理”，再启用 TUN 默认开启。"))
             return
         }
-        if sender.state == .on, !TunServiceManager.status(store: store).isInstalled {
+        if sender.state == .on, !TunServiceManager.status(store: store).isUsable {
             sender.state = .off
             showToast("请先安装TUN服务")
             showError(NSError.user("请先到 设置 > TUN 设置 安装 TUN 服务。"))
@@ -791,7 +791,7 @@ extension MainWindowController {
     }
 
     func syncProxyPreferenceControls() {
-        serviceSwitch.isOn = isProxyRuntimeRunning() && isSystemProxyEnabled
+        serviceSwitch.isOn = isSystemProxyEnabled && isProxyRuntimeRunning()
         tunSwitch.isOn = isTunEnabled
         tunSwitch.isEnabled = isSystemProxyEnabled || isProxyRuntimeRunning()
         settingsSystemProxyCheckbox.state = isSystemProxyDefaultEnabled ? .on : .off
@@ -812,11 +812,21 @@ extension MainWindowController {
     }
 
     func isProxyRuntimeRunning() -> Bool {
-        runner.isRunning || TunServiceManager.status(store: store).isRunning
+        runner.isRunning || isTunRuntimeRunning()
+    }
+
+    func isTunRuntimeRunning() -> Bool {
+        isTunEnabled && TunServiceManager.status(store: store).isRunning
     }
 
     func currentProxyPID() -> Int32? {
-        runner.pid ?? TunServiceManager.activeSingBoxPID(store: store)
+        if runner.isRunning {
+            return runner.pid
+        }
+        if isTunRuntimeRunning() {
+            return TunServiceManager.activeSingBoxPID(store: store)
+        }
+        return nil
     }
 
     func refreshTunServiceStatus() {

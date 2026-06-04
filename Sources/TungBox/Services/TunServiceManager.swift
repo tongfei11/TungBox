@@ -32,6 +32,15 @@ enum TunServiceStatus {
         if case .installedRunning = self { return true }
         return false
     }
+
+    var isUsable: Bool {
+        switch self {
+        case .installedRunning, .installedIdle:
+            return true
+        default:
+            return false
+        }
+    }
 }
 
 enum TunServiceManager {
@@ -137,7 +146,7 @@ enum TunServiceManager {
     }
 
     static func reload(store: Store) throws {
-        guard status(store: store).isInstalled else {
+        guard status(store: store).isUsable else {
             throw NSError.user("TUN 服务未安装。请先安装 TUN 服务。")
         }
         let command = [
@@ -151,7 +160,7 @@ enum TunServiceManager {
     }
 
     static func enable(store: Store, configText: String) throws {
-        guard status(store: store).isInstalled else {
+        guard status(store: store).isUsable else {
             throw NSError.user("TUN 服务未安装。请先到 设置 > TUN 设置 安装 TUN 服务。")
         }
         try configText.write(to: store.tunRequestConfigURL, atomically: true, encoding: .utf8)

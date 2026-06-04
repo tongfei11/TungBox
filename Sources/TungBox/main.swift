@@ -79,10 +79,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var colorSchemeRows: [MD3ColorSchemeRow] = []
     var themeObservers: [() -> Void] = []
     var statusItem: NSStatusItem?
-    var isSystemProxyDefaultEnabled = UserDefaults.standard.object(forKey: "systemProxyDefaultEnabled") as? Bool
-        ?? UserDefaults.standard.object(forKey: "systemProxyEnabled") as? Bool
-        ?? true
-    lazy var isSystemProxyEnabled = isSystemProxyDefaultEnabled
+    var isSystemProxyDefaultEnabled = UserDefaults.standard.object(forKey: "systemProxyDefaultEnabled") as? Bool ?? false
+    var isSystemProxyEnabled = false
     var isTunEnabled = UserDefaults.standard.object(forKey: "tunEnabled") as? Bool ?? false
     var isLaunchAtLoginEnabled: Bool {
         if #available(macOS 13.0, *) {
@@ -127,6 +125,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var latestAppRelease: AppRelease?
     var appUpdateCheckState: AppUpdateCheckState = .notChecked
     private weak var toastView: NSView?
+    private var pendingStatusRefresh: DispatchWorkItem?
+    private var pendingLogRefresh: DispatchWorkItem?
+    var logLineCount = 0
 
     func registerThemeObserver(_ observer: @escaping () -> Void) {
         themeObservers.append(observer)
@@ -157,13 +158,12 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     }
 
     func setup() {
-        normalizeProxyPreferences()
         profiles = store.loadProfiles()
         subscriptions = store.loadSubscriptions()
         customRules = store.loadCustomRules()
         runner.onOutput = { [weak self] text in
             self?.appendLog(text)
-            self?.refreshStatus()
+            self?.scheduleStatusRefreshFromOutput()
         }
 
         // Apply persisted theme
@@ -257,6 +257,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 selectProfile(at: 0)
             }
         }
+
+        normalizeProxyPreferences()
         
         refreshStatus()
         
@@ -279,8 +281,19 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     }
 
     func normalizeProxyPreferences() {
+        if UserDefaults.standard.object(forKey: "systemProxyDefaultEnabled") == nil {
+            UserDefaults.standard.set(isSystemProxyDefaultEnabled, forKey: "systemProxyDefaultEnabled")
+        }
+
         // If TUN daemon is actively running (e.g. survived a crash/force-quit), sync UI state
         let tunStatus = TunServiceManager.status(store: store)
+        if isTunEnabled && !tunStatus.isUsable {
+            isTunEnabled = false
+            UserDefaults.standard.set(false, forKey: "tunEnabled")
+            try? TunServiceManager.disable(store: store)
+            appendLog("[TUN] 检测到 TUN 服务不可用，已关闭 TUN 模式。请到 设置 > TUN 设置 重新安装。\n")
+            return
+        }
         if tunStatus.isRunning {
             isTunEnabled = true
             UserDefaults.standard.set(true, forKey: "tunEnabled")
@@ -303,6 +316,51 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 try? TunServiceManager.disable(store: store)
             }
         }
+    }
+
+    func applyStartupProxyPreference() {
+        guard isSystemProxyDefaultEnabled else {
+            isSystemProxyEnabled = false
+            syncProxyPreferenceControls()
+            appendLog("[启动] 默认开启系统代理未启用，本次启动不自动打开代理。\n")
+            return
+        }
+
+        isSystemProxyEnabled = true
+        syncProxyPreferenceControls()
+
+        if isProxyRuntimeRunning() {
+            reconcileSystemProxyForCurrentMode()
+            appendLog("[启动] 检测到代理已在运行，已同步系统代理状态。\n")
+            refreshStatus()
+            return
+        }
+
+        appendLog("[启动] 按设置自动开启系统代理。\n")
+        startService()
+    }
+
+    func scheduleStatusRefreshFromOutput() {
+        guard pendingStatusRefresh == nil else { return }
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.pendingStatusRefresh = nil
+            self?.refreshStatus()
+        }
+        pendingStatusRefresh = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: workItem)
+    }
+
+    func scheduleLogRefresh() {
+        guard pendingLogRefresh == nil else { return }
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.pendingLogRefresh = nil
+            self.refreshLogDisplay()
+            self.logs.scrollToEndOfDocument(nil)
+            self.logStatusLabel.stringValue = "日志：\(self.logLineCount) 行"
+        }
+        pendingLogRefresh = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: workItem)
     }
 
     func setupSidebar(_ view: NSView) {
@@ -589,17 +647,17 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     }
     func startService() {
         guard ensureCoreAvailableForStart() else {
-            serviceSwitch.isOn = false
+            markProxyStartupFailed()
             return
         }
         guard selectedIndex != nil else {
             showError(NSError.user("没有检测到有效的配置文件，请先创建或导入配置。"))
-            serviceSwitch.isOn = false
+            markProxyStartupFailed()
             return
         }
         guard !nodes.isEmpty else {
             showError(NSError.user("当前配置中没有检测到可用的节点。请先配置节点或更新订阅。"))
-            serviceSwitch.isOn = false
+            markProxyStartupFailed()
             return
         }
 
@@ -639,8 +697,14 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             scheduleConnectionsRefreshAfterStart()
         } catch {
             showError(error)
-            serviceSwitch.isOn = false
+            markProxyStartupFailed()
         }
+    }
+
+    func markProxyStartupFailed() {
+        isSystemProxyEnabled = false
+        serviceSwitch.isOn = false
+        syncProxyPreferenceControls()
     }
 
     func ensureRuntimeAPISupport() throws {
@@ -677,17 +741,29 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     }
 
     func stopService() {
+        let shouldDisableTun = isTunEnabled || TunServiceManager.status(store: store).isRunning
+        let shouldStopNormalProxy = runner.isRunning
+        let shouldClearSystemProxy = isSystemProxyEnabled || shouldStopNormalProxy
+
         // 1. Tell TUN daemon to stop (removes enabled flag; daemon cleanly kills TUN child, keeps daemon alive)
-        try? TunServiceManager.disable(store: store)
-        appendLog("[TungBox] TUN 标记已关闭\n")
+        if shouldDisableTun {
+            try? TunServiceManager.disable(store: store)
+            appendLog("[TungBox] TUN 标记已关闭\n")
+        }
 
         // 2. Stop sing-box processes (normal + elevated)
-        runner.stop()
-        appendLog("[TungBox] sing-box 已停止\n")
+        if shouldStopNormalProxy {
+            runner.stop()
+            appendLog("[TungBox] sing-box 已停止\n")
+        }
 
         // 3. Turn off system proxy synchronously — must complete before app exits
-        setSystemProxySync(enabled: false, port: 7890)
-        appendLog("[TungBox] 系统代理已关闭\n")
+        if shouldClearSystemProxy {
+            setSystemProxySync(enabled: false, port: 7890)
+            appendLog("[TungBox] 系统代理已关闭\n")
+        }
+
+        isSystemProxyEnabled = false
 
         refreshStatus()
     }
@@ -1609,15 +1685,33 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         return services
     }
     
-    nonisolated func runCommand(_ binary: String, args: [String]) -> String {
+    nonisolated func runCommand(_ binary: String, args: [String], timeoutSeconds: TimeInterval = 3) -> String {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: binary)
         proc.arguments = args
         let pipe = Pipe()
         proc.standardOutput = pipe
         proc.standardError = pipe
-        try? proc.run()
-        proc.waitUntilExit()
+        do {
+            try proc.run()
+        } catch {
+            return error.localizedDescription
+        }
+
+        let semaphore = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .utility).async {
+            proc.waitUntilExit()
+            semaphore.signal()
+        }
+        if semaphore.wait(timeout: .now() + timeoutSeconds) == .timedOut {
+            if proc.isRunning {
+                proc.terminate()
+                Thread.sleep(forTimeInterval: 0.2)
+                if proc.isRunning {
+                    _ = Darwin.kill(proc.processIdentifier, SIGKILL)
+                }
+            }
+        }
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         return String(data: data, encoding: .utf8) ?? ""
     }
@@ -1686,6 +1780,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             controller?.showConsoleWindow()
         }
+        controller?.applyStartupProxyPreference()
     }
 
     func isLaunchedAtLogin() -> Bool {
