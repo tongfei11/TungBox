@@ -678,8 +678,19 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
             appendLog("[TungBox] 正在启动代理服务...\n")
             appendLog("[TungBox] 当前连接节点: \(currentNode)\n")
+            if let config = parseConfigObject(from: editor.string),
+               readMode(from: config).caseInsensitiveCompare("Direct") == .orderedSame {
+                appendLog("[警告] 当前出站模式为直连/绕过代理，流量不会走代理。请切换到规则判定或全局代理。\n")
+                showToast("当前为直连/绕过代理模式")
+            }
 
             if isTunEnabled {
+                guard TunServiceManager.status(store: store).isUsable else {
+                    isTunEnabled = false
+                    UserDefaults.standard.set(false, forKey: "tunEnabled")
+                    syncProxyPreferenceControls()
+                    throw NSError.user("TUN 服务不可用。请先到 设置 > TUN 设置 重新安装 TUN 服务。")
+                }
                 try TunServiceManager.enable(store: store, configText: editor.string)
                 appendLog("[TUN] 已交给 TUN 服务启动 sing-box\n")
                 setSystemProxy(enabled: false, port: getMixedProxyPort())
@@ -691,7 +702,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             appendLog("[TungBox] 已启动\n")
             
             let port = getMixedProxyPort()
-            setSystemProxy(enabled: isSystemProxyEnabled && !isTunEnabled, port: port)
+            setSystemProxy(enabled: isSystemProxyEnabled && !isTunEnabled, port: port, rollbackOnMismatch: true)
             
             refreshStatus()
             scheduleConnectionsRefreshAfterStart()
@@ -1267,7 +1278,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
     func selectedMode() -> Mode {
         switch modeControl.selectedSegment {
-        case 0: return Mode(value: "Direct", displayName: "直接连接")
+        case 0: return Mode(value: "Direct", displayName: "直连/绕过代理")
         case 1: return Mode(value: "Global", displayName: "全局代理")
         default: return Mode(value: "Rule", displayName: "规则判定")
         }
@@ -1622,7 +1633,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         stopService()
     }
 
-    func setSystemProxy(enabled: Bool, port: Int) {
+    func setSystemProxy(enabled: Bool, port: Int, rollbackOnMismatch: Bool = false) {
         // Run networksetup commands in background
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
@@ -1652,16 +1663,48 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             // Check if another proxy is overriding settings
             if enabled {
                 Thread.sleep(forTimeInterval: 1.0)
-                if let settings = CFNetworkCopySystemProxySettings()?.takeRetainedValue() as? [String: Any],
-                   let httpEnabled = settings[kCFNetworkProxiesHTTPEnable as String] as? Int, httpEnabled == 1,
-                   let activePort = settings[kCFNetworkProxiesHTTPPort as String] as? Int,
-                   activePort != port {
+                let status = self.currentSystemProxyStatus(expectedPort: port)
+                if !status.matches {
                     Task { @MainActor [weak self] in
-                        self?.appendLog("[警告] 检测到当前系统代理已被其他软件接管（当前生效端口：\(activePort)，TungBox 预期端口：\(port)）。请先关闭其他代理软件（如 Surge, ClashX, Clash Verge）以避免冲突。\n")
+                        guard let self else { return }
+                        self.appendLog("[警告] 检测到当前系统代理没有指向 TungBox（\(status.message)）。请先关闭其他代理软件（如 Surge、Clash Verge）以避免冲突。\n")
+                        if rollbackOnMismatch {
+                            if self.runner.isRunning {
+                                self.runner.stop()
+                                self.appendLog("[TungBox] 已停止普通代理服务，避免后台空跑\n")
+                            }
+                            self.isSystemProxyEnabled = false
+                            self.serviceSwitch.isOn = false
+                            self.syncProxyPreferenceControls()
+                            self.showToast("系统代理被其他软件接管，已停止 TungBox 代理")
+                            self.refreshStatus()
+                        }
                     }
                 }
             }
         }
+    }
+
+    nonisolated func currentSystemProxyStatus(expectedPort port: Int) -> (matches: Bool, message: String) {
+        guard let settings = CFNetworkCopySystemProxySettings()?.takeRetainedValue() as? [String: Any] else {
+            return (false, "无法读取系统代理")
+        }
+        let httpEnabled = settings[kCFNetworkProxiesHTTPEnable as String] as? Int ?? 0
+        let httpHost = settings[kCFNetworkProxiesHTTPProxy as String] as? String ?? "-"
+        let httpPort = settings[kCFNetworkProxiesHTTPPort as String] as? Int ?? 0
+        let httpsEnabled = settings[kCFNetworkProxiesHTTPSEnable as String] as? Int ?? 0
+        let httpsHost = settings[kCFNetworkProxiesHTTPSProxy as String] as? String ?? "-"
+        let httpsPort = settings[kCFNetworkProxiesHTTPSPort as String] as? Int ?? 0
+        let httpMatches = httpEnabled == 1 && isLocalProxyHost(httpHost) && httpPort == port
+        let httpsMatches = httpsEnabled == 1 && isLocalProxyHost(httpsHost) && httpsPort == port
+        if httpMatches && httpsMatches {
+            return (true, "HTTP/HTTPS 已指向 127.0.0.1:\(port)")
+        }
+        return (false, "HTTP \(httpHost):\(httpPort) \(httpEnabled == 1 ? "开启" : "关闭")，HTTPS \(httpsHost):\(httpsPort) \(httpsEnabled == 1 ? "开启" : "关闭")，预期 127.0.0.1:\(port)")
+    }
+
+    nonisolated func isLocalProxyHost(_ host: String) -> Bool {
+        host == "127.0.0.1" || host == "localhost" || host == "::1"
     }
     
     nonisolated func getActiveNetworkServices() -> [String] {

@@ -62,7 +62,7 @@ extension MainWindowController {
         tunControlRow.translatesAutoresizingMaskIntoConstraints = false
         let tunCard = homeCard(title: "TUN 模式", views: [tunControlRow])
 
-        modeControl.items = ["直接连接", "全局代理", "规则判定"]
+        modeControl.items = ["直连/绕过代理", "全局代理", "规则判定"]
         modeControl.target = self
         modeControl.action = #selector(modeChanged)
         modeControl.selectedSegment = 2
@@ -551,8 +551,11 @@ extension MainWindowController {
         }
         if sender.isOn, !TunServiceManager.status(store: store).isUsable {
             sender.isOn = false
+            isTunEnabled = false
+            UserDefaults.standard.set(false, forKey: "tunEnabled")
+            syncProxyPreferenceControls()
             showToast("请先安装 TUN 服务")
-            showError(NSError.user("TUN 服务未安装。请先到 设置 > TUN 设置 安装 TUN 服务。"))
+            showError(NSError.user("TUN 服务不可用。请先到 设置 > TUN 设置 重新安装 TUN 服务。"))
             return
         }
         isTunEnabled = sender.isOn

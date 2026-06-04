@@ -698,7 +698,10 @@ extension MainWindowController {
     }
 
     @objc func toggleTunServiceInstallClicked() {
-        if TunServiceManager.status(store: store).isInstalled {
+        let status = TunServiceManager.status(store: store)
+        if status.shouldReinstall {
+            reinstallTunServiceClicked()
+        } else if status.isInstalled {
             uninstallTunServiceClicked()
         } else {
             installTunServiceClicked()
@@ -832,10 +835,15 @@ extension MainWindowController {
     func refreshTunServiceStatus() {
         let status = TunServiceManager.status(store: store)
         tunServiceStatusLabel.stringValue = "TUN 服务状态：\(status.displayText)"
-        tunServiceToggleButton.title = status.isInstalled ? "卸载 TUN 服务" : "安装 TUN 服务"
-        tunServiceToggleButton.style = status.isInstalled ? .destructive : .filled
+        if status.shouldReinstall {
+            tunServiceToggleButton.title = "重新安装 TUN 服务"
+            tunServiceToggleButton.style = .filled
+        } else {
+            tunServiceToggleButton.title = status.isInstalled ? "卸载 TUN 服务" : "安装 TUN 服务"
+            tunServiceToggleButton.style = status.isInstalled ? .destructive : .filled
+        }
         tunServiceReinstallButton.isEnabled = status.isInstalled
-        tunServiceReloadButton.isEnabled = status.isInstalled
+        tunServiceReloadButton.isEnabled = status.isUsable
         if FileManager.default.fileExists(atPath: TunServiceManager.logURL.path),
            let text = try? String(contentsOf: TunServiceManager.logURL, encoding: .utf8) {
             let lines = text.components(separatedBy: .newlines).filter { !$0.isEmpty }

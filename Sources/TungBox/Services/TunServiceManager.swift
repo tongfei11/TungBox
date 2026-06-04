@@ -41,6 +41,11 @@ enum TunServiceStatus {
             return false
         }
     }
+
+    var shouldReinstall: Bool {
+        if case .abnormal = self { return true }
+        return false
+    }
 }
 
 enum TunServiceManager {
@@ -64,6 +69,9 @@ enum TunServiceManager {
 
     static func status(store: Store) -> TunServiceStatus {
         guard FileManager.default.fileExists(atPath: plistPath) else {
+            if hasInstalledArtifacts() {
+                return .abnormal("服务文件残留，请重新安装 TUN 服务")
+            }
             return .notInstalled
         }
         guard FileManager.default.fileExists(atPath: scriptPath) else {
@@ -75,10 +83,42 @@ enum TunServiceManager {
         guard installedServiceDefinitionIsCurrent() else {
             return .abnormal("服务版本过旧，请重新安装 TUN 服务")
         }
+        guard launchDaemonIsLoaded() else {
+            return .abnormal("服务未加载，请重新安装 TUN 服务")
+        }
         if let pid = activeSingBoxPID(store: store), Darwin.kill(pid, 0) == 0 {
             return .installedRunning
         }
         return .installedIdle
+    }
+
+    private static func hasInstalledArtifacts() -> Bool {
+        [
+            scriptPath,
+            corePath,
+            configPath,
+            flagPath,
+            pidPath,
+            logPath,
+            stdoutPath,
+            stderrPath
+        ].contains { FileManager.default.fileExists(atPath: $0) }
+    }
+
+    private static func launchDaemonIsLoaded() -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        process.arguments = ["print", "system/\(label)"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        } catch {
+            return false
+        }
     }
 
     static func activeSingBoxPID(store: Store) -> Int32? {

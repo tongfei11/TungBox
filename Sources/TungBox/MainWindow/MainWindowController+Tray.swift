@@ -37,7 +37,7 @@ extension MainWindowController {
         menu.addItem(.separator())
 
         let modeMenu = NSMenu()
-        for (title, mode) in [("直接连接", "Direct"), ("全局代理", "Global"), ("规则判定", "Rule")] {
+        for (title, mode) in [("直连/绕过代理", "Direct"), ("全局代理", "Global"), ("规则判定", "Rule")] {
             let item = NSMenuItem(title: title, action: #selector(modeFromTray(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = mode
@@ -151,8 +151,11 @@ extension MainWindowController {
             isSystemProxyEnabled = true
         }
         if !isTunEnabled, !TunServiceManager.status(store: store).isUsable {
+            isTunEnabled = false
+            UserDefaults.standard.set(false, forKey: "tunEnabled")
+            syncProxyPreferenceControls()
             showToast("请先安装 TUN 服务")
-            showError(NSError.user("TUN 服务未安装。请先到 设置 > TUN 设置 安装 TUN 服务。"))
+            showError(NSError.user("TUN 服务不可用。请先到 设置 > TUN 设置 重新安装 TUN 服务。"))
             return
         }
         isTunEnabled.toggle()

@@ -12,7 +12,7 @@ extension MainWindowController {
             title?.textColor = MD3.onSurface
         }
 
-        nodesModeControl.items = ["直接连接", "全局代理", "规则判定"]
+        nodesModeControl.items = ["直连/绕过代理", "全局代理", "规则判定"]
         nodesModeControl.selectedSegment = 2
         nodesModeControl.translatesAutoresizingMaskIntoConstraints = false
         nodesModeControl.heightAnchor.constraint(equalToConstant: 36).isActive = true
@@ -627,4 +627,3 @@ extension MainWindowController {
         refreshNodesFromEditor()
     }
 }
-
