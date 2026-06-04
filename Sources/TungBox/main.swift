@@ -694,7 +694,11 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 try TunServiceManager.enable(store: store, configText: editor.string)
                 appendLog("[TUN] 已交给 TUN 服务启动 sing-box\n")
                 setSystemProxy(enabled: false, port: getMixedProxyPort())
-                refreshStatus()
+                // TUN daemon needs a moment to start sing-box; delay status refresh
+                // so the switch doesn't flip off before the daemon picks up the flag
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                    self?.refreshStatus()
+                }
                 scheduleConnectionsRefreshAfterStart()
                 return
             }

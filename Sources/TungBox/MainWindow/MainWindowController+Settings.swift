@@ -764,7 +764,7 @@ extension MainWindowController {
     }
 
     func syncProxyPreferenceControls() {
-        serviceSwitch.isOn = isSystemProxyEnabled && isProxyRuntimeRunning()
+        serviceSwitch.isOn = isProxyRuntimeRunning()
         homeSystemProxyRadio.state = isTunEnabled ? .off : .on
         homeTunRadio.state = isTunEnabled ? .on : .off
         settingsSystemProxyCheckbox.state = isSystemProxyDefaultEnabled ? .on : .off

@@ -213,6 +213,8 @@ enum TunServiceManager {
         if !FileManager.default.fileExists(atPath: store.tunRequestFlagURL.path) {
             FileManager.default.createFile(atPath: store.tunRequestFlagURL.path, contents: Data())
         }
+        // Wake the daemon immediately so it picks up the flag without polling delay
+        _ = runAppleScript("launchctl kickstart -k system/\(label) >/dev/null 2>&1 || true")
     }
 
     static func disable(store: Store) throws {

@@ -579,6 +579,16 @@ extension MainWindowController {
             if isProxyRuntimeRunning() {
                 try applyTunPreference(restartIfRunning: false)
                 reconcileSystemProxyForCurrentMode()
+            } else if tunEnabled {
+                // Proxy not running — start TUN directly instead of just saving config
+                _ = try saveCurrent()
+                try TunServiceManager.enable(store: store, configText: editor.string)
+                appendLog("[\(source)] 已启动 TUN 模式\n")
+                appendLog("[TUN] 已交给 TUN 服务启动 sing-box\n")
+                // Delay status refresh so daemon has time to pick up the flag
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                    self?.refreshStatus()
+                }
             }
             appendLog("[\(source)] 接管方式已切换为 \(isTunEnabled ? "TUN 模式" : "系统代理")\n")
         } catch {
