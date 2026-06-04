@@ -965,17 +965,19 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 ],
                 "auto_route": true,
                 "strict_route": false,
-                "inet4_route_address": ["0.0.0.0/1", "128.0.0.0/1"],
-                "inet4_route_exclude_address": [
+                "route_address": [
+                    "0.0.0.0/1",
+                    "128.0.0.0/1",
+                    "::/1",
+                    "8000::/1"
+                ],
+                "route_exclude_address": [
                     "10.0.0.0/8",
                     "172.16.0.0/12",
                     "192.168.0.0/16",
                     "169.254.0.0/16",
                     "224.0.0.0/4",
-                    "240.0.0.0/4"
-                ],
-                "inet6_route_address": ["::/1", "8000::/1"],
-                "inet6_route_exclude_address": [
+                    "240.0.0.0/4",
                     "fe80::/10",
                     "fec0::/10",
                     "fc00::/7",

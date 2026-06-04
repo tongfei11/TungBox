@@ -213,8 +213,10 @@ enum TunServiceManager {
         if !FileManager.default.fileExists(atPath: store.tunRequestFlagURL.path) {
             FileManager.default.createFile(atPath: store.tunRequestFlagURL.path, contents: Data())
         }
-        // Wake the daemon immediately so it picks up the flag without polling delay
-        _ = runAppleScript("launchctl kickstart -k system/\(label) >/dev/null 2>&1 || true")
+        // Wake the daemon immediately so it picks up the flag without polling delay.
+        // kickstart on a system daemon needs root but we only write user-owned files,
+        // so the daemon polls and picks them up on its next 1s loop iteration.
+        // Launchctl kickstart without admin privs will fail → just let the poll loop handle it.
     }
 
     static func disable(store: Store) throws {
