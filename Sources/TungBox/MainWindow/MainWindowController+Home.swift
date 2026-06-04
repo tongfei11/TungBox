@@ -208,7 +208,7 @@ extension MainWindowController {
             trafficStatsCard.widthAnchor.constraint(equalTo: outboundCard.widthAnchor),
             
             // --- Height Constraints ---
-            serviceCard.heightAnchor.constraint(equalToConstant: 168),
+            serviceCard.heightAnchor.constraint(equalToConstant: 180),
             outboundCard.heightAnchor.constraint(equalTo: serviceCard.heightAnchor),
             nodeLatencyCard.heightAnchor.constraint(equalTo: serviceCard.heightAnchor),
             uploadCard.heightAnchor.constraint(equalTo: serviceCard.heightAnchor),
