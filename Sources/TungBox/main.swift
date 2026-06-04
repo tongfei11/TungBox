@@ -1846,6 +1846,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         false
     }
 
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        controller?.showConsoleWindow()
+        return true
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         controller?.stopServiceFromDelegate()
     }
