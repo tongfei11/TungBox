@@ -700,7 +700,7 @@ extension MainWindowController {
     @objc func toggleTunServiceInstallClicked() {
         let status = TunServiceManager.status(store: store)
         if status.shouldReinstall {
-            reinstallTunServiceClicked()
+            installTunServiceClicked()
         } else if status.isInstalled {
             uninstallTunServiceClicked()
         } else {
@@ -741,9 +741,6 @@ extension MainWindowController {
     @objc func reinstallTunServiceClicked() {
         do {
             let shouldRestoreTun = isTunEnabled
-            if TunServiceManager.status(store: store).isInstalled {
-                try TunServiceManager.uninstall(store: store)
-            }
             try TunServiceManager.install(store: store)
             if shouldRestoreTun {
                 try TunServiceManager.enable(store: store, configText: editor.string)
@@ -836,7 +833,7 @@ extension MainWindowController {
         let status = TunServiceManager.status(store: store)
         tunServiceStatusLabel.stringValue = "TUN 服务状态：\(status.displayText)"
         if status.shouldReinstall {
-            tunServiceToggleButton.title = "重新安装 TUN 服务"
+            tunServiceToggleButton.title = "安装 TUN 服务"
             tunServiceToggleButton.style = .filled
         } else {
             tunServiceToggleButton.title = status.isInstalled ? "卸载 TUN 服务" : "安装 TUN 服务"

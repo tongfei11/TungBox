@@ -142,6 +142,7 @@ enum TunServiceManager {
         let tempPlist = FileManager.default.temporaryDirectory.appendingPathComponent("\(label).plist")
         try plist.write(to: tempPlist, atomically: true, encoding: .utf8)
         let command = [
+            "set -e",
             "launchctl bootout system/\(label) >/dev/null 2>&1 || true",
             "mkdir -p \(shellQuote(installDirectoryPath))",
             "cp \(shellQuote(tempScript.path)) \(shellQuote(scriptPath))",
@@ -154,10 +155,14 @@ enum TunServiceManager {
             "chmod 755 \(shellQuote(scriptPath)) \(shellQuote(corePath))",
             "chmod 644 \(shellQuote(logPath)) \(shellQuote(stdoutPath)) \(shellQuote(stderrPath))",
             "chmod 644 \(shellQuote(plistPath))",
+            "xattr -c \(shellQuote(scriptPath)) \(shellQuote(corePath)) \(shellQuote(plistPath)) >/dev/null 2>&1 || true",
             "launchctl bootstrap system \(shellQuote(plistPath))",
-            "launchctl enable system/\(label)"
-        ].joined(separator: "; ")
-        let result = runAppleScript(command)
+            "launchctl enable system/\(label)",
+            "launchctl kickstart -k system/\(label) >/dev/null 2>&1 || true",
+            "launchctl print system/\(label) >/dev/null"
+        ]
+        let commandText = command.joined(separator: "\n")
+        let result = runAppleScript(commandText)
         try? FileManager.default.removeItem(at: tempScript)
         try? FileManager.default.removeItem(at: tempPlist)
         if result.status != 0 {
