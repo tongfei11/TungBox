@@ -54,12 +54,22 @@ extension MainWindowController {
         captureOptionsStack.spacing = 8
         captureOptionsStack.alignment = .leading
         captureOptionsStack.translatesAutoresizingMaskIntoConstraints = false
+        
+        systemProxyOption.leadingAnchor.constraint(equalTo: captureOptionsStack.leadingAnchor).isActive = true
+        systemProxyOption.trailingAnchor.constraint(equalTo: captureOptionsStack.trailingAnchor).isActive = true
+        tunOption.leadingAnchor.constraint(equalTo: captureOptionsStack.leadingAnchor).isActive = true
+        tunOption.trailingAnchor.constraint(equalTo: captureOptionsStack.trailingAnchor).isActive = true
+
+        captureLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        captureOptionsStack.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         let captureRow = NSStackView(views: [captureLabel, captureOptionsStack])
         captureRow.orientation = .horizontal
         captureRow.spacing = 16
         captureRow.alignment = .top
         captureRow.translatesAutoresizingMaskIntoConstraints = false
+        
+        captureOptionsStack.trailingAnchor.constraint(equalTo: captureRow.trailingAnchor).isActive = true
 
         let serviceCard = homeCard(title: "代理服务", titleInlineView: statusChip, titleAccessoryView: serviceSwitch, views: [captureRow])
 
@@ -198,7 +208,7 @@ extension MainWindowController {
             trafficStatsCard.widthAnchor.constraint(equalTo: outboundCard.widthAnchor),
             
             // --- Height Constraints ---
-            serviceCard.heightAnchor.constraint(equalToConstant: 142),
+            serviceCard.heightAnchor.constraint(equalToConstant: 168),
             outboundCard.heightAnchor.constraint(equalTo: serviceCard.heightAnchor),
             nodeLatencyCard.heightAnchor.constraint(equalTo: serviceCard.heightAnchor),
             uploadCard.heightAnchor.constraint(equalTo: serviceCard.heightAnchor),
@@ -600,21 +610,26 @@ extension MainWindowController {
             hintLabel?.textColor = MD3.onSurfaceVariant
         }
         
-        let spacer = NSView()
-        spacer.translatesAutoresizingMaskIntoConstraints = false
-        spacer.widthAnchor.constraint(equalToConstant: 28).isActive = true
+        let hintContainer = NSView()
+        hintContainer.translatesAutoresizingMaskIntoConstraints = false
+        hintContainer.addSubview(hintLabel)
         
-        let hintRow = NSStackView(views: [spacer, hintLabel])
-        hintRow.orientation = .horizontal
-        hintRow.spacing = 0
-        hintRow.alignment = .centerY
-        hintRow.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            hintLabel.leadingAnchor.constraint(equalTo: hintContainer.leadingAnchor, constant: 28),
+            hintLabel.trailingAnchor.constraint(equalTo: hintContainer.trailingAnchor),
+            hintLabel.topAnchor.constraint(equalTo: hintContainer.topAnchor),
+            hintLabel.bottomAnchor.constraint(equalTo: hintContainer.bottomAnchor)
+        ])
         
-        let stack = NSStackView(views: [radio, hintRow])
+        let stack = NSStackView(views: [radio, hintContainer])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 2
         stack.translatesAutoresizingMaskIntoConstraints = false
+        
+        hintContainer.leadingAnchor.constraint(equalTo: stack.leadingAnchor).isActive = true
+        hintContainer.trailingAnchor.constraint(equalTo: stack.trailingAnchor).isActive = true
+        
         return stack
     }
 }
