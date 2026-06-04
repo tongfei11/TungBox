@@ -958,8 +958,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                     "fdfe:dcba:9876::1/126"
                 ],
                 "auto_route": true,
-                "strict_route": true,
-                "sniff": true
+                "strict_route": true
             ], at: 0)
         }
         config["inbounds"] = inbounds
