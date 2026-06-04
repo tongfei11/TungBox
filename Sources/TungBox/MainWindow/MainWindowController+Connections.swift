@@ -74,10 +74,11 @@ extension MainWindowController {
 
         connectionsTable.backgroundColor = .clear
         connectionsTable.addTableColumn(connectionColumn("network", "网络", 70))
-        connectionsTable.addTableColumn(connectionColumn("source", "来源", 150))
+        connectionsTable.addTableColumn(connectionColumn("status", "状态", 80))
+        connectionsTable.addTableColumn(connectionColumn("source", "来源 IP", 120))
         connectionsTable.addTableColumn(connectionColumn("destination", "目标", 240))
-        connectionsTable.addTableColumn(connectionColumn("rule", "规则", 140))
-        connectionsTable.addTableColumn(connectionColumn("outbound", "出站", 130))
+        connectionsTable.addTableColumn(connectionColumn("rule", "规则", 120))
+        connectionsTable.addTableColumn(connectionColumn("outbound", "出站", 120))
         connectionsTable.addTableColumn(connectionColumn("traffic", "流量", 120))
         connectionsTable.delegate = self
         connectionsTable.dataSource = self
@@ -127,6 +128,7 @@ extension MainWindowController {
             conn.outbound.lowercased().contains(query) ||
             conn.destination.lowercased().contains(query) ||
             conn.source.lowercased().contains(query) ||
+            conn.status.lowercased().contains(query) ||
             conn.rule.lowercased().contains(query) ||
             conn.network.lowercased().contains(query)
         }
@@ -296,6 +298,7 @@ extension MainWindowController {
         let text: String
         switch columnID {
         case "network": text = connection.network
+        case "status": text = connection.status
         case "source": text = connection.source
         case "destination": text = connection.destination
         case "rule": text = connection.rule

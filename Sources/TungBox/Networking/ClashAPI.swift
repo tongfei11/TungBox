@@ -36,11 +36,11 @@ enum ClashAPI {
             let destinationHost = (metadata["host"] as? String) ?? (metadata["destinationIP"] as? String) ?? ""
             let destinationPort = metadata["destinationPort"].map { "\($0)" } ?? ""
             let sourceIP = (metadata["sourceIP"] as? String) ?? ""
-            let sourcePort = metadata["sourcePort"].map { "\($0)" } ?? ""
             return ConnectionInfo(
                 id: (item["id"] as? String) ?? UUID().uuidString,
                 network: (metadata["network"] as? String) ?? "",
-                source: sourcePort.isEmpty ? sourceIP : "\(sourceIP):\(sourcePort)",
+                status: connectionStatus(from: item, chains: chains, destinationHost: destinationHost),
+                source: sourceIP,
                 destination: destinationPort.isEmpty ? destinationHost : "\(destinationHost):\(destinationPort)",
                 rule: (item["rule"] as? String) ?? "",
                 outbound: chains.first ?? "",
@@ -48,6 +48,36 @@ enum ClashAPI {
                 download: (item["download"] as? Int) ?? 0
             )
         }
+    }
+
+    private static func connectionStatus(from item: [String: Any], chains: [String], destinationHost: String) -> String {
+        let rawStatus = [
+            item["status"],
+            item["state"],
+            item["connectionStatus"]
+        ].compactMap { $0 as? String }.first?.lowercased()
+
+        if let rawStatus {
+            if ["reject", "rejected", "blocked", "closed", "failed", "failure"].contains(rawStatus) {
+                return "拒绝"
+            }
+            if ["pending", "connecting", "dialing", "resolving", "opening"].contains(rawStatus) {
+                return "pending"
+            }
+            if ["connected", "established", "open", "active", "ok", "success"].contains(rawStatus) {
+                return "成功"
+            }
+        }
+
+        let rule = ((item["rule"] as? String) ?? "").lowercased()
+        let outboundText = chains.joined(separator: " ").lowercased()
+        if rule.contains("reject") || outboundText.contains("reject") {
+            return "拒绝"
+        }
+        if destinationHost.isEmpty || chains.isEmpty {
+            return "pending"
+        }
+        return "成功"
     }
 
     @discardableResult

@@ -57,6 +57,7 @@ struct CustomRule: Codable, Equatable {
 struct ConnectionInfo {
     var id: String
     var network: String
+    var status: String
     var source: String
     var destination: String
     var rule: String
