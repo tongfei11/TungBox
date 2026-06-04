@@ -16,6 +16,7 @@ extension MainWindowController {
     func menuNeedsUpdate(_ menu: NSMenu) {
         guard menu === statusItem?.menu else { return }
         rebuildTrayMenu(menu)
+        refreshTrayRuntimeState(for: menu)
     }
 
     func rebuildTrayMenu(_ menu: NSMenu) {
@@ -85,8 +86,7 @@ extension MainWindowController {
             menu.addItem(NSMenuItem(title: "暂无节点", action: nil, keyEquivalent: ""))
         } else {
             for node in members {
-                let delay = nodes.first(where: { $0.tag == node })?.delay ?? "未测试"
-                let displayTitle = "\(node) (\(delay))"
+                let displayTitle = trayProxyNodeTitle(for: node)
                 let item = NSMenuItem(title: displayTitle, action: isAuto ? nil : #selector(proxyNodeFromTray(_:)), keyEquivalent: "")
                 if !isAuto {
                     item.target = self
@@ -100,6 +100,37 @@ extension MainWindowController {
         }
         root.submenu = menu
         return root
+    }
+
+    private func refreshTrayRuntimeState(for menu: NSMenu) {
+        guard isProxyRuntimeRunning() else { return }
+        Task { [weak self, weak menu] in
+            guard let proxiesObj = try? await ClashAPI.proxies() else { return }
+            await MainActor.run { [weak self, weak menu] in
+                guard let self, let menu, menu === self.statusItem?.menu else { return }
+                self.lastProxiesObj = proxiesObj
+                self.syncNodeDelaysFromClashAPI(proxiesObj: proxiesObj)
+                self.rebuildTrayMenu(menu)
+            }
+        }
+    }
+
+    private func trayProxyNodeTitle(for node: String) -> String {
+        if let group = nodeGroups.first(where: { $0.tag == node }),
+           ["urltest", "url-test", "fallback"].contains(group.type.lowercased()) {
+            let resolved = resolveActiveOutboundForGroup(groupTag: group.tag, proxiesObj: lastProxiesObj)
+            let resolvedNode = resolved.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !resolvedNode.isEmpty, resolvedNode != node {
+                let delay = nodes.first(where: { $0.tag == resolvedNode })?.delay
+                if let delay, !delay.isEmpty, delay != "未测试" {
+                    return "\(node) - \(resolvedNode) (\(delay))"
+                }
+                return "\(node) - \(resolvedNode)"
+            }
+        }
+
+        let delay = nodes.first(where: { $0.tag == node })?.delay ?? "未测试"
+        return "\(node) (\(delay))"
     }
 
     func trayIcon() -> NSImage? {
