@@ -691,6 +691,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                     syncProxyPreferenceControls()
                     throw NSError.user("TUN 服务不可用。请先到 设置 > TUN 设置 重新安装 TUN 服务。")
                 }
+                runner.stop()
                 try TunServiceManager.enable(store: store, configText: editor.string)
                 appendLog("[TUN] 已交给 TUN 服务启动 sing-box\n")
                 setSystemProxy(enabled: false, port: getMixedProxyPort())
@@ -731,6 +732,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             if self.isConnectionsPageSelected() {
                 self.startConnectionsRefreshTimer()
             }
+            self.updateRunningStats()
             self.refreshConnections(showErrors: false)
         }
     }
@@ -927,6 +929,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         let url = try saveCurrent()
         if restartIfRunning, wasRunning {
             if isTunEnabled {
+                runner.stop()
                 try TunServiceManager.enable(store: store, configText: editor.string)
                 appendLog("[TUN] 已更新 TUN 服务配置\n")
             } else {
@@ -937,6 +940,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             }
         } else if wasRunning {
             if isTunEnabled {
+                runner.stop()
                 try TunServiceManager.enable(store: store, configText: editor.string)
             } else {
                 try TunServiceManager.disable(store: store)
@@ -1507,7 +1511,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         refreshHomeFeatureStatus()
         
         if isRunning {
-            let activeNodeInfo = resolveActiveOutbound(proxiesObj: nil)
+            let activeNodeInfo = resolveActiveOutbound(proxiesObj: lastProxiesObj)
             let formattedNode = activeNodeInfo.isAuto ? "\(activeNodeInfo.name) (自动)" : activeNodeInfo.name
             currentNodeNameLabel.stringValue = formattedNode
             let activeDelay = nodes.first(where: { $0.tag == activeNodeInfo.name })?.delay ?? "—"
