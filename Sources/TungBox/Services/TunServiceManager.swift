@@ -55,6 +55,7 @@ enum TunServiceManager {
     static let scriptPath = "\(installDirectoryPath)/tun-service.sh"
     static let corePath = "\(installDirectoryPath)/sing-box"
     static let configPath = "\(installDirectoryPath)/tun-daemon.json"
+    static let cachePath = "\(installDirectoryPath)/cache.db"
     static let flagPath = "\(installDirectoryPath)/tun-enabled"
     static let pidPath = "\(installDirectoryPath)/tun-service.pid"
     static let logPath = "\(installDirectoryPath)/tun-service.log"

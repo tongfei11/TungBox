@@ -962,6 +962,28 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             ], at: 0)
         }
         config["inbounds"] = inbounds
+        config = setTunCacheFile(enabled: enabled, in: config)
+        return config
+    }
+
+    func setTunCacheFile(enabled: Bool, in config: [String: Any]) -> [String: Any] {
+        var config = config
+        var experimental = config["experimental"] as? [String: Any] ?? [:]
+        var cacheFile = experimental["cache_file"] as? [String: Any] ?? [:]
+
+        if enabled {
+            cacheFile["enabled"] = true
+            cacheFile["path"] = TunServiceManager.cachePath
+            experimental["cache_file"] = cacheFile
+            config["experimental"] = experimental
+            return config
+        }
+
+        if cacheFile["path"] as? String == TunServiceManager.cachePath {
+            cacheFile.removeValue(forKey: "path")
+            experimental["cache_file"] = cacheFile
+            config["experimental"] = experimental
+        }
         return config
     }
 
