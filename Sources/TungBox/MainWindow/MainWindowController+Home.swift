@@ -33,16 +33,14 @@ extension MainWindowController {
         serviceSwitch.target = self
         serviceSwitch.action = #selector(switchToggled(_:))
 
-        let serviceSpacer = NSView()
-        serviceSpacer.translatesAutoresizingMaskIntoConstraints = false
-        let serviceRow = NSStackView(views: [statusChip, serviceSpacer, serviceSwitch])
-        serviceRow.orientation = .horizontal
-        serviceRow.distribution = .fill
-        serviceRow.alignment = .centerY
-        serviceRow.translatesAutoresizingMaskIntoConstraints = false
+        let accessoryStack = NSStackView(views: [statusChip, serviceSwitch])
+        accessoryStack.orientation = .horizontal
+        accessoryStack.spacing = 8
+        accessoryStack.alignment = .centerY
+        accessoryStack.translatesAutoresizingMaskIntoConstraints = false
 
         let captureLabel = NSTextField(labelWithString: "接管方式")
-        captureLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        captureLabel.font = .systemFont(ofSize: 13, weight: .medium)
         captureLabel.textColor = MD3.onSurfaceVariant
         captureLabel.translatesAutoresizingMaskIntoConstraints = false
         registerThemeObserver { [weak captureLabel] in
@@ -53,13 +51,15 @@ extension MainWindowController {
         configureCaptureRadio(homeTunRadio, tag: 1, action: #selector(homeCaptureModeChanged(_:)))
         homeSystemProxyRadio.state = isTunEnabled ? .off : .on
         homeTunRadio.state = isTunEnabled ? .on : .off
-        let captureModeStack = NSStackView(views: [homeSystemProxyRadio, homeTunRadio])
-        captureModeStack.orientation = .vertical
-        captureModeStack.spacing = 4
-        captureModeStack.alignment = .leading
-        captureModeStack.translatesAutoresizingMaskIntoConstraints = false
 
-        let serviceCard = homeCard(title: "代理服务", views: [serviceRow, captureLabel, captureModeStack])
+        let captureModeRow = NSStackView(views: [captureLabel, homeSystemProxyRadio, homeTunRadio])
+        captureModeRow.orientation = .horizontal
+        captureModeRow.spacing = 16
+        captureModeRow.alignment = .centerY
+        captureModeRow.translatesAutoresizingMaskIntoConstraints = false
+        captureModeRow.setCustomSpacing(16, after: captureLabel)
+
+        let serviceCard = homeCard(title: "代理服务", titleAccessoryView: accessoryStack, views: [captureModeRow])
 
         modeControl.items = ["直连/绕过代理", "全局代理", "规则判定"]
         modeControl.target = self
