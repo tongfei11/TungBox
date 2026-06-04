@@ -600,15 +600,21 @@ extension MainWindowController {
             hintLabel?.textColor = MD3.onSurfaceVariant
         }
         
-        let stack = NSStackView(views: [radio, hintLabel])
+        let spacer = NSView()
+        spacer.translatesAutoresizingMaskIntoConstraints = false
+        spacer.widthAnchor.constraint(equalToConstant: 28).isActive = true
+        
+        let hintRow = NSStackView(views: [spacer, hintLabel])
+        hintRow.orientation = .horizontal
+        hintRow.spacing = 0
+        hintRow.alignment = .centerY
+        hintRow.translatesAutoresizingMaskIntoConstraints = false
+        
+        let stack = NSStackView(views: [radio, hintRow])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 2
         stack.translatesAutoresizingMaskIntoConstraints = false
-        
-        NSLayoutConstraint.activate([
-            hintLabel.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: 28)
-        ])
         return stack
     }
 }
