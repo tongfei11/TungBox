@@ -33,12 +33,6 @@ extension MainWindowController {
         serviceSwitch.target = self
         serviceSwitch.action = #selector(switchToggled(_:))
 
-        let accessoryStack = NSStackView(views: [statusChip, serviceSwitch])
-        accessoryStack.orientation = .horizontal
-        accessoryStack.spacing = 8
-        accessoryStack.alignment = .centerY
-        accessoryStack.translatesAutoresizingMaskIntoConstraints = false
-
         let captureLabel = NSTextField(labelWithString: "接管方式")
         captureLabel.font = .systemFont(ofSize: 13, weight: .bold)
         captureLabel.textColor = MD3.onSurfaceVariant
@@ -67,7 +61,7 @@ extension MainWindowController {
         captureRow.alignment = .top
         captureRow.translatesAutoresizingMaskIntoConstraints = false
 
-        let serviceCard = homeCard(title: "代理服务", titleAccessoryView: accessoryStack, views: [captureRow])
+        let serviceCard = homeCard(title: "代理服务", titleInlineView: statusChip, titleAccessoryView: serviceSwitch, views: [captureRow])
 
         modeControl.items = ["直连/绕过代理", "全局代理", "规则判定"]
         modeControl.target = self
@@ -304,7 +298,7 @@ extension MainWindowController {
         label.maximumNumberOfLines = 2
     }
 
-    func homeCard(title: String, titleAccessoryView: NSView? = nil, views: [NSView]) -> NSView {
+    func homeCard(title: String, titleInlineView: NSView? = nil, titleAccessoryView: NSView? = nil, views: [NSView]) -> NSView {
         let panel = MD3Panel()
         panel.type = .elevated
         panel.translatesAutoresizingMaskIntoConstraints = false
@@ -323,6 +317,10 @@ extension MainWindowController {
             titleLabel?.textColor = MD3.onSurface
         }
         titleStack.addArrangedSubview(titleLabel)
+        
+        if let inline = titleInlineView {
+            titleStack.addArrangedSubview(inline)
+        }
         
         if let accessory = titleAccessoryView {
             let spacer = NSView()
