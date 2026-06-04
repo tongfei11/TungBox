@@ -133,6 +133,14 @@ enum ConfigCompatibilityChecker {
                             autoFixed: true
                         ))
                     }
+                    if inbound["inet4_route_exclude_address"] != nil || inbound["inet6_route_exclude_address"] != nil {
+                        issues.append(Issue(
+                            severity: .warn,
+                            path: "inbounds[\(i)].tun",
+                            message: "TUN 的 inet4_route_exclude_address / inet6_route_exclude_address 已弃用。请合并为 route_exclude_address 数组。",
+                            autoFixed: true
+                        ))
+                    }
                 }
             }
         }
@@ -272,6 +280,18 @@ enum ConfigCompatibilityChecker {
                     if !routes.isEmpty {
                         updated["route_address"] = routes
                         fixed.append("inbounds[\(i)].tun: inet4/inet6_route_address → route_address")
+                    }
+
+                    var excludes: [String] = []
+                    if let v4 = updated.removeValue(forKey: "inet4_route_exclude_address") {
+                        excludes.append(contentsOf: asStringArray(v4))
+                    }
+                    if let v6 = updated.removeValue(forKey: "inet6_route_exclude_address") {
+                        excludes.append(contentsOf: asStringArray(v6))
+                    }
+                    if !excludes.isEmpty {
+                        updated["route_exclude_address"] = excludes
+                        fixed.append("inbounds[\(i)].tun: inet4/inet6_route_exclude_address → route_exclude_address")
                     }
                     newInbounds[i] = updated
                 }
