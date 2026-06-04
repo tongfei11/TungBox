@@ -960,7 +960,23 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                     "fdfe:dcba:9876::1/126"
                 ],
                 "auto_route": true,
-                "strict_route": true
+                "strict_route": false,
+                "inet4_route_address": ["0.0.0.0/1", "128.0.0.0/1"],
+                "inet4_route_exclude_address": [
+                    "10.0.0.0/8",
+                    "172.16.0.0/12",
+                    "192.168.0.0/16",
+                    "169.254.0.0/16",
+                    "224.0.0.0/4",
+                    "240.0.0.0/4"
+                ],
+                "inet6_route_address": ["::/1", "8000::/1"],
+                "inet6_route_exclude_address": [
+                    "fe80::/10",
+                    "fec0::/10",
+                    "fc00::/7",
+                    "ff00::/8"
+                ]
             ], at: 0)
         }
         config["inbounds"] = inbounds

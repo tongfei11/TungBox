@@ -264,12 +264,55 @@ enum TunServiceManager {
           return 0
         }
 
-        cleanup() {
+        # Clean up stale TUN default routes. sing-box auto_route replaces the system
+        # default route; if sing-box crashes or is killed before restoring, ALL traffic
+        # gets black-holed (including Surge enhanced mode, which runs inside utun).
+        # These routes use split-/1 trick to override 0.0.0.0/0 and ::/0 without
+        # touching other routes — safe to delete even if no stale route exists.
+        clean_routes() {
+          echo "$(date '+%Y-%m-%d %H:%M:%S') cleaning up TUN routes" >> "$LOG"
+          # IPv4: delete sing-box split-default fake routes
+          /sbin/route -n delete -net 0.0.0.0/1 2>/dev/null || true
+          /sbin/route -n delete -net 128.0.0.0/1 2>/dev/null || true
+          /sbin/route -n delete -net default -iface utun 2>/dev/null || true
+          # Restore the real default route (get gateway before TUN polluted it is too late,
+          # so we rely on networksetup to re-apply DHCP — but at least remove bad routes)
+          # IPv6: delete sing-box split-default fake routes
+          /sbin/route -n delete -inet6 -net ::/1 2>/dev/null || true
+          /sbin/route -n delete -inet6 -net 8000::/1 2>/dev/null || true
+          /sbin/route -n delete -inet6 default -iface utun 2>/dev/null || true
+          # Kick the primary network service to restore correct routes
+          # Best-effort: get the first active service and renew DHCP
+          for svc in $(/usr/sbin/networksetup -listallnetworkservices | tail -n +2 | grep -v '^\\*'); do
+            if /usr/sbin/networksetup -getinfo "$svc" 2>/dev/null | grep -q '^IP address'; then
+              # Renew DHCP to restore default gateway
+              /usr/sbin/networksetup -renewdhcp "$svc" 2>/dev/null || true
+              break
+            fi
+          done 2>/dev/null || true
+          echo "$(date '+%Y-%m-%d %H:%M:%S') route cleanup done" >> "$LOG"
+        }
+
+        shutdown_child() {
           if [ -n "$CHILD" ] && kill -0 "$CHILD" >/dev/null 2>&1; then
-            kill "$CHILD" >/dev/null 2>&1 || true
-            wait "$CHILD" >/dev/null 2>&1 || true
+            # Give sing-box time to clean up routes itself first
+            kill -TERM "$CHILD" >/dev/null 2>&1 || true
+            sleep 2
+            if kill -0 "$CHILD" >/dev/null 2>&1; then
+              echo "$(date '+%Y-%m-%d %H:%M:%S') sing-box not exiting, force killing" >> "$LOG"
+              kill -KILL "$CHILD" >/dev/null 2>&1 || true
+              wait "$CHILD" >/dev/null 2>&1 || true
+            else
+              wait "$CHILD" >/dev/null 2>&1 || true
+            fi
           fi
+          clean_routes
+          CHILD=""
           rm -f "$PIDFILE"
+        }
+
+        cleanup() {
+          shutdown_child
           exit 0
         }
         trap cleanup TERM INT
@@ -277,7 +320,7 @@ enum TunServiceManager {
         echo "$(date '+%Y-%m-%d %H:%M:%S') TUN service started" >> "$LOG"
         while true; do
           if ! has_request; then
-            rm -f "$FLAG" "$PIDFILE"
+            rm -f "$FLAG"
             sleep 1
             continue
           fi
@@ -291,15 +334,13 @@ enum TunServiceManager {
               if ! has_request; then
                 echo "$(date '+%Y-%m-%d %H:%M:%S') stopping sing-box TUN" >> "$LOG"
                 rm -f "$FLAG"
-                kill "$CHILD" >/dev/null 2>&1 || true
-                wait "$CHILD" >/dev/null 2>&1 || true
+                shutdown_child
                 break
               fi
               if [ "$REQUEST_CONFIG" -nt "$CONFIG" ]; then
                 echo "$(date '+%Y-%m-%d %H:%M:%S') reloading sing-box TUN config" >> "$LOG"
                 if sync_requested_config; then
-                  kill "$CHILD" >/dev/null 2>&1 || true
-                  wait "$CHILD" >/dev/null 2>&1 || true
+                  shutdown_child
                   break
                 fi
               fi
@@ -354,13 +395,23 @@ enum TunServiceManager {
             && script.contains("REQUEST_CONFIG=")
             && script.contains("REQUEST_FLAG=")
             && script.contains("sync_requested_config")
+            && script.contains("shutdown_child")
+            && script.contains("clean_routes")
             && plist.contains(stdoutPath)
             && plist.contains(stderrPath)
     }
 
     private static func stopChildCommand() -> String {
         """
-        if [ -f \(shellQuote(pidPath)) ]; then PID=$(cat \(shellQuote(pidPath)) 2>/dev/null || true); case "$PID" in ''|*[!0-9]*) ;; *) kill "$PID" >/dev/null 2>&1 || true; sleep 0.3; kill -KILL "$PID" >/dev/null 2>&1 || true ;; esac; fi
+        if [ -f \(shellQuote(pidPath)) ]; then PID=$(cat \(shellQuote(pidPath)) 2>/dev/null || true); case "$PID" in ''|*[!0-9]*) ;; *) kill -TERM "$PID" >/dev/null 2>&1 || true; sleep 2; kill -KILL "$PID" >/dev/null 2>&1 || true ;; esac; fi
+        # Clean up stale TUN split-default routes
+        /sbin/route -n delete -net 0.0.0.0/1 2>/dev/null || true
+        /sbin/route -n delete -net 128.0.0.0/1 2>/dev/null || true
+        /sbin/route -n delete -net default -iface utun 2>/dev/null || true
+        /sbin/route -n delete -inet6 -net ::/1 2>/dev/null || true
+        /sbin/route -n delete -inet6 -net 8000::/1 2>/dev/null || true
+        /sbin/route -n delete -inet6 default -iface utun 2>/dev/null || true
+        for svc in $(/usr/sbin/networksetup -listallnetworkservices | tail -n +2 | grep -v '^\\*'); do if /usr/sbin/networksetup -getinfo "$svc" 2>/dev/null | grep -q '^IP address'; then /usr/sbin/networksetup -renewdhcp "$svc" 2>/dev/null || true; break; fi; done 2>/dev/null || true
         """
     }
 
