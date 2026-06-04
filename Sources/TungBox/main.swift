@@ -100,9 +100,11 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var logBuffer = ""
     
     let serviceSwitch = MD3Switch()
-    let tunSwitch = MD3Switch()
-    let settingsSystemProxyCheckbox = MD3Checkbox(checkboxWithTitle: "默认开启系统代理", target: nil, action: nil)
-    let settingsTunCheckbox = MD3Checkbox(checkboxWithTitle: "默认开启 TUN 模式", target: nil, action: nil)
+    let homeSystemProxyRadio = NSButton(radioButtonWithTitle: "系统代理", target: nil, action: nil)
+    let homeTunRadio = NSButton(radioButtonWithTitle: "TUN 模式", target: nil, action: nil)
+    let settingsSystemProxyRadio = NSButton(radioButtonWithTitle: "系统代理", target: nil, action: nil)
+    let settingsTunRadio = NSButton(radioButtonWithTitle: "TUN 模式", target: nil, action: nil)
+    let settingsSystemProxyCheckbox = MD3Checkbox(checkboxWithTitle: "默认开启代理服务", target: nil, action: nil)
     let settingsLaunchAtLoginCheckbox = MD3Checkbox(checkboxWithTitle: "开机自启动", target: nil, action: nil)
     let settingsStartSilentlyCheckbox = MD3Checkbox(checkboxWithTitle: "静默启动", target: nil, action: nil)
     let tunServiceStatusLabel = NSTextField(labelWithString: "TUN 服务状态：未检测")
@@ -299,9 +301,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             UserDefaults.standard.set(true, forKey: "tunEnabled")
             // Daemon is running TUN — regular proxy should be off to avoid conflict
             isSystemProxyEnabled = false
-        } else if isTunEnabled && !isSystemProxyEnabled {
-            isTunEnabled = false
-            UserDefaults.standard.set(false, forKey: "tunEnabled")
         }
         // If TUN was enabled but daemon is idle (e.g. manual flag removal), re-enable
         if isTunEnabled && tunStatus.isInstalled && !tunStatus.isRunning {
@@ -322,7 +321,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         guard isSystemProxyDefaultEnabled else {
             isSystemProxyEnabled = false
             syncProxyPreferenceControls()
-            appendLog("[启动] 默认开启系统代理未启用，本次启动不自动打开代理。\n")
+            appendLog("[启动] 默认开启代理服务未启用，本次启动不自动打开代理。\n")
             return
         }
 
@@ -336,7 +335,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             return
         }
 
-        appendLog("[启动] 按设置自动开启系统代理。\n")
+        appendLog("[启动] 按设置自动开启代理服务。\n")
         startService()
     }
 
@@ -918,7 +917,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
 
     func applyTunPreference(restartIfRunning: Bool) throws {
-        let wasRunning = isProxyRuntimeRunning()
+        let wasRunning = runner.isRunning || TunServiceManager.status(store: store).isRunning
         guard var config = parseConfigObject(from: editor.string) else {
             throw NSError.user("当前配置不是有效 JSON")
         }

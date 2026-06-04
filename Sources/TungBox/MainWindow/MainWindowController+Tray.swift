@@ -25,15 +25,22 @@ extension MainWindowController {
         menu.addItem(NSMenuItem(title: "\(TungBoxVersion.display) \(status)", action: nil, keyEquivalent: ""))
         menu.addItem(.separator())
 
-        let systemProxy = NSMenuItem(title: "系统代理", action: #selector(toggleSystemProxyFromTray), keyEquivalent: "")
-        systemProxy.target = self
-        systemProxy.state = (isProxyRuntimeRunning() && isSystemProxyEnabled) ? .on : .off
-        menu.addItem(systemProxy)
+        let proxyService = NSMenuItem(title: "代理服务", action: #selector(toggleProxyServiceFromTray), keyEquivalent: "")
+        proxyService.target = self
+        proxyService.state = isProxyRuntimeRunning() ? .on : .off
+        menu.addItem(proxyService)
 
-        let tun = NSMenuItem(title: "TUN 模式", action: #selector(toggleTunFromTray), keyEquivalent: "")
-        tun.target = self
-        tun.state = isTunEnabled ? .on : .off
-        menu.addItem(tun)
+        let captureMenu = NSMenu()
+        for (title, useTun) in [("系统代理", false), ("TUN 模式", true)] {
+            let item = NSMenuItem(title: title, action: #selector(captureModeFromTray(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = useTun
+            item.state = isTunEnabled == useTun ? .on : .off
+            captureMenu.addItem(item)
+        }
+        let captureRoot = NSMenuItem(title: "接管方式", action: nil, keyEquivalent: "")
+        captureRoot.submenu = captureMenu
+        menu.addItem(captureRoot)
 
         menu.addItem(.separator())
 
@@ -158,55 +165,24 @@ extension MainWindowController {
         button.toolTip = TungBoxVersion.display
     }
 
-    @objc func toggleSystemProxyFromTray() {
+    @objc func toggleProxyServiceFromTray() {
         if !isProxyRuntimeRunning() {
             isSystemProxyEnabled = true
             syncProxyPreferenceControls()
             startService()
-            appendLog("[托盘] 启动代理服务并开启系统代理\n")
+            appendLog("[托盘] 启动代理服务\n")
         } else {
             isSystemProxyEnabled = false
-            if isTunEnabled {
-                isTunEnabled = false
-                UserDefaults.standard.set(isTunEnabled, forKey: "tunEnabled")
-            }
             syncProxyPreferenceControls()
             stopService()
-            appendLog("[托盘] 已关闭系统代理和代理服务\n")
+            appendLog("[托盘] 已关闭代理服务\n")
         }
         refreshStatus()
     }
 
-    @objc func toggleTunFromTray() {
-        if !isTunEnabled && !isSystemProxyEnabled {
-            isSystemProxyEnabled = true
-        }
-        if !isTunEnabled, !TunServiceManager.status(store: store).isUsable {
-            isTunEnabled = false
-            UserDefaults.standard.set(false, forKey: "tunEnabled")
-            syncProxyPreferenceControls()
-            showToast("请先安装 TUN 服务")
-            showError(NSError.user("TUN 服务不可用。请先到 设置 > TUN 设置 重新安装 TUN 服务。"))
-            return
-        }
-        isTunEnabled.toggle()
-        UserDefaults.standard.set(isTunEnabled, forKey: "tunEnabled")
-        syncProxyPreferenceControls()
-        do {
-            if isTunEnabled && !isProxyRuntimeRunning() {
-                startService()
-                return
-            }
-            try applyTunPreference(restartIfRunning: false)
-            reconcileSystemProxyForCurrentMode()
-            appendLog("[托盘] TUN 模式已\(isTunEnabled ? "开启" : "关闭")\n")
-        } catch {
-            isTunEnabled.toggle()
-            UserDefaults.standard.set(isTunEnabled, forKey: "tunEnabled")
-            syncProxyPreferenceControls()
-            showError(error)
-        }
-        refreshStatus()
+    @objc func captureModeFromTray(_ sender: NSMenuItem) {
+        guard let useTun = sender.representedObject as? Bool else { return }
+        setCaptureMode(tunEnabled: useTun, source: "托盘")
     }
 
     @objc func showConsoleFromTray() {

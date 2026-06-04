@@ -33,34 +33,33 @@ extension MainWindowController {
         serviceSwitch.target = self
         serviceSwitch.action = #selector(switchToggled(_:))
 
-        let systemProxySpacer = NSView()
-        systemProxySpacer.translatesAutoresizingMaskIntoConstraints = false
-        let systemProxyRow = NSStackView(views: [statusChip, systemProxySpacer, serviceSwitch])
-        systemProxyRow.orientation = .horizontal
-        systemProxyRow.distribution = .fill
-        systemProxyRow.alignment = .centerY
-        systemProxyRow.translatesAutoresizingMaskIntoConstraints = false
-        let systemProxyCard = homeCard(title: "系统代理", views: [systemProxyRow])
+        let serviceSpacer = NSView()
+        serviceSpacer.translatesAutoresizingMaskIntoConstraints = false
+        let serviceRow = NSStackView(views: [statusChip, serviceSpacer, serviceSwitch])
+        serviceRow.orientation = .horizontal
+        serviceRow.distribution = .fill
+        serviceRow.alignment = .centerY
+        serviceRow.translatesAutoresizingMaskIntoConstraints = false
 
-        tunSwitch.target = self
-        tunSwitch.action = #selector(tunSwitchToggled(_:))
-        tunSwitch.isOn = isTunEnabled
-        tunSwitch.translatesAutoresizingMaskIntoConstraints = false
-
-        let tunLabel = NSTextField(labelWithString: "启用 TUN")
-        tunLabel.font = .systemFont(ofSize: 14, weight: .bold)
-        tunLabel.textColor = MD3.onSurface
-        registerThemeObserver { [weak tunLabel] in
-            tunLabel?.textColor = MD3.onSurface
+        let captureLabel = NSTextField(labelWithString: "接管方式")
+        captureLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        captureLabel.textColor = MD3.onSurfaceVariant
+        captureLabel.translatesAutoresizingMaskIntoConstraints = false
+        registerThemeObserver { [weak captureLabel] in
+            captureLabel?.textColor = MD3.onSurfaceVariant
         }
-        let tunSpacer = NSView()
-        tunSpacer.translatesAutoresizingMaskIntoConstraints = false
-        let tunControlRow = NSStackView(views: [tunLabel, tunSpacer, tunSwitch])
-        tunControlRow.orientation = .horizontal
-        tunControlRow.distribution = .fill
-        tunControlRow.alignment = .centerY
-        tunControlRow.translatesAutoresizingMaskIntoConstraints = false
-        let tunCard = homeCard(title: "TUN 模式", views: [tunControlRow])
+
+        configureCaptureRadio(homeSystemProxyRadio, tag: 0, action: #selector(homeCaptureModeChanged(_:)))
+        configureCaptureRadio(homeTunRadio, tag: 1, action: #selector(homeCaptureModeChanged(_:)))
+        homeSystemProxyRadio.state = isTunEnabled ? .off : .on
+        homeTunRadio.state = isTunEnabled ? .on : .off
+        let captureModeStack = NSStackView(views: [homeSystemProxyRadio, homeTunRadio])
+        captureModeStack.orientation = .vertical
+        captureModeStack.spacing = 4
+        captureModeStack.alignment = .leading
+        captureModeStack.translatesAutoresizingMaskIntoConstraints = false
+
+        let serviceCard = homeCard(title: "代理服务", views: [serviceRow, captureLabel, captureModeStack])
 
         modeControl.items = ["直连/绕过代理", "全局代理", "规则判定"]
         modeControl.target = self
@@ -172,12 +171,12 @@ extension MainWindowController {
         }
 
         updateTrafficLabels()
+        syncProxyPreferenceControls()
 
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
         
-        container.addSubview(systemProxyCard)
-        container.addSubview(tunCard)
+        container.addSubview(serviceCard)
         container.addSubview(outboundCard)
         container.addSubview(nodeLatencyCard)
         container.addSubview(uploadCard)
@@ -187,45 +186,40 @@ extension MainWindowController {
 
         NSLayoutConstraint.activate([
             // --- Width Constraints ---
-            tunCard.widthAnchor.constraint(equalTo: systemProxyCard.widthAnchor),
-            uploadCard.widthAnchor.constraint(equalTo: systemProxyCard.widthAnchor),
-            downloadCard.widthAnchor.constraint(equalTo: systemProxyCard.widthAnchor),
+            uploadCard.widthAnchor.constraint(equalTo: serviceCard.widthAnchor, multiplier: 0.5, constant: -8),
+            downloadCard.widthAnchor.constraint(equalTo: uploadCard.widthAnchor),
             
             // Span 2 cards width: 2 * size-1 width + 16 (gap)
-            outboundCard.widthAnchor.constraint(equalTo: systemProxyCard.widthAnchor, multiplier: 2.0, constant: 16),
+            serviceCard.widthAnchor.constraint(equalTo: outboundCard.widthAnchor),
             nodeLatencyCard.widthAnchor.constraint(equalTo: outboundCard.widthAnchor),
             activeConnectionsCard.widthAnchor.constraint(equalTo: outboundCard.widthAnchor),
             trafficStatsCard.widthAnchor.constraint(equalTo: outboundCard.widthAnchor),
             
             // --- Height Constraints ---
-            systemProxyCard.heightAnchor.constraint(equalToConstant: 142),
-            tunCard.heightAnchor.constraint(equalTo: systemProxyCard.heightAnchor),
-            outboundCard.heightAnchor.constraint(equalTo: systemProxyCard.heightAnchor),
-            nodeLatencyCard.heightAnchor.constraint(equalTo: systemProxyCard.heightAnchor),
-            uploadCard.heightAnchor.constraint(equalTo: systemProxyCard.heightAnchor),
-            downloadCard.heightAnchor.constraint(equalTo: systemProxyCard.heightAnchor),
-            activeConnectionsCard.heightAnchor.constraint(equalTo: systemProxyCard.heightAnchor),
-            trafficStatsCard.heightAnchor.constraint(equalTo: systemProxyCard.heightAnchor),
+            serviceCard.heightAnchor.constraint(equalToConstant: 142),
+            outboundCard.heightAnchor.constraint(equalTo: serviceCard.heightAnchor),
+            nodeLatencyCard.heightAnchor.constraint(equalTo: serviceCard.heightAnchor),
+            uploadCard.heightAnchor.constraint(equalTo: serviceCard.heightAnchor),
+            downloadCard.heightAnchor.constraint(equalTo: serviceCard.heightAnchor),
+            activeConnectionsCard.heightAnchor.constraint(equalTo: serviceCard.heightAnchor),
+            trafficStatsCard.heightAnchor.constraint(equalTo: serviceCard.heightAnchor),
             
             // --- Row 1 Layout (top) ---
-            systemProxyCard.topAnchor.constraint(equalTo: container.topAnchor),
-            systemProxyCard.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            
-            tunCard.topAnchor.constraint(equalTo: container.topAnchor),
-            tunCard.leadingAnchor.constraint(equalTo: systemProxyCard.trailingAnchor, constant: 16),
+            serviceCard.topAnchor.constraint(equalTo: container.topAnchor),
+            serviceCard.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             
             outboundCard.topAnchor.constraint(equalTo: container.topAnchor),
-            outboundCard.leadingAnchor.constraint(equalTo: tunCard.trailingAnchor, constant: 16),
+            outboundCard.leadingAnchor.constraint(equalTo: serviceCard.trailingAnchor, constant: 16),
             outboundCard.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             
             // --- Row 2 Layout (middle) ---
-            nodeLatencyCard.topAnchor.constraint(equalTo: systemProxyCard.bottomAnchor, constant: 16),
+            nodeLatencyCard.topAnchor.constraint(equalTo: serviceCard.bottomAnchor, constant: 16),
             nodeLatencyCard.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             
-            uploadCard.topAnchor.constraint(equalTo: systemProxyCard.bottomAnchor, constant: 16),
+            uploadCard.topAnchor.constraint(equalTo: serviceCard.bottomAnchor, constant: 16),
             uploadCard.leadingAnchor.constraint(equalTo: nodeLatencyCard.trailingAnchor, constant: 16),
             
-            downloadCard.topAnchor.constraint(equalTo: systemProxyCard.bottomAnchor, constant: 16),
+            downloadCard.topAnchor.constraint(equalTo: serviceCard.bottomAnchor, constant: 16),
             downloadCard.leadingAnchor.constraint(equalTo: uploadCard.trailingAnchor, constant: 16),
             downloadCard.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             
@@ -534,48 +528,52 @@ extension MainWindowController {
             startService()
         } else {
             isSystemProxyEnabled = false
-            if isTunEnabled {
-                isTunEnabled = false
-                UserDefaults.standard.set(false, forKey: "tunEnabled")
-            }
             syncProxyPreferenceControls()
             stopService()
         }
     }
 
-    @objc func tunSwitchToggled(_ sender: MD3Switch) {
-        guard !sender.isOn || isSystemProxyEnabled else {
-            sender.isOn = false
-            showError(NSError.user("请先开启系统代理，再启用 TUN 模式。"))
+    @objc func homeCaptureModeChanged(_ sender: NSButton) {
+        setCaptureMode(tunEnabled: sender.tag == 1, source: "首页")
+    }
+
+    func configureCaptureRadio(_ radio: NSButton, tag: Int, action: Selector) {
+        radio.tag = tag
+        radio.target = self
+        radio.action = action
+        radio.font = .systemFont(ofSize: 13, weight: .medium)
+        radio.contentTintColor = MD3.onSurface
+        radio.translatesAutoresizingMaskIntoConstraints = false
+        registerThemeObserver { [weak radio] in
+            radio?.contentTintColor = MD3.onSurface
+        }
+    }
+
+    func setCaptureMode(tunEnabled: Bool, source: String) {
+        let previous = isTunEnabled
+        guard previous != tunEnabled else {
+            syncProxyPreferenceControls()
             return
         }
-        if sender.isOn, !TunServiceManager.status(store: store).isUsable {
-            sender.isOn = false
-            isTunEnabled = false
-            UserDefaults.standard.set(false, forKey: "tunEnabled")
+        if tunEnabled, !TunServiceManager.status(store: store).isUsable {
             syncProxyPreferenceControls()
             showToast("请先安装 TUN 服务")
             showError(NSError.user("TUN 服务不可用。请先到 设置 > TUN 设置 重新安装 TUN 服务。"))
             return
         }
-        isTunEnabled = sender.isOn
+
+        isTunEnabled = tunEnabled
         UserDefaults.standard.set(isTunEnabled, forKey: "tunEnabled")
-        if isTunEnabled {
-            isSystemProxyEnabled = true
-        }
         syncProxyPreferenceControls()
         do {
-            if isTunEnabled && !isProxyRuntimeRunning() {
-                startService()
-                return
+            if isProxyRuntimeRunning() {
+                try applyTunPreference(restartIfRunning: false)
+                reconcileSystemProxyForCurrentMode()
             }
-            try applyTunPreference(restartIfRunning: false)
-            reconcileSystemProxyForCurrentMode()
-            appendLog("[首页] TUN 模式已\(isTunEnabled ? "开启" : "关闭")\n")
+            appendLog("[\(source)] 接管方式已切换为 \(isTunEnabled ? "TUN 模式" : "系统代理")\n")
         } catch {
-            isTunEnabled.toggle()
+            isTunEnabled = previous
             UserDefaults.standard.set(isTunEnabled, forKey: "tunEnabled")
-            tunSwitch.isOn = isTunEnabled
             syncProxyPreferenceControls()
             showError(error)
         }

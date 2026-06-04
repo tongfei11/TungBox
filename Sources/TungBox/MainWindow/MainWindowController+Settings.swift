@@ -120,15 +120,21 @@ extension MainWindowController {
 
         let openFolderButton = settingsButton(title: "打开配置目录", action: #selector(openFolderClicked), style: .outlined)
 
+        settingsSystemProxyCheckbox.title = "默认开启代理服务"
         settingsSystemProxyCheckbox.target = self
         settingsSystemProxyCheckbox.action = #selector(settingsSystemProxyChanged(_:))
         settingsSystemProxyCheckbox.state = isSystemProxyDefaultEnabled ? .on : .off
 
-        settingsTunCheckbox.title = "默认开启 TUN 模式"
-        settingsTunCheckbox.target = self
-        settingsTunCheckbox.action = #selector(settingsTunChanged(_:))
-        settingsTunCheckbox.state = isTunEnabled ? .on : .off
-        settingsTunCheckbox.isEnabled = isSystemProxyDefaultEnabled
+        configureCaptureRadio(settingsSystemProxyRadio, tag: 0, action: #selector(settingsCaptureModeChanged(_:)))
+        configureCaptureRadio(settingsTunRadio, tag: 1, action: #selector(settingsCaptureModeChanged(_:)))
+        settingsSystemProxyRadio.state = isTunEnabled ? .off : .on
+        settingsTunRadio.state = isTunEnabled ? .on : .off
+        let defaultCaptureLabel = settingsLabel("默认接管方式")
+        let defaultCaptureStack = NSStackView(views: [settingsSystemProxyRadio, settingsTunRadio])
+        defaultCaptureStack.orientation = .vertical
+        defaultCaptureStack.spacing = 6
+        defaultCaptureStack.alignment = .leading
+        defaultCaptureStack.translatesAutoresizingMaskIntoConstraints = false
 
         settingsLaunchAtLoginCheckbox.title = "开机自启动"
         settingsLaunchAtLoginCheckbox.target = self
@@ -140,7 +146,7 @@ extension MainWindowController {
         settingsStartSilentlyCheckbox.action = #selector(settingsStartSilentlyChanged(_:))
         settingsStartSilentlyCheckbox.state = UserDefaults.standard.bool(forKey: "startSilently") ? .on : .off
 
-        let proxyHint = NSTextField(labelWithString: "TUN 默认开启依赖系统代理默认开启；如果系统代理默认关闭，TUN 默认开启不可选。")
+        let proxyHint = NSTextField(labelWithString: "代理服务开启后会按接管方式启动；系统代理和 TUN 模式互斥。")
         proxyHint.textColor = MD3.onSurfaceVariant
         proxyHint.font = .systemFont(ofSize: 13)
         proxyHint.lineBreakMode = .byWordWrapping
@@ -175,7 +181,8 @@ extension MainWindowController {
         return settingsPageStack([
             settingsPanel(title: "代理启动配置", views: [
                 settingsSystemProxyCheckbox,
-                settingsTunCheckbox,
+                defaultCaptureLabel,
+                defaultCaptureStack,
                 proxyHint
             ]),
             settingsPanel(title: "软件启动配置", views: [
@@ -602,48 +609,14 @@ extension MainWindowController {
 
     @objc func settingsSystemProxyChanged(_ sender: MD3Checkbox) {
         isSystemProxyDefaultEnabled = sender.state == .on
-        if !isSystemProxyDefaultEnabled, isTunEnabled {
-            isTunEnabled = false
-            UserDefaults.standard.set(false, forKey: "tunEnabled")
-            tunSwitch.isOn = false
-        }
         UserDefaults.standard.set(isSystemProxyDefaultEnabled, forKey: "systemProxyDefaultEnabled")
         syncProxyPreferenceControls()
-        appendLog("[设置] 系统代理默认值已\(isSystemProxyDefaultEnabled ? "开启" : "关闭")\n")
+        appendLog("[设置] 默认开启代理服务已\(isSystemProxyDefaultEnabled ? "开启" : "关闭")\n")
         refreshStatus()
     }
 
-    @objc func settingsTunChanged(_ sender: MD3Checkbox) {
-        guard isSystemProxyDefaultEnabled else {
-            sender.state = .off
-            showError(NSError.user("请先开启“默认开启系统代理”，再启用 TUN 默认开启。"))
-            return
-        }
-        if sender.state == .on, !TunServiceManager.status(store: store).isUsable {
-            sender.state = .off
-            showToast("请先安装TUN服务")
-            showError(NSError.user("请先到 设置 > TUN 设置 安装 TUN 服务。"))
-            return
-        }
-        isTunEnabled = sender.state == .on
-        UserDefaults.standard.set(isTunEnabled, forKey: "tunEnabled")
-        tunSwitch.isOn = isTunEnabled
-        syncProxyPreferenceControls()
-        do {
-            if isProxyRuntimeRunning() {
-                try applyTunPreference(restartIfRunning: false)
-            }
-            reconcileSystemProxyForCurrentMode()
-            appendLog("[设置] 随代理开启 TUN 已\(isTunEnabled ? "开启" : "关闭")\n")
-        } catch {
-            isTunEnabled.toggle()
-            UserDefaults.standard.set(isTunEnabled, forKey: "tunEnabled")
-            sender.state = isTunEnabled ? .on : .off
-            tunSwitch.isOn = isTunEnabled
-            syncProxyPreferenceControls()
-            showError(error)
-        }
-        refreshStatus()
+    @objc func settingsCaptureModeChanged(_ sender: NSButton) {
+        setCaptureMode(tunEnabled: sender.tag == 1, source: "设置")
     }
 
     @objc func settingsLaunchAtLoginChanged(_ sender: MD3Checkbox) {
@@ -792,11 +765,11 @@ extension MainWindowController {
 
     func syncProxyPreferenceControls() {
         serviceSwitch.isOn = isSystemProxyEnabled && isProxyRuntimeRunning()
-        tunSwitch.isOn = isTunEnabled
-        tunSwitch.isEnabled = isSystemProxyEnabled || isProxyRuntimeRunning()
+        homeSystemProxyRadio.state = isTunEnabled ? .off : .on
+        homeTunRadio.state = isTunEnabled ? .on : .off
         settingsSystemProxyCheckbox.state = isSystemProxyDefaultEnabled ? .on : .off
-        settingsTunCheckbox.state = isTunEnabled ? .on : .off
-        settingsTunCheckbox.isEnabled = isSystemProxyDefaultEnabled
+        settingsSystemProxyRadio.state = isTunEnabled ? .off : .on
+        settingsTunRadio.state = isTunEnabled ? .on : .off
         settingsLaunchAtLoginCheckbox.state = isLaunchAtLoginEnabled ? .on : .off
         settingsStartSilentlyCheckbox.state = UserDefaults.standard.bool(forKey: "startSilently") ? .on : .off
         refreshTunServiceStatus()
