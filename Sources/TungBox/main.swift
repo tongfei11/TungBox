@@ -1378,6 +1378,15 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         rules.insert(["clash_mode": "direct", "outbound": "direct"], at: 0)
         rules.insert(["clash_mode": "global", "outbound": proxyTag], at: 1)
         route["rules"] = rules
+        // sing-box 1.12+: outbound dials that chain to domain-based routing require a
+        // default domain resolver. Without this, sing-box warns now and will FATAL in 1.14.
+        if route["default_domain_resolver"] == nil {
+            if let dns = config["dns"] as? [String: Any],
+               let servers = dns["servers"] as? [[String: Any]],
+               let firstTag = servers.first?["tag"] as? String {
+                route["default_domain_resolver"] = firstTag
+            }
+        }
         config["route"] = route
 
         return config
