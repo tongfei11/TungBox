@@ -769,6 +769,13 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         if shouldDisableTun {
             try? TunServiceManager.disable(store: store)
             appendLog("[TungBox] TUN 标记已关闭\n")
+            let timeout: TimeInterval = clearSystemProxySynchronously ? 8 : 6
+            if TunServiceManager.waitUntilStopped(store: store, timeout: timeout) {
+                appendLog("[TungBox] TUN 已确认回收\n")
+            } else {
+                appendLog("[警告] TUN 未在 \(Int(timeout)) 秒内确认回收。请到设置重新安装 TUN 服务以更新安全停机脚本。\n")
+                showToast("TUN 未确认回收，请重新安装 TUN 服务")
+            }
         }
 
         // 2. Stop sing-box processes (normal + elevated)

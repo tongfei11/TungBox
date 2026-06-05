@@ -136,6 +136,17 @@ enum TunServiceManager {
             && FileManager.default.fileExists(atPath: store.tunRequestConfigURL.path)
     }
 
+    static func waitUntilStopped(store: Store, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if !hasEnableRequest(store: store), activeSingBoxPID(store: store) == nil {
+                return true
+            }
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        return !hasEnableRequest(store: store) && activeSingBoxPID(store: store) == nil
+    }
+
     static func install(store: Store) throws {
         guard FileManager.default.isExecutableFile(atPath: store.coreBinaryURL.path) else {
             throw NSError.user("请先在 Core 管理中导入或安装 sing-box Core。")
