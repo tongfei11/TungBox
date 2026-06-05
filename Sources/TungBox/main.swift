@@ -93,6 +93,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var detectedCoreVersion = "检测中"
     var subscriptionTimer: Timer?
     var connectionsRefreshTimer: Timer?
+    var tunRequestHeartbeatTimer: Timer?
     var isRefreshingConnections = false
     weak var zeroStateView: NSView?
     let connectionFilterField = MD3TextField()
@@ -723,6 +724,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     func markProxyStartupFailed() {
         isSystemProxyEnabled = false
         isProxyServiceTransitioning = false
+        stopTunRequestHeartbeat()
+        try? TunServiceManager.disable(store: store)
         serviceSwitch.isOn = false
         syncProxyPreferenceControls()
     }
@@ -761,19 +764,24 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     }
 
     func stopService(clearSystemProxySynchronously: Bool = false) {
-        let shouldDisableTun = isTunEnabled || TunServiceManager.status(store: store).isRunning
+        let shouldDisableTun = isTunEnabled
+            || TunServiceManager.status(store: store).isRunning
+            || TunServiceManager.hasRequestFiles(store: store)
+            || TunServiceManager.hasNetworkResidue()
         let shouldStopNormalProxy = runner.isRunning
         let shouldClearSystemProxy = isSystemProxyEnabled || shouldStopNormalProxy
 
         // 1. Tell TUN daemon to stop (removes enabled flag; daemon cleanly kills TUN child, keeps daemon alive)
         if shouldDisableTun {
+            stopTunRequestHeartbeat()
             try? TunServiceManager.disable(store: store)
             appendLog("[TungBox] TUN 标记已关闭\n")
             let timeout: TimeInterval = clearSystemProxySynchronously ? 8 : 6
             if TunServiceManager.waitUntilStopped(store: store, timeout: timeout) {
                 appendLog("[TungBox] TUN 已确认回收\n")
             } else {
-                appendLog("[警告] TUN 未在 \(Int(timeout)) 秒内确认回收。请到设置重新安装 TUN 服务以更新安全停机脚本。\n")
+                let residue = TunServiceManager.networkResidueDescription() ?? "未知残留"
+                appendLog("[警告] TUN 未在 \(Int(timeout)) 秒内确认回收：\(residue)。请到设置重新安装 TUN 服务以更新安全停机脚本。\n")
                 showToast("TUN 未确认回收，请重新安装 TUN 服务")
             }
         }
@@ -952,6 +960,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 try enableTunServiceSafely(configText: editor.string)
                 appendLog("[TUN] 已更新 TUN 服务配置\n")
             } else {
+                stopTunRequestHeartbeat()
                 try TunServiceManager.disable(store: store)
                 runner.stop()
                 try runner.start(config: url, elevated: false)
@@ -962,8 +971,12 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 runner.stop()
                 try enableTunServiceSafely(configText: editor.string)
             } else {
+                stopTunRequestHeartbeat()
                 try TunServiceManager.disable(store: store)
             }
+        } else if !isTunEnabled {
+            stopTunRequestHeartbeat()
+            try TunServiceManager.disable(store: store)
         }
     }
 
@@ -985,6 +998,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             inbounds.insert([
                 "type": "tun",
                 "tag": "tun-in",
+                "stack": "mixed",
+                "mtu": 1500,
                 "address": [
                     "172.19.0.1/30"
                 ],
@@ -1006,13 +1021,14 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
             let outbounds = config["outbounds"] as? [[String: Any]] ?? []
             let proxyTag = preferredProxyTag(from: outbounds)
+            var route = config["route"] as? [String: Any] ?? [:]
+            route["auto_detect_interface"] = true
             if proxyTag != "direct" {
-                var route = config["route"] as? [String: Any] ?? [:]
                 if (route["final"] as? String).map({ $0 == "direct" }) ?? true {
                     route["final"] = proxyTag
-                    config["route"] = route
                 }
             }
+            config["route"] = route
         }
         config["inbounds"] = inbounds
         config = setTunCacheFile(enabled: enabled, in: config)

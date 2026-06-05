@@ -31,6 +31,7 @@ final class Store {
     let coreBinaryURL: URL
     let tunRequestConfigURL: URL
     let tunRequestFlagURL: URL
+    let tunRequestHeartbeatURL: URL
     let logURL: URL
 
     init() {
@@ -44,6 +45,7 @@ final class Store {
         coreBinaryURL = coreURL.appendingPathComponent("sing-box")
         tunRequestConfigURL = baseURL.appendingPathComponent("tun-request.json")
         tunRequestFlagURL = baseURL.appendingPathComponent("tun-request-enabled")
+        tunRequestHeartbeatURL = baseURL.appendingPathComponent("tun-request-heartbeat")
         logURL = baseURL.appendingPathComponent("sing-box.log")
         try? FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: ruleSetsURL, withIntermediateDirectories: true)

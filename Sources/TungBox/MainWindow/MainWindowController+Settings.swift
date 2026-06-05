@@ -793,6 +793,7 @@ extension MainWindowController {
         isProxyServiceTransitioning
             || runner.isRunning
             || isTunRuntimeRunning()
+            || TunServiceManager.hasNetworkResidue()
             || (isTunEnabled && (isSystemProxyEnabled || TunServiceManager.hasEnableRequest(store: store)))
     }
 
@@ -803,6 +804,27 @@ extension MainWindowController {
     func enableTunServiceSafely(configText: String) throws {
         try ensureTunRouteIsSafeToStart()
         try TunServiceManager.enable(store: store, configText: configText)
+        startTunRequestHeartbeat()
+    }
+
+    func startTunRequestHeartbeat() {
+        TunServiceManager.refreshRequestHeartbeat(store: store)
+        tunRequestHeartbeatTimer?.invalidate()
+        tunRequestHeartbeatTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                guard self.isTunEnabled, TunServiceManager.hasEnableRequest(store: self.store) else {
+                    self.stopTunRequestHeartbeat()
+                    return
+                }
+                TunServiceManager.refreshRequestHeartbeat(store: self.store)
+            }
+        }
+    }
+
+    func stopTunRequestHeartbeat() {
+        tunRequestHeartbeatTimer?.invalidate()
+        tunRequestHeartbeatTimer = nil
     }
 
     func ensureTunRouteIsSafeToStart() throws {

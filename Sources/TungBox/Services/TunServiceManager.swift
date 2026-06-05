@@ -63,6 +63,7 @@ enum TunServiceManager {
     static let stderrPath = "\(installDirectoryPath)/tun-service.err.log"
     static let legacyStdoutPath = "/tmp/\(label).out.log"
     static let legacyStderrPath = "/tmp/\(label).err.log"
+    static let requestHeartbeatTimeout: TimeInterval = 30
 
     static var logURL: URL {
         URL(fileURLWithPath: logPath)
@@ -89,6 +90,9 @@ enum TunServiceManager {
         }
         if let pid = activeSingBoxPID(store: store), Darwin.kill(pid, 0) == 0 {
             return .installedRunning
+        }
+        if let residue = networkResidueDescription() {
+            return .abnormal("检测到 TUN 路由残留：\(residue)")
         }
         return .installedIdle
     }
@@ -134,17 +138,24 @@ enum TunServiceManager {
     static func hasEnableRequest(store: Store) -> Bool {
         FileManager.default.fileExists(atPath: store.tunRequestFlagURL.path)
             && FileManager.default.fileExists(atPath: store.tunRequestConfigURL.path)
+            && requestHeartbeatIsFresh(store: store)
+    }
+
+    static func hasRequestFiles(store: Store) -> Bool {
+        FileManager.default.fileExists(atPath: store.tunRequestFlagURL.path)
+            || FileManager.default.fileExists(atPath: store.tunRequestConfigURL.path)
+            || FileManager.default.fileExists(atPath: store.tunRequestHeartbeatURL.path)
     }
 
     static func waitUntilStopped(store: Store, timeout: TimeInterval) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if !hasEnableRequest(store: store), activeSingBoxPID(store: store) == nil {
+            if !hasRequestFiles(store: store), activeSingBoxPID(store: store) == nil, !hasNetworkResidue() {
                 return true
             }
             Thread.sleep(forTimeInterval: 0.2)
         }
-        return !hasEnableRequest(store: store) && activeSingBoxPID(store: store) == nil
+        return !hasRequestFiles(store: store) && activeSingBoxPID(store: store) == nil && !hasNetworkResidue()
     }
 
     static func install(store: Store) throws {
@@ -153,6 +164,7 @@ enum TunServiceManager {
         }
         try? FileManager.default.removeItem(at: store.tunRequestFlagURL)
         try? FileManager.default.removeItem(at: store.tunRequestConfigURL)
+        try? FileManager.default.removeItem(at: store.tunRequestHeartbeatURL)
         let tempScript = FileManager.default.temporaryDirectory.appendingPathComponent("\(label).sh")
         try writeServiceScript(store: store, to: tempScript)
         let plist = launchDaemonPlist(scriptPath: scriptPath)
@@ -190,6 +202,7 @@ enum TunServiceManager {
     static func uninstall(store: Store) throws {
         try? FileManager.default.removeItem(at: store.tunRequestFlagURL)
         try? FileManager.default.removeItem(at: store.tunRequestConfigURL)
+        try? FileManager.default.removeItem(at: store.tunRequestHeartbeatURL)
         let command = [
             "rm -f \(shellQuote(flagPath))",
             stopChildCommand(),
@@ -227,9 +240,11 @@ enum TunServiceManager {
         }
         try ensureRouteIsSafeToStart(store: store)
         try configText.write(to: store.tunRequestConfigURL, atomically: true, encoding: .utf8)
+        refreshRequestHeartbeat(store: store)
         if !FileManager.default.fileExists(atPath: store.tunRequestFlagURL.path) {
             FileManager.default.createFile(atPath: store.tunRequestFlagURL.path, contents: Data())
         }
+        refreshRequestHeartbeat(store: store)
         // Wake the daemon immediately so it picks up the flag without polling delay.
         // kickstart on a system daemon needs root but we only write user-owned files,
         // so the daemon polls and picks them up on its next 1s loop iteration.
@@ -239,6 +254,45 @@ enum TunServiceManager {
     static func disable(store: Store) throws {
         try? FileManager.default.removeItem(at: store.tunRequestFlagURL)
         try? FileManager.default.removeItem(at: store.tunRequestConfigURL)
+        try? FileManager.default.removeItem(at: store.tunRequestHeartbeatURL)
+    }
+
+    static func refreshRequestHeartbeat(store: Store) {
+        if !FileManager.default.fileExists(atPath: store.tunRequestHeartbeatURL.path) {
+            FileManager.default.createFile(atPath: store.tunRequestHeartbeatURL.path, contents: Data())
+        }
+        try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: store.tunRequestHeartbeatURL.path)
+    }
+
+    private static func requestHeartbeatIsFresh(store: Store) -> Bool {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: store.tunRequestHeartbeatURL.path),
+              let modifiedAt = attrs[.modificationDate] as? Date else {
+            return false
+        }
+        return Date().timeIntervalSince(modifiedAt) <= requestHeartbeatTimeout
+    }
+
+    static func hasNetworkResidue() -> Bool {
+        networkResidueDescription() != nil
+    }
+
+    static func networkResidueDescription() -> String? {
+        let interfaceNames = runProcessAndGetOutput("/sbin/ifconfig", args: ["-l"])
+            .split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" })
+            .map(String.init)
+            .filter { $0.hasPrefix("utun") }
+
+        for interface in interfaceNames {
+            let ifconfig = runProcessAndGetOutput("/sbin/ifconfig", args: [interface])
+            guard ifconfig.contains("inet 172.19.0.1") else { continue }
+            return "\(interface) 172.19.0.1"
+        }
+
+        let routes = runProcessAndGetOutput("/usr/sbin/netstat", args: ["-rn", "-f", "inet"])
+        if routes.contains("172.19.0.1") {
+            return "路由表仍包含 172.19.0.1"
+        }
+        return nil
     }
 
     private static func ensureRouteIsSafeToStart(store: Store) throws {
@@ -288,10 +342,12 @@ enum TunServiceManager {
         FLAG=\(shellQuote(flagPath))
         REQUEST_CONFIG=\(shellQuote(store.tunRequestConfigURL.path))
         REQUEST_FLAG=\(shellQuote(store.tunRequestFlagURL.path))
+        REQUEST_HEARTBEAT=\(shellQuote(store.tunRequestHeartbeatURL.path))
         PIDFILE=\(shellQuote(pidPath))
         LOG=\(shellQuote(logPath))
         CHILD=""
-        SCRIPT_VERSION="2026-06-tun-safe-stop-v6"
+        SCRIPT_VERSION="2026-06-tun-safe-stop-v8"
+        REQUEST_MAX_AGE=30
 
         is_safe_root_file() {
           path="$1"
@@ -305,9 +361,26 @@ enum TunServiceManager {
         has_request() {
           [ -L "$REQUEST_FLAG" ] && return 1
           [ -L "$REQUEST_CONFIG" ] && return 1
+          [ -L "$REQUEST_HEARTBEAT" ] && return 1
           [ -f "$REQUEST_FLAG" ] || return 1
           [ -f "$REQUEST_CONFIG" ] || return 1
+          [ -f "$REQUEST_HEARTBEAT" ] || return 1
+          heartbeat_mtime="$(stat -f '%m' "$REQUEST_HEARTBEAT" 2>/dev/null || echo 0)"
+          now="$(date '+%s')"
+          case "$heartbeat_mtime" in ''|*[!0-9]*) return 1 ;; esac
+          [ $((now - heartbeat_mtime)) -le "$REQUEST_MAX_AGE" ] || return 1
           return 0
+        }
+
+        request_is_stale() {
+          [ -f "$REQUEST_FLAG" ] || [ -f "$REQUEST_CONFIG" ] || [ -f "$REQUEST_HEARTBEAT" ] || return 1
+          [ -f "$REQUEST_FLAG" ] || return 0
+          [ -f "$REQUEST_CONFIG" ] || return 0
+          [ -f "$REQUEST_HEARTBEAT" ] || return 0
+          heartbeat_mtime="$(stat -f '%m' "$REQUEST_HEARTBEAT" 2>/dev/null || echo 0)"
+          now="$(date '+%s')"
+          case "$heartbeat_mtime" in ''|*[!0-9]*) return 0 ;; esac
+          [ $((now - heartbeat_mtime)) -gt "$REQUEST_MAX_AGE" ]
         }
 
         route_safe_to_start() {
@@ -328,6 +401,15 @@ enum TunServiceManager {
           echo "$ifconfig_text" | grep -Eq 'inet 172\\.19\\.0\\.1'
         }
 
+        has_tungbox_tun_interface() {
+          for ifname in $(/sbin/ifconfig -l 2>/dev/null | tr ' ' '\\n' | grep '^utun'); do
+            if is_tungbox_tun_interface "$ifname"; then
+              return 0
+            fi
+          done
+          return 1
+        }
+
         sync_requested_config() {
           has_request || return 1
           if ! "$CORE" check -c "$REQUEST_CONFIG" >> "$LOG" 2>&1; then
@@ -345,14 +427,21 @@ enum TunServiceManager {
 
         clean_routes() {
           echo "$(date '+%Y-%m-%d %H:%M:%S') cleaning up TUN routes" >> "$LOG"
+          cleaned=0
           for ifname in $(/sbin/ifconfig -l 2>/dev/null | tr ' ' '\\n' | grep '^utun'); do
             is_tungbox_tun_interface "$ifname" || continue
+            cleaned=1
             /sbin/route -n delete -net 0.0.0.0/1 -ifscope "$ifname" 2>/dev/null || true
             /sbin/route -n delete -net 0.0.0.0/1 -iface "$ifname" 2>/dev/null || true
             /sbin/route -n delete -net 128.0.0.0/1 -ifscope "$ifname" 2>/dev/null || true
             /sbin/route -n delete -net 128.0.0.0/1 -iface "$ifname" 2>/dev/null || true
             /sbin/route -n delete -net default -iface "$ifname" 2>/dev/null || true
           done
+
+          [ "$cleaned" -eq 1 ] || {
+            echo "$(date '+%Y-%m-%d %H:%M:%S') route cleanup skipped: no TungBox TUN interface" >> "$LOG"
+            return 0
+          }
 
           /usr/sbin/networksetup -listallnetworkservices 2>/dev/null | tail -n +2 | while IFS= read -r svc; do
             case "$svc" in \\**) continue ;; esac
@@ -406,7 +495,11 @@ enum TunServiceManager {
         echo "$(date '+%Y-%m-%d %H:%M:%S') TUN service started" >> "$LOG"
         while true; do
           if ! has_request; then
-            if [ -f "$FLAG" ] || [ -f "$PIDFILE" ]; then
+            if request_is_stale; then
+              echo "$(date '+%Y-%m-%d %H:%M:%S') removing stale TUN request" >> "$LOG"
+              rm -f "$REQUEST_FLAG" "$REQUEST_CONFIG" "$REQUEST_HEARTBEAT"
+            fi
+            if [ -f "$FLAG" ] || [ -f "$PIDFILE" ] || has_tungbox_tun_interface; then
               shutdown_child
             fi
             rm -f "$FLAG"
@@ -415,7 +508,7 @@ enum TunServiceManager {
           fi
 
           if ! route_safe_to_start; then
-            rm -f "$FLAG" "$PIDFILE" "$REQUEST_FLAG"
+            rm -f "$FLAG" "$PIDFILE" "$REQUEST_FLAG" "$REQUEST_CONFIG" "$REQUEST_HEARTBEAT"
             sleep 2
             continue
           fi
@@ -489,12 +582,15 @@ enum TunServiceManager {
             && script.contains(flagPath)
             && script.contains("REQUEST_CONFIG=")
             && script.contains("REQUEST_FLAG=")
+            && script.contains("REQUEST_HEARTBEAT=")
+            && script.contains("request_is_stale")
             && script.contains("sync_requested_config")
             && script.contains("route_safe_to_start")
             && script.contains("is_tungbox_tun_interface")
+            && script.contains("has_tungbox_tun_interface")
             && script.contains("shutdown_child")
             && script.contains("clean_routes")
-            && script.contains("2026-06-tun-safe-stop-v6")
+            && script.contains("2026-06-tun-safe-stop-v8")
             && plist.contains(stdoutPath)
             && plist.contains(stderrPath)
     }
