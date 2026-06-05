@@ -244,7 +244,7 @@ enum TunServiceManager {
     private static func ensureRouteIsSafeToStart(store: Store) throws {
         if activeSingBoxPID(store: store) != nil { return }
         guard let detail = externalTunDefaultRouteDescription() else { return }
-        throw NSError.user("检测到系统网络已经被其它 TUN/VPN 接管（\(detail)）。为避免断网，TungBox 暂不启动 TUN。请先关闭其它 VPN/网络增强，或恢复网络后再试。")
+        throw NSError.user("检测到系统网络已经被其它 TUN/VPN 接管（\(detail)）。为避免影响 Surge 等代理软件，TungBox 暂不启动 TUN。请改用系统代理模式，或先关闭其它 TUN/VPN 后再试。")
     }
 
     private static func externalTunDefaultRouteDescription() -> String? {
@@ -291,7 +291,7 @@ enum TunServiceManager {
         PIDFILE=\(shellQuote(pidPath))
         LOG=\(shellQuote(logPath))
         CHILD=""
-        SCRIPT_VERSION="2026-06-tun-safe-stop-v4"
+        SCRIPT_VERSION="2026-06-tun-safe-stop-v6"
 
         is_safe_root_file() {
           path="$1"
@@ -325,7 +325,7 @@ enum TunServiceManager {
 
         is_tungbox_tun_interface() {
           ifconfig_text="$(/sbin/ifconfig "$1" 2>/dev/null || true)"
-          echo "$ifconfig_text" | grep -Eq 'inet (172\\.19\\.0\\.1|198\\.18\\.)'
+          echo "$ifconfig_text" | grep -Eq 'inet 172\\.19\\.0\\.1'
         }
 
         sync_requested_config() {
@@ -345,15 +345,13 @@ enum TunServiceManager {
 
         clean_routes() {
           echo "$(date '+%Y-%m-%d %H:%M:%S') cleaning up TUN routes" >> "$LOG"
-          /sbin/route -n delete -net 0.0.0.0/1 2>/dev/null || true
-          /sbin/route -n delete -net 128.0.0.0/1 2>/dev/null || true
-          /sbin/route -n delete -inet6 -net ::/1 2>/dev/null || true
-          /sbin/route -n delete -inet6 -net 8000::/1 2>/dev/null || true
-
           for ifname in $(/sbin/ifconfig -l 2>/dev/null | tr ' ' '\\n' | grep '^utun'); do
             is_tungbox_tun_interface "$ifname" || continue
+            /sbin/route -n delete -net 0.0.0.0/1 -ifscope "$ifname" 2>/dev/null || true
+            /sbin/route -n delete -net 0.0.0.0/1 -iface "$ifname" 2>/dev/null || true
+            /sbin/route -n delete -net 128.0.0.0/1 -ifscope "$ifname" 2>/dev/null || true
+            /sbin/route -n delete -net 128.0.0.0/1 -iface "$ifname" 2>/dev/null || true
             /sbin/route -n delete -net default -iface "$ifname" 2>/dev/null || true
-            /sbin/route -n delete -inet6 default -iface "$ifname" 2>/dev/null || true
           done
 
           /usr/sbin/networksetup -listallnetworkservices 2>/dev/null | tail -n +2 | while IFS= read -r svc; do
@@ -496,7 +494,7 @@ enum TunServiceManager {
             && script.contains("is_tungbox_tun_interface")
             && script.contains("shutdown_child")
             && script.contains("clean_routes")
-            && script.contains("2026-06-tun-safe-stop-v4")
+            && script.contains("2026-06-tun-safe-stop-v6")
             && plist.contains(stdoutPath)
             && plist.contains(stderrPath)
     }
@@ -504,11 +502,7 @@ enum TunServiceManager {
     private static func stopChildCommand() -> String {
         """
         if [ -f \(shellQuote(pidPath)) ]; then PID=$(cat \(shellQuote(pidPath)) 2>/dev/null || true); case "$PID" in ''|*[!0-9]*) ;; *) kill -TERM "$PID" >/dev/null 2>&1 || true; sleep 2; kill -KILL "$PID" >/dev/null 2>&1 || true ;; esac; fi
-        /sbin/route -n delete -net 0.0.0.0/1 2>/dev/null || true
-        /sbin/route -n delete -net 128.0.0.0/1 2>/dev/null || true
-        /sbin/route -n delete -inet6 -net ::/1 2>/dev/null || true
-        /sbin/route -n delete -inet6 -net 8000::/1 2>/dev/null || true
-        for ifname in $(/sbin/ifconfig -l 2>/dev/null | tr ' ' '\\n' | grep '^utun'); do if /sbin/ifconfig "$ifname" 2>/dev/null | grep -Eq 'inet (172\\.19\\.0\\.1|198\\.18\\.)'; then /sbin/route -n delete -net default -iface "$ifname" 2>/dev/null || true; /sbin/route -n delete -inet6 default -iface "$ifname" 2>/dev/null || true; fi; done
+        for ifname in $(/sbin/ifconfig -l 2>/dev/null | tr ' ' '\\n' | grep '^utun'); do if /sbin/ifconfig "$ifname" 2>/dev/null | grep -Eq 'inet 172\\.19\\.0\\.1'; then /sbin/route -n delete -net 0.0.0.0/1 -ifscope "$ifname" 2>/dev/null || true; /sbin/route -n delete -net 0.0.0.0/1 -iface "$ifname" 2>/dev/null || true; /sbin/route -n delete -net 128.0.0.0/1 -ifscope "$ifname" 2>/dev/null || true; /sbin/route -n delete -net 128.0.0.0/1 -iface "$ifname" 2>/dev/null || true; /sbin/route -n delete -net default -iface "$ifname" 2>/dev/null || true; fi; done
         /usr/sbin/networksetup -listallnetworkservices 2>/dev/null | tail -n +2 | while IFS= read -r svc; do case "$svc" in \\**) continue ;; esac; if /usr/sbin/networksetup -getinfo "$svc" 2>/dev/null | grep -q '^IP address'; then /usr/sbin/networksetup -renewdhcp "$svc" 2>/dev/null || true; break; fi; done
         """
     }

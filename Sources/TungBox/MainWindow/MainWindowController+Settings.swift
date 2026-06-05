@@ -808,7 +808,7 @@ extension MainWindowController {
     func ensureTunRouteIsSafeToStart() throws {
         guard let conflict = externalTunDefaultRouteDescription() else { return }
         appendLog("[TUN] 已阻止启动：检测到系统默认网络仍在 \(conflict)\n")
-        throw NSError.user("检测到系统网络已经被其它 TUN/VPN 接管（\(conflict)）。为避免断网，TungBox 暂不启动 TUN。请先关闭其它 VPN/网络增强，或恢复网络后再试。")
+        throw NSError.user("检测到系统网络已经被其它 TUN/VPN 接管（\(conflict)）。为避免影响 Surge 等代理软件，TungBox 暂不启动 TUN。请改用系统代理模式，或先关闭其它 TUN/VPN 后再试。")
     }
 
     func externalTunDefaultRouteDescription() -> String? {
