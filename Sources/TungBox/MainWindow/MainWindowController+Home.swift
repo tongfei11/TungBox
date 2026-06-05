@@ -574,6 +574,16 @@ extension MainWindowController {
             showError(NSError.user("TUN 服务不可用。请先到 设置 > TUN 设置 重新安装 TUN 服务。"))
             return
         }
+        if tunEnabled {
+            do {
+                try ensureTunRouteIsSafeToStart()
+            } catch {
+                syncProxyPreferenceControls()
+                showToast("TUN 已被保护拦截")
+                showError(error)
+                return
+            }
+        }
 
         isTunEnabled = tunEnabled
         UserDefaults.standard.set(isTunEnabled, forKey: "tunEnabled")

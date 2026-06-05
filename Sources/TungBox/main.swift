@@ -693,7 +693,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                     throw NSError.user("TUN 服务不可用。请先到 设置 > TUN 设置 重新安装 TUN 服务。")
                 }
                 runner.stop()
-                try TunServiceManager.enable(store: store, configText: editor.string)
+                try enableTunServiceSafely(configText: editor.string)
                 appendLog("[TUN] 已交给 TUN 服务启动 sing-box\n")
                 setSystemProxy(enabled: false, port: getMixedProxyPort())
                 isProxyServiceTransitioning = false
@@ -918,7 +918,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                         if self.isProxyRuntimeRunning() && !switchedByAPI {
                             self.runner.stop()
                             if self.isTunEnabled {
-                                try TunServiceManager.enable(store: self.store, configText: self.editor.string)
+                                try self.enableTunServiceSafely(configText: self.editor.string)
                             } else {
                                 try self.runner.start(config: url, elevated: false)
                             }
@@ -949,7 +949,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         if restartIfRunning, wasRunning {
             if isTunEnabled {
                 runner.stop()
-                try TunServiceManager.enable(store: store, configText: editor.string)
+                try enableTunServiceSafely(configText: editor.string)
                 appendLog("[TUN] 已更新 TUN 服务配置\n")
             } else {
                 try TunServiceManager.disable(store: store)
@@ -960,7 +960,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         } else if wasRunning {
             if isTunEnabled {
                 runner.stop()
-                try TunServiceManager.enable(store: store, configText: editor.string)
+                try enableTunServiceSafely(configText: editor.string)
             } else {
                 try TunServiceManager.disable(store: store)
             }
@@ -1336,7 +1336,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         if isProxyRuntimeRunning() {
             runner.stop()
             if isTunEnabled {
-                try TunServiceManager.enable(store: store, configText: editor.string)
+                try enableTunServiceSafely(configText: editor.string)
             } else {
                 try runner.start(config: url, elevated: false)
             }

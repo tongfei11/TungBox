@@ -225,6 +225,7 @@ enum TunServiceManager {
         guard status(store: store).isUsable else {
             throw NSError.user("TUN 服务未安装。请先到 设置 > TUN 设置 安装 TUN 服务。")
         }
+        try ensureRouteIsSafeToStart(store: store)
         try configText.write(to: store.tunRequestConfigURL, atomically: true, encoding: .utf8)
         if !FileManager.default.fileExists(atPath: store.tunRequestFlagURL.path) {
             FileManager.default.createFile(atPath: store.tunRequestFlagURL.path, contents: Data())
@@ -240,6 +241,45 @@ enum TunServiceManager {
         try? FileManager.default.removeItem(at: store.tunRequestConfigURL)
     }
 
+    private static func ensureRouteIsSafeToStart(store: Store) throws {
+        if activeSingBoxPID(store: store) != nil { return }
+        guard let detail = externalTunDefaultRouteDescription() else { return }
+        throw NSError.user("检测到系统网络已经被其它 TUN/VPN 接管（\(detail)）。为避免断网，TungBox 暂不启动 TUN。请先关闭其它 VPN/网络增强，或恢复网络后再试。")
+    }
+
+    private static func externalTunDefaultRouteDescription() -> String? {
+        let route = runProcessAndGetOutput("/sbin/route", args: ["-n", "get", "default"])
+        guard let interface = route
+            .components(separatedBy: .newlines)
+            .compactMap({ line -> String? in
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                guard trimmed.hasPrefix("interface:") else { return nil }
+                return trimmed
+                    .replacingOccurrences(of: "interface:", with: "")
+                    .trimmingCharacters(in: .whitespaces)
+            })
+            .first,
+            interface.hasPrefix("utun")
+        else {
+            return nil
+        }
+
+        let ifconfig = runProcessAndGetOutput("/sbin/ifconfig", args: [interface])
+        guard ifconfig.contains("inet 198.18.") else { return nil }
+        let address = firstIPv4Address(in: ifconfig)
+        return [interface, address].compactMap { $0 }.joined(separator: " ")
+    }
+
+    private static func firstIPv4Address(in text: String) -> String? {
+        for line in text.components(separatedBy: .newlines) {
+            let parts = line.trimmingCharacters(in: .whitespaces).components(separatedBy: .whitespaces)
+            if let index = parts.firstIndex(of: "inet"), parts.indices.contains(index + 1) {
+                return parts[index + 1]
+            }
+        }
+        return nil
+    }
+
     private static func writeServiceScript(store: Store, to url: URL) throws {
         let script = """
         #!/bin/sh
@@ -251,7 +291,7 @@ enum TunServiceManager {
         PIDFILE=\(shellQuote(pidPath))
         LOG=\(shellQuote(logPath))
         CHILD=""
-        SCRIPT_VERSION="2026-06-tun-safe-stop-v3"
+        SCRIPT_VERSION="2026-06-tun-safe-stop-v4"
 
         is_safe_root_file() {
           path="$1"
@@ -268,6 +308,24 @@ enum TunServiceManager {
           [ -f "$REQUEST_FLAG" ] || return 1
           [ -f "$REQUEST_CONFIG" ] || return 1
           return 0
+        }
+
+        route_safe_to_start() {
+          iface="$(/sbin/route -n get default 2>/dev/null | awk '/interface:/{print $2; exit}')"
+          case "$iface" in
+            utun*)
+              if /sbin/ifconfig "$iface" 2>/dev/null | grep -q 'inet 198\\.18\\.'; then
+                echo "$(date '+%Y-%m-%d %H:%M:%S') refusing TUN start: default route already uses $iface 198.18.x" >> "$LOG"
+                return 1
+              fi
+              ;;
+          esac
+          return 0
+        }
+
+        is_tungbox_tun_interface() {
+          ifconfig_text="$(/sbin/ifconfig "$1" 2>/dev/null || true)"
+          echo "$ifconfig_text" | grep -Eq 'inet (172\\.19\\.0\\.1|198\\.18\\.)'
         }
 
         sync_requested_config() {
@@ -293,6 +351,7 @@ enum TunServiceManager {
           /sbin/route -n delete -inet6 -net 8000::/1 2>/dev/null || true
 
           for ifname in $(/sbin/ifconfig -l 2>/dev/null | tr ' ' '\\n' | grep '^utun'); do
+            is_tungbox_tun_interface "$ifname" || continue
             /sbin/route -n delete -net default -iface "$ifname" 2>/dev/null || true
             /sbin/route -n delete -inet6 default -iface "$ifname" 2>/dev/null || true
           done
@@ -354,6 +413,12 @@ enum TunServiceManager {
             fi
             rm -f "$FLAG"
             sleep 1
+            continue
+          fi
+
+          if ! route_safe_to_start; then
+            rm -f "$FLAG" "$PIDFILE" "$REQUEST_FLAG"
+            sleep 2
             continue
           fi
 
@@ -427,9 +492,11 @@ enum TunServiceManager {
             && script.contains("REQUEST_CONFIG=")
             && script.contains("REQUEST_FLAG=")
             && script.contains("sync_requested_config")
+            && script.contains("route_safe_to_start")
+            && script.contains("is_tungbox_tun_interface")
             && script.contains("shutdown_child")
             && script.contains("clean_routes")
-            && script.contains("2026-06-tun-safe-stop-v3")
+            && script.contains("2026-06-tun-safe-stop-v4")
             && plist.contains(stdoutPath)
             && plist.contains(stderrPath)
     }
@@ -441,7 +508,7 @@ enum TunServiceManager {
         /sbin/route -n delete -net 128.0.0.0/1 2>/dev/null || true
         /sbin/route -n delete -inet6 -net ::/1 2>/dev/null || true
         /sbin/route -n delete -inet6 -net 8000::/1 2>/dev/null || true
-        for ifname in $(/sbin/ifconfig -l 2>/dev/null | tr ' ' '\\n' | grep '^utun'); do /sbin/route -n delete -net default -iface "$ifname" 2>/dev/null || true; /sbin/route -n delete -inet6 default -iface "$ifname" 2>/dev/null || true; done
+        for ifname in $(/sbin/ifconfig -l 2>/dev/null | tr ' ' '\\n' | grep '^utun'); do if /sbin/ifconfig "$ifname" 2>/dev/null | grep -Eq 'inet (172\\.19\\.0\\.1|198\\.18\\.)'; then /sbin/route -n delete -net default -iface "$ifname" 2>/dev/null || true; /sbin/route -n delete -inet6 default -iface "$ifname" 2>/dev/null || true; fi; done
         /usr/sbin/networksetup -listallnetworkservices 2>/dev/null | tail -n +2 | while IFS= read -r svc; do case "$svc" in \\**) continue ;; esac; if /usr/sbin/networksetup -getinfo "$svc" 2>/dev/null | grep -q '^IP address'; then /usr/sbin/networksetup -renewdhcp "$svc" 2>/dev/null || true; break; fi; done
         """
     }
@@ -461,6 +528,23 @@ enum TunServiceManager {
             return (process.terminationStatus, String(data: data, encoding: .utf8) ?? "")
         } catch {
             return (1, error.localizedDescription)
+        }
+    }
+
+    private static func runProcessAndGetOutput(_ binary: String, args: [String]) -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: binary)
+        process.arguments = args
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            return String(data: data, encoding: .utf8) ?? ""
+        } catch {
+            return ""
         }
     }
 

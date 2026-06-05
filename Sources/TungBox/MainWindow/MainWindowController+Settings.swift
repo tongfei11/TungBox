@@ -717,7 +717,7 @@ extension MainWindowController {
             try TunServiceManager.install(store: store)
             if shouldRestoreTun {
                 try applyTunPreference(restartIfRunning: false)
-                try TunServiceManager.enable(store: store, configText: editor.string)
+                try enableTunServiceSafely(configText: editor.string)
             }
             appendLog("[TUN] TUN 服务已重新安装\n")
             showToast("TUN 服务已重新安装")
@@ -735,7 +735,7 @@ extension MainWindowController {
         do {
             if isTunEnabled {
                 try applyTunPreference(restartIfRunning: false)
-                try TunServiceManager.enable(store: store, configText: editor.string)
+                try enableTunServiceSafely(configText: editor.string)
             }
             try TunServiceManager.reload(store: store)
             appendLog("[TUN] TUN 服务已重载\n")
@@ -798,6 +798,67 @@ extension MainWindowController {
 
     func isTunRuntimeRunning() -> Bool {
         isTunEnabled && TunServiceManager.status(store: store).isRunning
+    }
+
+    func enableTunServiceSafely(configText: String) throws {
+        try ensureTunRouteIsSafeToStart()
+        try TunServiceManager.enable(store: store, configText: configText)
+    }
+
+    func ensureTunRouteIsSafeToStart() throws {
+        guard let conflict = externalTunDefaultRouteDescription() else { return }
+        appendLog("[TUN] 已阻止启动：检测到系统默认网络仍在 \(conflict)\n")
+        throw NSError.user("检测到系统网络已经被其它 TUN/VPN 接管（\(conflict)）。为避免断网，TungBox 暂不启动 TUN。请先关闭其它 VPN/网络增强，或恢复网络后再试。")
+    }
+
+    func externalTunDefaultRouteDescription() -> String? {
+        if isTunRuntimeRunning() { return nil }
+        let route = runProcessAndGetOutput("/sbin/route", args: ["-n", "get", "default"])
+        guard let interface = route
+            .components(separatedBy: .newlines)
+            .compactMap({ line -> String? in
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                guard trimmed.hasPrefix("interface:") else { return nil }
+                return trimmed
+                    .replacingOccurrences(of: "interface:", with: "")
+                    .trimmingCharacters(in: .whitespaces)
+            })
+            .first,
+            interface.hasPrefix("utun")
+        else {
+            return nil
+        }
+
+        let ifconfig = runProcessAndGetOutput("/sbin/ifconfig", args: [interface])
+        guard ifconfig.contains("inet 198.18.") else { return nil }
+        var detail = "\(interface)"
+        if let address = firstIPv4Address(in: ifconfig) {
+            detail += " \(address)"
+        }
+        if let dns = firstFakeTunDNSServer() {
+            detail += "，DNS \(dns)"
+        }
+        return detail
+    }
+
+    private func firstIPv4Address(in text: String) -> String? {
+        for line in text.components(separatedBy: .newlines) {
+            let parts = line.trimmingCharacters(in: .whitespaces).components(separatedBy: .whitespaces)
+            if let index = parts.firstIndex(of: "inet"), parts.indices.contains(index + 1) {
+                return parts[index + 1]
+            }
+        }
+        return nil
+    }
+
+    private func firstFakeTunDNSServer() -> String? {
+        let dns = runProcessAndGetOutput("/usr/sbin/scutil", args: ["--dns"])
+        for line in dns.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("nameserver"), trimmed.contains("198.18.") else { continue }
+            return trimmed.components(separatedBy: ":").last?.trimmingCharacters(in: .whitespaces)
+        }
+        return nil
     }
 
     func currentProxyPID() -> Int32? {
