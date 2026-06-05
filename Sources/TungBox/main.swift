@@ -288,7 +288,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             UserDefaults.standard.set(isSystemProxyDefaultEnabled, forKey: "systemProxyDefaultEnabled")
         }
 
-        // If TUN daemon is actively running (e.g. survived a crash/force-quit), sync UI state
         let tunStatus = TunServiceManager.status(store: store)
         if isTunEnabled && !tunStatus.isUsable {
             isTunEnabled = false
@@ -297,31 +296,32 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             appendLog("[TUN] 检测到 TUN 服务不可用，已关闭 TUN 模式。请到 设置 > TUN 设置 重新安装。\n")
             return
         }
-        if tunStatus.isRunning {
-            isTunEnabled = true
-            UserDefaults.standard.set(true, forKey: "tunEnabled")
-            // Daemon is running TUN — regular proxy should be off to avoid conflict
+
+        guard isSystemProxyDefaultEnabled else {
             isSystemProxyEnabled = false
-        }
-        // If TUN was enabled but daemon is idle (e.g. manual flag removal), re-enable
-        if isTunEnabled && tunStatus.isInstalled && !tunStatus.isRunning {
-            if let index = selectedIndex, profiles.indices.contains(index),
-               let configText = try? String(contentsOf: store.configURL(for: profiles[index])) {
-                let preparedText = (try? preparedTunConfigText(from: configText)) ?? configText
-                try? TunServiceManager.enable(store: store, configText: preparedText)
-                appendLog("[TUN] 启动时恢复 TUN 服务\n")
-            } else {
-                // No valid config to give the daemon — disable TUN to prevent restart loop
-                isTunEnabled = false
-                UserDefaults.standard.set(false, forKey: "tunEnabled")
+            if tunStatus.isRunning || TunServiceManager.hasEnableRequest(store: store) {
                 try? TunServiceManager.disable(store: store)
+                appendLog("[启动] 默认开启代理服务未启用，已清理残留 TUN 请求。\n")
             }
+            return
+        }
+
+        if tunStatus.isRunning && !isTunEnabled {
+            try? TunServiceManager.disable(store: store)
+            isSystemProxyEnabled = false
+            appendLog("[启动] 当前接管方式为系统代理，已清理残留 TUN 请求。\n")
+            return
+        }
+
+        if tunStatus.isRunning && isTunEnabled {
+            isSystemProxyEnabled = true
         }
     }
 
     func applyStartupProxyPreference() {
         guard isSystemProxyDefaultEnabled else {
             isSystemProxyEnabled = false
+            try? TunServiceManager.disable(store: store)
             syncProxyPreferenceControls()
             appendLog("[启动] 默认开启代理服务未启用，本次启动不自动打开代理。\n")
             return
@@ -979,16 +979,13 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 "type": "tun",
                 "tag": "tun-in",
                 "address": [
-                    "172.19.0.1/30",
-                    "fdfe:dcba:9876::1/126"
+                    "172.19.0.1/30"
                 ],
                 "auto_route": true,
                 "strict_route": false,
                 "route_address": [
                     "0.0.0.0/1",
-                    "128.0.0.0/1",
-                    "::/1",
-                    "8000::/1"
+                    "128.0.0.0/1"
                 ],
                 "route_exclude_address": [
                     "10.0.0.0/8",
@@ -996,11 +993,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                     "192.168.0.0/16",
                     "169.254.0.0/16",
                     "224.0.0.0/4",
-                    "240.0.0.0/4",
-                    "fe80::/10",
-                    "fec0::/10",
-                    "fc00::/7",
-                    "ff00::/8"
+                    "240.0.0.0/4"
                 ]
             ], at: 0)
 

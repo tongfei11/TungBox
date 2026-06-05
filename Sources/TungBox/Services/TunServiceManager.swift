@@ -225,8 +225,8 @@ enum TunServiceManager {
     }
 
     static func disable(store: Store) throws {
-        guard status(store: store).isInstalled else { return }
         try? FileManager.default.removeItem(at: store.tunRequestFlagURL)
+        try? FileManager.default.removeItem(at: store.tunRequestConfigURL)
     }
 
     private static func writeServiceScript(store: Store, to url: URL) throws {
@@ -240,7 +240,7 @@ enum TunServiceManager {
         PIDFILE=\(shellQuote(pidPath))
         LOG=\(shellQuote(logPath))
         CHILD=""
-        SCRIPT_VERSION="2026-06-tun-route-cleanup-v2"
+        SCRIPT_VERSION="2026-06-tun-safe-stop-v3"
 
         is_safe_root_file() {
           path="$1"
@@ -308,6 +308,21 @@ enum TunServiceManager {
             else
               wait "$CHILD" >/dev/null 2>&1 || true
             fi
+          elif [ -f "$PIDFILE" ]; then
+            PID="$(cat "$PIDFILE" 2>/dev/null || true)"
+            case "$PID" in
+              ''|*[!0-9]*) ;;
+              *)
+                if kill -0 "$PID" >/dev/null 2>&1; then
+                  kill -TERM "$PID" >/dev/null 2>&1 || true
+                  sleep 2
+                  if kill -0 "$PID" >/dev/null 2>&1; then
+                    echo "$(date '+%Y-%m-%d %H:%M:%S') stale sing-box not exiting, force killing" >> "$LOG"
+                    kill -KILL "$PID" >/dev/null 2>&1 || true
+                  fi
+                fi
+                ;;
+            esac
           fi
           clean_routes
           CHILD=""
@@ -323,6 +338,9 @@ enum TunServiceManager {
         echo "$(date '+%Y-%m-%d %H:%M:%S') TUN service started" >> "$LOG"
         while true; do
           if ! has_request; then
+            if [ -f "$FLAG" ] || [ -f "$PIDFILE" ]; then
+              shutdown_child
+            fi
             rm -f "$FLAG"
             sleep 1
             continue
@@ -400,7 +418,7 @@ enum TunServiceManager {
             && script.contains("sync_requested_config")
             && script.contains("shutdown_child")
             && script.contains("clean_routes")
-            && script.contains("2026-06-tun-route-cleanup-v2")
+            && script.contains("2026-06-tun-safe-stop-v3")
             && plist.contains(stdoutPath)
             && plist.contains(stderrPath)
     }
