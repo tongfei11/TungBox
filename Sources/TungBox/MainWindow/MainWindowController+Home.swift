@@ -540,10 +540,12 @@ extension MainWindowController {
     @objc func switchToggled(_ sender: MD3Switch) {
         if sender.isOn {
             isSystemProxyEnabled = true
+            isProxyServiceTransitioning = true
             syncProxyPreferenceControls()
             startService()
         } else {
             isSystemProxyEnabled = false
+            isProxyServiceTransitioning = false
             syncProxyPreferenceControls()
             stopService()
         }

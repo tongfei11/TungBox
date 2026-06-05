@@ -82,6 +82,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var isSystemProxyDefaultEnabled = UserDefaults.standard.object(forKey: "systemProxyDefaultEnabled") as? Bool ?? false
     var isSystemProxyEnabled = false
     var isTunEnabled = UserDefaults.standard.object(forKey: "tunEnabled") as? Bool ?? false
+    var isProxyServiceTransitioning = false
     var isLaunchAtLoginEnabled: Bool {
         if #available(macOS 13.0, *) {
             return SMAppService.mainApp.status == .enabled
@@ -695,6 +696,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 try TunServiceManager.enable(store: store, configText: editor.string)
                 appendLog("[TUN] 已交给 TUN 服务启动 sing-box\n")
                 setSystemProxy(enabled: false, port: getMixedProxyPort())
+                isProxyServiceTransitioning = false
                 // TUN daemon needs a moment to start sing-box; delay status refresh
                 // so the switch doesn't flip off before the daemon picks up the flag
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
@@ -705,6 +707,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             }
             try runner.start(config: url, elevated: false)
             appendLog("[TungBox] 已启动\n")
+            isProxyServiceTransitioning = false
             
             let port = getMixedProxyPort()
             setSystemProxy(enabled: isSystemProxyEnabled && !isTunEnabled, port: port, rollbackOnMismatch: true)
@@ -719,6 +722,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
     func markProxyStartupFailed() {
         isSystemProxyEnabled = false
+        isProxyServiceTransitioning = false
         serviceSwitch.isOn = false
         syncProxyPreferenceControls()
     }
@@ -753,11 +757,10 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             showError(NSError.user("未检测到 sing-box Core。请先在 设置 > 基础 > Core 管理 中安装或导入 Core。"))
             return false
         }
-        checkSingBoxInstall(showAlert: false)
         return true
     }
 
-    func stopService() {
+    func stopService(clearSystemProxySynchronously: Bool = false) {
         let shouldDisableTun = isTunEnabled || TunServiceManager.status(store: store).isRunning
         let shouldStopNormalProxy = runner.isRunning
         let shouldClearSystemProxy = isSystemProxyEnabled || shouldStopNormalProxy
@@ -776,11 +779,16 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
         // 3. Turn off system proxy synchronously — must complete before app exits
         if shouldClearSystemProxy {
-            setSystemProxySync(enabled: false, port: 7890)
+            if clearSystemProxySynchronously {
+                setSystemProxySync(enabled: false, port: 7890)
+            } else {
+                setSystemProxy(enabled: false, port: 7890)
+            }
             appendLog("[TungBox] 系统代理已关闭\n")
         }
 
         isSystemProxyEnabled = false
+        isProxyServiceTransitioning = false
 
         refreshStatus()
     }
@@ -1725,7 +1733,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     }
 
     func stopServiceFromDelegate() {
-        stopService()
+        stopService(clearSystemProxySynchronously: true)
     }
 
     func setSystemProxy(enabled: Bool, port: Int, rollbackOnMismatch: Bool = false) {

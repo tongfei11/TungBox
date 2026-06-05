@@ -168,16 +168,27 @@ extension MainWindowController {
     @objc func toggleProxyServiceFromTray() {
         if !isProxyServiceActiveOrRequested() {
             isSystemProxyEnabled = true
+            isProxyServiceTransitioning = true
             syncProxyPreferenceControls()
-            startService()
-            appendLog("[托盘] 启动代理服务\n")
+            refreshTrayIcon()
+            appendLog("[托盘] 正在启动代理服务\n")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                guard let self else { return }
+                self.startService()
+                self.appendLog("[托盘] 启动代理服务\n")
+            }
         } else {
             isSystemProxyEnabled = false
+            isProxyServiceTransitioning = false
             syncProxyPreferenceControls()
-            stopService()
-            appendLog("[托盘] 已关闭代理服务\n")
+            refreshTrayIcon()
+            appendLog("[托盘] 正在关闭代理服务\n")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                guard let self else { return }
+                self.stopService()
+                self.appendLog("[托盘] 已关闭代理服务\n")
+            }
         }
-        refreshStatus()
     }
 
     @objc func captureModeFromTray(_ sender: NSMenuItem) {

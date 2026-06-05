@@ -790,7 +790,10 @@ extension MainWindowController {
     }
 
     func isProxyServiceActiveOrRequested() -> Bool {
-        runner.isRunning || isTunRuntimeRunning() || (isTunEnabled && (isSystemProxyEnabled || TunServiceManager.hasEnableRequest(store: store)))
+        isProxyServiceTransitioning
+            || runner.isRunning
+            || isTunRuntimeRunning()
+            || (isTunEnabled && (isSystemProxyEnabled || TunServiceManager.hasEnableRequest(store: store)))
     }
 
     func isTunRuntimeRunning() -> Bool {
