@@ -802,6 +802,7 @@ extension MainWindowController {
     func enableTunServiceSafely(configText: String) throws {
         try ensureTunRouteIsSafeToStart()
         let preparedConfig = try preparedTunConfigText(from: configText)
+        setSystemProxySync(enabled: false, port: getMixedProxyPort())
         try TunServiceManager.enable(store: store, configText: preparedConfig)
         startTunRequestHeartbeat()
     }

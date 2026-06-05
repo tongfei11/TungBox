@@ -124,12 +124,31 @@ enum TunServiceManager {
     }
 
     static func activeSingBoxPID(store: Store) -> Int32? {
-        guard let text = try? String(contentsOfFile: pidPath).trimmingCharacters(in: .whitespacesAndNewlines),
-              let pid = Int32(text),
-              Darwin.kill(pid, 0) == 0 else {
-            return nil
+        if let text = try? String(contentsOfFile: pidPath).trimmingCharacters(in: .whitespacesAndNewlines),
+           let pid = Int32(text),
+           Darwin.kill(pid, 0) == 0 {
+            return pid
         }
-        return pid
+        return activeTunProcessPID()
+    }
+
+    private static func activeTunProcessPID() -> Int32? {
+        let output = runProcessAndGetOutput("/bin/ps", args: ["-axo", "pid=,command="])
+        for line in output.components(separatedBy: .newlines) {
+            guard line.contains(corePath),
+                  line.contains(configPath),
+                  line.contains(" run ") || line.contains("/sing-box run ") else {
+                continue
+            }
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard let first = trimmed.split(separator: " ").first,
+                  let pid = Int32(first),
+                  Darwin.kill(pid, 0) == 0 else {
+                continue
+            }
+            return pid
+        }
+        return nil
     }
 
     static func hasEnableRequest(store: Store) -> Bool {
@@ -423,7 +442,7 @@ enum TunServiceManager {
         PIDFILE=\(shellQuote(pidPath))
         LOG=\(shellQuote(logPath))
         CHILD=""
-        SCRIPT_VERSION="2026-06-tun-safe-stop-v10"
+        SCRIPT_VERSION="2026-06-tun-safe-stop-v11"
         REQUEST_MAX_AGE=30
 
         is_safe_root_file() {
@@ -546,33 +565,39 @@ enum TunServiceManager {
           echo "$(date '+%Y-%m-%d %H:%M:%S') route cleanup done" >> "$LOG"
         }
 
-        shutdown_child() {
-          if [ -n "$CHILD" ] && kill -0 "$CHILD" >/dev/null 2>&1; then
-            # Give sing-box time to clean up routes itself first
-            kill -TERM "$CHILD" >/dev/null 2>&1 || true
-            sleep 2
-            if kill -0 "$CHILD" >/dev/null 2>&1; then
-              echo "$(date '+%Y-%m-%d %H:%M:%S') sing-box not exiting, force killing" >> "$LOG"
-              kill -KILL "$CHILD" >/dev/null 2>&1 || true
-              wait "$CHILD" >/dev/null 2>&1 || true
-            else
-              wait "$CHILD" >/dev/null 2>&1 || true
+        wait_for_pid_exit() {
+          pid="$1"
+          limit="$2"
+          i=0
+          while kill -0 "$pid" >/dev/null 2>&1 && [ "$i" -lt "$limit" ]; do
+            sleep 1
+            i=$((i + 1))
+          done
+          ! kill -0 "$pid" >/dev/null 2>&1
+        }
+
+        stop_pid() {
+          pid="$1"
+          label="$2"
+          case "$pid" in ''|*[!0-9]*) return 0 ;; esac
+          kill -0 "$pid" >/dev/null 2>&1 || return 0
+          kill -TERM "$pid" >/dev/null 2>&1 || true
+          if ! wait_for_pid_exit "$pid" 4; then
+            echo "$(date '+%Y-%m-%d %H:%M:%S') $label not exiting, force killing" >> "$LOG"
+            kill -KILL "$pid" >/dev/null 2>&1 || true
+            if ! wait_for_pid_exit "$pid" 3; then
+              echo "$(date '+%Y-%m-%d %H:%M:%S') $label still alive after force kill" >> "$LOG"
             fi
+          fi
+          wait "$pid" >/dev/null 2>&1 || true
+        }
+
+        shutdown_child() {
+          if [ -n "$CHILD" ]; then
+            stop_pid "$CHILD" "sing-box"
           elif [ -f "$PIDFILE" ]; then
             PID="$(cat "$PIDFILE" 2>/dev/null || true)"
-            case "$PID" in
-              ''|*[!0-9]*) ;;
-              *)
-                if kill -0 "$PID" >/dev/null 2>&1; then
-                  kill -TERM "$PID" >/dev/null 2>&1 || true
-                  sleep 2
-                  if kill -0 "$PID" >/dev/null 2>&1; then
-                    echo "$(date '+%Y-%m-%d %H:%M:%S') stale sing-box not exiting, force killing" >> "$LOG"
-                    kill -KILL "$PID" >/dev/null 2>&1 || true
-                  fi
-                fi
-                ;;
-            esac
+            stop_pid "$PID" "stale sing-box"
           fi
           clean_routes
           CHILD=""
@@ -684,14 +709,16 @@ enum TunServiceManager {
             && script.contains("has_tungbox_tun_interface")
             && script.contains("shutdown_child")
             && script.contains("clean_routes")
-            && script.contains("2026-06-tun-safe-stop-v10")
+            && script.contains("wait_for_pid_exit")
+            && script.contains("stop_pid")
+            && script.contains("2026-06-tun-safe-stop-v11")
             && plist.contains(stdoutPath)
             && plist.contains(stderrPath)
     }
 
     private static func stopChildCommand() -> String {
         """
-        if [ -f \(shellQuote(pidPath)) ]; then PID=$(cat \(shellQuote(pidPath)) 2>/dev/null || true); case "$PID" in ''|*[!0-9]*) ;; *) kill -TERM "$PID" >/dev/null 2>&1 || true; sleep 2; kill -KILL "$PID" >/dev/null 2>&1 || true ;; esac; fi
+        if [ -f \(shellQuote(pidPath)) ]; then PID=$(cat \(shellQuote(pidPath)) 2>/dev/null || true); case "$PID" in ''|*[!0-9]*) ;; *) kill -TERM "$PID" >/dev/null 2>&1 || true; i=0; while kill -0 "$PID" >/dev/null 2>&1 && [ "$i" -lt 4 ]; do sleep 1; i=$((i + 1)); done; if kill -0 "$PID" >/dev/null 2>&1; then kill -KILL "$PID" >/dev/null 2>&1 || true; i=0; while kill -0 "$PID" >/dev/null 2>&1 && [ "$i" -lt 3 ]; do sleep 1; i=$((i + 1)); done; fi ;; esac; fi
         for ifname in $(/sbin/ifconfig -l 2>/dev/null | tr ' ' '\\n' | grep '^utun'); do if /sbin/ifconfig "$ifname" 2>/dev/null | grep -Eq 'inet 172\\.19\\.0\\.1'; then /sbin/route -n delete -net 0.0.0.0/1 -ifscope "$ifname" 2>/dev/null || true; /sbin/route -n delete -net 0.0.0.0/1 -iface "$ifname" 2>/dev/null || true; /sbin/route -n delete -net 128.0.0.0/1 -ifscope "$ifname" 2>/dev/null || true; /sbin/route -n delete -net 128.0.0.0/1 -iface "$ifname" 2>/dev/null || true; /sbin/route -n delete -net default -iface "$ifname" 2>/dev/null || true; fi; done
         /usr/sbin/networksetup -listallnetworkservices 2>/dev/null | tail -n +2 | while IFS= read -r svc; do case "$svc" in \\**) continue ;; esac; if /usr/sbin/networksetup -getinfo "$svc" 2>/dev/null | grep -q '^IP address'; then /usr/sbin/networksetup -renewdhcp "$svc" 2>/dev/null || true; break; fi; done
         """

@@ -694,9 +694,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                     throw NSError.user("TUN 服务不可用。请先到 设置 > TUN 设置 重新安装 TUN 服务。")
                 }
                 runner.stop()
+                setSystemProxySync(enabled: false, port: getMixedProxyPort())
                 try enableTunServiceSafely(configText: editor.string)
                 appendLog("[TUN] 已交给 TUN 服务启动 sing-box\n")
-                setSystemProxy(enabled: false, port: getMixedProxyPort())
                 isProxyServiceTransitioning = false
                 // TUN daemon needs a moment to start sing-box; delay status refresh
                 // so the switch doesn't flip off before the daemon picks up the flag
@@ -706,6 +706,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 scheduleConnectionsRefreshAfterStart()
                 return
             }
+            try stopTunBeforeStartingNormalProxy(timeout: 8)
             try runner.start(config: url, elevated: false)
             appendLog("[TungBox] 已启动\n")
             isProxyServiceTransitioning = false
@@ -726,8 +727,25 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         isProxyServiceTransitioning = false
         stopTunRequestHeartbeat()
         try? TunServiceManager.disable(store: store)
+        _ = TunServiceManager.waitUntilStopped(store: store, timeout: 3)
         serviceSwitch.isOn = false
         syncProxyPreferenceControls()
+    }
+
+    func stopTunBeforeStartingNormalProxy(timeout: TimeInterval) throws {
+        let shouldStopTun = TunServiceManager.status(store: store).isRunning
+            || TunServiceManager.hasRequestFiles(store: store)
+            || TunServiceManager.hasNetworkResidue()
+        guard shouldStopTun else { return }
+
+        stopTunRequestHeartbeat()
+        try TunServiceManager.disable(store: store)
+        appendLog("[TUN] 正在等待 TUN 完全停止后再启动系统代理...\n")
+        guard TunServiceManager.waitUntilStopped(store: store, timeout: timeout) else {
+            let residue = TunServiceManager.networkResidueDescription() ?? "TUN 服务仍在停止中"
+            throw NSError.user("TUN 尚未完全停止，暂不启动系统代理，避免进入断网状态。请稍等后重试。\(residue)")
+        }
+        appendLog("[TUN] 已停止，继续启动系统代理\n")
     }
 
     func ensureRuntimeAPISupport() throws {
@@ -960,23 +978,21 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 try enableTunServiceSafely(configText: editor.string)
                 appendLog("[TUN] 已更新 TUN 服务配置\n")
             } else {
-                stopTunRequestHeartbeat()
-                try TunServiceManager.disable(store: store)
                 runner.stop()
+                try stopTunBeforeStartingNormalProxy(timeout: 8)
                 try runner.start(config: url, elevated: false)
                 appendLog("[TUN] 已关闭 TUN 并用普通代理重启\n")
             }
         } else if wasRunning {
             if isTunEnabled {
                 runner.stop()
+                setSystemProxySync(enabled: false, port: getMixedProxyPort())
                 try enableTunServiceSafely(configText: editor.string)
             } else {
-                stopTunRequestHeartbeat()
-                try TunServiceManager.disable(store: store)
+                try stopTunBeforeStartingNormalProxy(timeout: 8)
             }
         } else if !isTunEnabled {
-            stopTunRequestHeartbeat()
-            try TunServiceManager.disable(store: store)
+            try stopTunBeforeStartingNormalProxy(timeout: 8)
         }
     }
 
@@ -987,7 +1003,50 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         let modeValue = readMode(from: config)
         config = setTunEnabled(true, in: config)
         config = ensureModeSupport(in: config, mode: Mode(value: modeValue, displayName: modeDisplayName(modeValue)))
+        config = removeLocalProxyInboundForTunRuntime(in: config)
+        config = bindTunRuntimeDialersToPhysicalInterface(in: config)
         return try renderConfig(config)
+    }
+
+    func removeLocalProxyInboundForTunRuntime(in config: [String: Any]) -> [String: Any] {
+        var config = config
+        var inbounds = config["inbounds"] as? [[String: Any]] ?? []
+        inbounds.removeAll { inbound in
+            guard let type = (inbound["type"] as? String)?.lowercased() else { return false }
+            return ["mixed", "http", "socks"].contains(type)
+        }
+        config["inbounds"] = inbounds
+        return config
+    }
+
+    func bindTunRuntimeDialersToPhysicalInterface(in config: [String: Any]) -> [String: Any] {
+        guard let interface = TunServiceManager.defaultNetworkInterface(), !interface.hasPrefix("utun") else {
+            return config
+        }
+
+        var config = config
+        let virtualOutboundTypes: Set<String> = ["selector", "urltest", "block", "dns"]
+        if var outbounds = config["outbounds"] as? [[String: Any]] {
+            for index in outbounds.indices {
+                guard let type = (outbounds[index]["type"] as? String)?.lowercased(),
+                      !virtualOutboundTypes.contains(type) else {
+                    continue
+                }
+                outbounds[index]["bind_interface"] = interface
+            }
+            config["outbounds"] = outbounds
+        }
+
+        if var dns = config["dns"] as? [String: Any],
+           var servers = dns["servers"] as? [[String: Any]] {
+            for index in servers.indices where servers[index]["detour"] == nil {
+                servers[index]["detour"] = "direct"
+            }
+            dns["servers"] = servers
+            config["dns"] = dns
+        }
+
+        return config
     }
 
     func setTunEnabled(_ enabled: Bool, in config: [String: Any]) -> [String: Any] {
