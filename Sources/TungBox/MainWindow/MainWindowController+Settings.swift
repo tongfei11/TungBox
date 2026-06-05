@@ -829,7 +829,7 @@ extension MainWindowController {
     func ensureTunRouteIsSafeToStart() throws {
         guard let conflict = externalTunDefaultRouteDescription() else { return }
         appendLog("[TUN] 已阻止启动：检测到系统默认网络仍在 \(conflict)\n")
-        throw NSError.user("检测到系统网络已经被其它 TUN/VPN 接管（\(conflict)）。为避免影响 Surge 等代理软件，TungBox 暂不启动 TUN。请改用系统代理模式，或先关闭其它 TUN/VPN 后再试。")
+        throw NSError.user("检测到系统默认路由在 TUN/VPN 上（\(conflict)），且没有找到可用的物理出口接口。TungBox 暂不启动 TUN。请检查 Wi-Fi/有线网络，或改用系统代理模式。")
     }
 
     func externalTunDefaultRouteDescription() -> String? {
@@ -847,6 +847,9 @@ extension MainWindowController {
             .first,
             interface.hasPrefix("utun")
         else {
+            return nil
+        }
+        if let egress = TunServiceManager.defaultNetworkInterface(), !egress.hasPrefix("utun") {
             return nil
         }
 

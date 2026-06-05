@@ -326,16 +326,20 @@ enum TunServiceManager {
     private static func ensureRouteIsSafeToStart(store: Store) throws {
         if activeSingBoxPID(store: store) != nil { return }
         guard let detail = externalTunDefaultRouteDescription() else { return }
-        throw NSError.user("检测到系统网络已经被其它 TUN/VPN 接管（\(detail)）。为避免影响 Surge 等代理软件，TungBox 暂不启动 TUN。请改用系统代理模式，或先关闭其它 TUN/VPN 后再试。")
+        throw NSError.user("检测到系统默认路由在 TUN/VPN 上（\(detail)），且没有找到可用的物理出口接口。TungBox 暂不启动 TUN。请检查 Wi-Fi/有线网络，或改用系统代理模式。")
     }
 
     static func defaultNetworkInterface() -> String? {
-        defaultRouteInterface()?.interface
+        if let route = defaultRouteInterface(), !route.interface.hasPrefix("utun") {
+            return route.interface
+        }
+        return activePhysicalNetworkInterface()
     }
 
     private static func externalTunDefaultRouteDescription() -> String? {
         guard let route = defaultRouteInterface(),
               route.interface.hasPrefix("utun") else { return nil }
+        if activePhysicalNetworkInterface() != nil { return nil }
 
         let ifconfig = runProcessAndGetOutput("/sbin/ifconfig", args: [route.interface])
         let address = firstIPv4Address(in: ifconfig)
@@ -360,6 +364,43 @@ enum TunServiceManager {
         return (interface, route)
     }
 
+    private static func activePhysicalNetworkInterface() -> String? {
+        for interface in hardwarePortInterfaces() + fallbackPhysicalInterfaces() {
+            guard !interface.isEmpty,
+                  !interface.hasPrefix("utun"),
+                  interface != "bridge0",
+                  interface.hasPrefix("en") else {
+                continue
+            }
+            let ifconfig = runProcessAndGetOutput("/sbin/ifconfig", args: [interface])
+            guard ifconfig.contains("status: active"),
+                  ifconfig.contains("inet "),
+                  !ifconfig.contains("inet 169.254.") else {
+                continue
+            }
+            return interface
+        }
+        return nil
+    }
+
+    private static func hardwarePortInterfaces() -> [String] {
+        let output = runProcessAndGetOutput("/usr/sbin/networksetup", args: ["-listnetworkserviceorder"])
+        let pattern = #"Device:\s*([A-Za-z0-9]+)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let range = NSRange(output.startIndex..<output.endIndex, in: output)
+        return regex.matches(in: output, range: range).compactMap { match in
+            guard let deviceRange = Range(match.range(at: 1), in: output) else { return nil }
+            return String(output[deviceRange])
+        }
+    }
+
+    private static func fallbackPhysicalInterfaces() -> [String] {
+        runProcessAndGetOutput("/sbin/ifconfig", args: ["-l"])
+            .split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" })
+            .map(String.init)
+            .filter { $0.hasPrefix("en") }
+    }
+
     private static func firstIPv4Address(in text: String) -> String? {
         for line in text.components(separatedBy: .newlines) {
             let parts = line.trimmingCharacters(in: .whitespaces).components(separatedBy: .whitespaces)
@@ -382,7 +423,7 @@ enum TunServiceManager {
         PIDFILE=\(shellQuote(pidPath))
         LOG=\(shellQuote(logPath))
         CHILD=""
-        SCRIPT_VERSION="2026-06-tun-safe-stop-v9"
+        SCRIPT_VERSION="2026-06-tun-safe-stop-v10"
         REQUEST_MAX_AGE=30
 
         is_safe_root_file() {
@@ -423,11 +464,29 @@ enum TunServiceManager {
           iface="$(/sbin/route -n get default 2>/dev/null | awk '/interface:/{print $2; exit}')"
           case "$iface" in
             utun*)
-              echo "$(date '+%Y-%m-%d %H:%M:%S') refusing TUN start: default route already uses $iface" >> "$LOG"
-              return 1
+              if [ -z "$(active_physical_interface)" ]; then
+                echo "$(date '+%Y-%m-%d %H:%M:%S') refusing TUN start: default route uses $iface and no physical egress is active" >> "$LOG"
+                return 1
+              fi
               ;;
           esac
           return 0
+        }
+
+        active_physical_interface() {
+          for ifname in $(/usr/sbin/networksetup -listnetworkserviceorder 2>/dev/null | awk -F'Device: ' '/Device:/{gsub(/\\).*/, "", $2); print $2}' | grep '^en'); do
+            if /sbin/ifconfig "$ifname" 2>/dev/null | grep -q 'status: active' && /sbin/ifconfig "$ifname" 2>/dev/null | grep -q 'inet ' && ! /sbin/ifconfig "$ifname" 2>/dev/null | grep -q 'inet 169\\.254\\.'; then
+              echo "$ifname"
+              return 0
+            fi
+          done
+          for ifname in $(/sbin/ifconfig -l 2>/dev/null | tr ' ' '\\n' | grep '^en'); do
+            if /sbin/ifconfig "$ifname" 2>/dev/null | grep -q 'status: active' && /sbin/ifconfig "$ifname" 2>/dev/null | grep -q 'inet ' && ! /sbin/ifconfig "$ifname" 2>/dev/null | grep -q 'inet 169\\.254\\.'; then
+              echo "$ifname"
+              return 0
+            fi
+          done
+          return 1
         }
 
         is_tungbox_tun_interface() {
@@ -620,11 +679,12 @@ enum TunServiceManager {
             && script.contains("request_is_stale")
             && script.contains("sync_requested_config")
             && script.contains("route_safe_to_start")
+            && script.contains("active_physical_interface")
             && script.contains("is_tungbox_tun_interface")
             && script.contains("has_tungbox_tun_interface")
             && script.contains("shutdown_child")
             && script.contains("clean_routes")
-            && script.contains("2026-06-tun-safe-stop-v9")
+            && script.contains("2026-06-tun-safe-stop-v10")
             && plist.contains(stdoutPath)
             && plist.contains(stderrPath)
     }
