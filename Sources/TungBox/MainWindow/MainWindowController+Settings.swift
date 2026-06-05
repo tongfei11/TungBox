@@ -716,6 +716,7 @@ extension MainWindowController {
             let shouldRestoreTun = isTunEnabled
             try TunServiceManager.install(store: store)
             if shouldRestoreTun {
+                try applyTunPreference(restartIfRunning: false)
                 try TunServiceManager.enable(store: store, configText: editor.string)
             }
             appendLog("[TUN] TUN 服务已重新安装\n")
@@ -764,7 +765,7 @@ extension MainWindowController {
     }
 
     func syncProxyPreferenceControls() {
-        serviceSwitch.isOn = isProxyRuntimeRunning()
+        serviceSwitch.isOn = isProxyServiceActiveOrRequested()
         homeSystemProxyRadio.state = isTunEnabled ? .off : .on
         homeTunRadio.state = isTunEnabled ? .on : .off
         settingsSystemProxyCheckbox.state = isSystemProxyDefaultEnabled ? .on : .off
@@ -786,6 +787,10 @@ extension MainWindowController {
 
     func isProxyRuntimeRunning() -> Bool {
         runner.isRunning || isTunRuntimeRunning()
+    }
+
+    func isProxyServiceActiveOrRequested() -> Bool {
+        runner.isRunning || isTunRuntimeRunning() || (isTunEnabled && (isSystemProxyEnabled || TunServiceManager.hasEnableRequest(store: store)))
     }
 
     func isTunRuntimeRunning() -> Bool {

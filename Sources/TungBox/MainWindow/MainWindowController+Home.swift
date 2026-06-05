@@ -573,6 +573,9 @@ extension MainWindowController {
         }
 
         isTunEnabled = tunEnabled
+        if tunEnabled {
+            isSystemProxyEnabled = true
+        }
         UserDefaults.standard.set(isTunEnabled, forKey: "tunEnabled")
         syncProxyPreferenceControls()
         do {
@@ -580,8 +583,7 @@ extension MainWindowController {
                 try applyTunPreference(restartIfRunning: false)
                 reconcileSystemProxyForCurrentMode()
             } else if tunEnabled {
-                // Proxy not running — start TUN directly instead of just saving config
-                _ = try saveCurrent()
+                try applyTunPreference(restartIfRunning: false)
                 try TunServiceManager.enable(store: store, configText: editor.string)
                 appendLog("[\(source)] 已启动 TUN 模式\n")
                 appendLog("[TUN] 已交给 TUN 服务启动 sing-box\n")

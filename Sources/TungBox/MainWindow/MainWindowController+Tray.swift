@@ -21,13 +21,13 @@ extension MainWindowController {
 
     func rebuildTrayMenu(_ menu: NSMenu) {
         menu.removeAllItems()
-        let status = isProxyRuntimeRunning() ? "运行中" : "已关闭"
+        let status = isProxyServiceActiveOrRequested() ? "运行中" : "已关闭"
         menu.addItem(NSMenuItem(title: "\(TungBoxVersion.display) \(status)", action: nil, keyEquivalent: ""))
         menu.addItem(.separator())
 
         let proxyService = NSMenuItem(title: "代理服务", action: #selector(toggleProxyServiceFromTray), keyEquivalent: "")
         proxyService.target = self
-        proxyService.state = isProxyRuntimeRunning() ? .on : .off
+        proxyService.state = isProxyServiceActiveOrRequested() ? .on : .off
         menu.addItem(proxyService)
 
         let captureMenu = NSMenu()
@@ -141,7 +141,7 @@ extension MainWindowController {
     }
 
     func trayIcon() -> NSImage? {
-        let name = isProxyRuntimeRunning() ? "on" : "off"
+        let name = isProxyServiceActiveOrRequested() ? "on" : "off"
         guard let url = AppResources.url(forResource: name, withExtension: "png", subdirectory: "Tray"),
               let image = NSImage(contentsOf: url) else { return nil }
         image.size = NSSize(width: 20, height: 20)
@@ -166,7 +166,7 @@ extension MainWindowController {
     }
 
     @objc func toggleProxyServiceFromTray() {
-        if !isProxyRuntimeRunning() {
+        if !isProxyServiceActiveOrRequested() {
             isSystemProxyEnabled = true
             syncProxyPreferenceControls()
             startService()

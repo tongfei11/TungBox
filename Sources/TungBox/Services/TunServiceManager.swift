@@ -131,6 +131,11 @@ enum TunServiceManager {
         return pid
     }
 
+    static func hasEnableRequest(store: Store) -> Bool {
+        FileManager.default.fileExists(atPath: store.tunRequestFlagURL.path)
+            && FileManager.default.fileExists(atPath: store.tunRequestConfigURL.path)
+    }
+
     static func install(store: Store) throws {
         guard FileManager.default.isExecutableFile(atPath: store.coreBinaryURL.path) else {
             throw NSError.user("请先在 Core 管理中导入或安装 sing-box Core。")
@@ -143,8 +148,8 @@ enum TunServiceManager {
         let tempPlist = FileManager.default.temporaryDirectory.appendingPathComponent("\(label).plist")
         try plist.write(to: tempPlist, atomically: true, encoding: .utf8)
         let command = [
-            "set -e",
             "launchctl bootout system/\(label) >/dev/null 2>&1 || true",
+            "launchctl enable system/\(label) >/dev/null 2>&1 || true",
             "mkdir -p \(shellQuote(installDirectoryPath))",
             "cp \(shellQuote(tempScript.path)) \(shellQuote(scriptPath))",
             "cp \(shellQuote(store.coreBinaryURL.path)) \(shellQuote(corePath))",
@@ -235,6 +240,7 @@ enum TunServiceManager {
         PIDFILE=\(shellQuote(pidPath))
         LOG=\(shellQuote(logPath))
         CHILD=""
+        SCRIPT_VERSION="2026-06-tun-route-cleanup-v2"
 
         is_safe_root_file() {
           path="$1"
@@ -268,32 +274,25 @@ enum TunServiceManager {
           return 0
         }
 
-        # Clean up stale TUN default routes. sing-box auto_route replaces the system
-        # default route; if sing-box crashes or is killed before restoring, ALL traffic
-        # gets black-holed (including Surge enhanced mode, which runs inside utun).
-        # These routes use split-/1 trick to override 0.0.0.0/0 and ::/0 without
-        # touching other routes — safe to delete even if no stale route exists.
         clean_routes() {
           echo "$(date '+%Y-%m-%d %H:%M:%S') cleaning up TUN routes" >> "$LOG"
-          # IPv4: delete sing-box split-default fake routes
           /sbin/route -n delete -net 0.0.0.0/1 2>/dev/null || true
           /sbin/route -n delete -net 128.0.0.0/1 2>/dev/null || true
-          /sbin/route -n delete -net default -iface utun 2>/dev/null || true
-          # Restore the real default route (get gateway before TUN polluted it is too late,
-          # so we rely on networksetup to re-apply DHCP — but at least remove bad routes)
-          # IPv6: delete sing-box split-default fake routes
           /sbin/route -n delete -inet6 -net ::/1 2>/dev/null || true
           /sbin/route -n delete -inet6 -net 8000::/1 2>/dev/null || true
-          /sbin/route -n delete -inet6 default -iface utun 2>/dev/null || true
-          # Kick the primary network service to restore correct routes
-          # Best-effort: get the first active service and renew DHCP
-          for svc in $(/usr/sbin/networksetup -listallnetworkservices | tail -n +2 | grep -v '^\\*'); do
+
+          for ifname in $(/sbin/ifconfig -l 2>/dev/null | tr ' ' '\\n' | grep '^utun'); do
+            /sbin/route -n delete -net default -iface "$ifname" 2>/dev/null || true
+            /sbin/route -n delete -inet6 default -iface "$ifname" 2>/dev/null || true
+          done
+
+          /usr/sbin/networksetup -listallnetworkservices 2>/dev/null | tail -n +2 | while IFS= read -r svc; do
+            case "$svc" in \\**) continue ;; esac
             if /usr/sbin/networksetup -getinfo "$svc" 2>/dev/null | grep -q '^IP address'; then
-              # Renew DHCP to restore default gateway
               /usr/sbin/networksetup -renewdhcp "$svc" 2>/dev/null || true
               break
             fi
-          done 2>/dev/null || true
+          done
           echo "$(date '+%Y-%m-%d %H:%M:%S') route cleanup done" >> "$LOG"
         }
 
@@ -401,6 +400,7 @@ enum TunServiceManager {
             && script.contains("sync_requested_config")
             && script.contains("shutdown_child")
             && script.contains("clean_routes")
+            && script.contains("2026-06-tun-route-cleanup-v2")
             && plist.contains(stdoutPath)
             && plist.contains(stderrPath)
     }
@@ -408,14 +408,12 @@ enum TunServiceManager {
     private static func stopChildCommand() -> String {
         """
         if [ -f \(shellQuote(pidPath)) ]; then PID=$(cat \(shellQuote(pidPath)) 2>/dev/null || true); case "$PID" in ''|*[!0-9]*) ;; *) kill -TERM "$PID" >/dev/null 2>&1 || true; sleep 2; kill -KILL "$PID" >/dev/null 2>&1 || true ;; esac; fi
-        # Clean up stale TUN split-default routes
         /sbin/route -n delete -net 0.0.0.0/1 2>/dev/null || true
         /sbin/route -n delete -net 128.0.0.0/1 2>/dev/null || true
-        /sbin/route -n delete -net default -iface utun 2>/dev/null || true
         /sbin/route -n delete -inet6 -net ::/1 2>/dev/null || true
         /sbin/route -n delete -inet6 -net 8000::/1 2>/dev/null || true
-        /sbin/route -n delete -inet6 default -iface utun 2>/dev/null || true
-        for svc in $(/usr/sbin/networksetup -listallnetworkservices | tail -n +2 | grep -v '^\\*'); do if /usr/sbin/networksetup -getinfo "$svc" 2>/dev/null | grep -q '^IP address'; then /usr/sbin/networksetup -renewdhcp "$svc" 2>/dev/null || true; break; fi; done 2>/dev/null || true
+        for ifname in $(/sbin/ifconfig -l 2>/dev/null | tr ' ' '\\n' | grep '^utun'); do /sbin/route -n delete -net default -iface "$ifname" 2>/dev/null || true; /sbin/route -n delete -inet6 default -iface "$ifname" 2>/dev/null || true; done
+        /usr/sbin/networksetup -listallnetworkservices 2>/dev/null | tail -n +2 | while IFS= read -r svc; do case "$svc" in \\**) continue ;; esac; if /usr/sbin/networksetup -getinfo "$svc" 2>/dev/null | grep -q '^IP address'; then /usr/sbin/networksetup -renewdhcp "$svc" 2>/dev/null || true; break; fi; done
         """
     }
 

@@ -306,7 +306,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         if isTunEnabled && tunStatus.isInstalled && !tunStatus.isRunning {
             if let index = selectedIndex, profiles.indices.contains(index),
                let configText = try? String(contentsOf: store.configURL(for: profiles[index])) {
-                try? TunServiceManager.enable(store: store, configText: configText)
+                let preparedText = (try? preparedTunConfigText(from: configText)) ?? configText
+                try? TunServiceManager.enable(store: store, configText: preparedText)
                 appendLog("[TUN] 启动时恢复 TUN 服务\n")
             } else {
                 // No valid config to give the daemon — disable TUN to prevent restart loop
@@ -951,6 +952,16 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         }
     }
 
+    func preparedTunConfigText(from configText: String) throws -> String {
+        guard var config = parseConfigObject(from: configText) else {
+            throw NSError.user("当前配置不是有效 JSON")
+        }
+        let modeValue = readMode(from: config)
+        config = setTunEnabled(true, in: config)
+        config = ensureModeSupport(in: config, mode: Mode(value: modeValue, displayName: modeDisplayName(modeValue)))
+        return try renderConfig(config)
+    }
+
     func setTunEnabled(_ enabled: Bool, in config: [String: Any]) -> [String: Any] {
         var config = config
         var inbounds = config["inbounds"] as? [[String: Any]] ?? []
@@ -984,6 +995,16 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                     "ff00::/8"
                 ]
             ], at: 0)
+
+            let outbounds = config["outbounds"] as? [[String: Any]] ?? []
+            let proxyTag = preferredProxyTag(from: outbounds)
+            if proxyTag != "direct" {
+                var route = config["route"] as? [String: Any] ?? [:]
+                if (route["final"] as? String).map({ $0 == "direct" }) ?? true {
+                    route["final"] = proxyTag
+                    config["route"] = route
+                }
+            }
         }
         config["inbounds"] = inbounds
         config = setTunCacheFile(enabled: enabled, in: config)
@@ -1371,12 +1392,13 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         let proxyTag = preferredProxyTag(from: outbounds)
         var route = config["route"] as? [String: Any] ?? [:]
         var rules = route["rules"] as? [[String: Any]] ?? []
-        rules.removeAll { rule in
-            guard let clashMode = rule["clash_mode"] as? String else { return false }
-            return ["direct", "global"].contains(clashMode.lowercased())
-        }
-        rules.insert(["clash_mode": "direct", "outbound": "direct"], at: 0)
-        rules.insert(["clash_mode": "global", "outbound": proxyTag], at: 1)
+        rules.removeAll { isManagedRuntimeRule($0) }
+        rules = [
+            ["action": "sniff"],
+            ["protocol": "dns", "action": "hijack-dns"],
+            ["clash_mode": "direct", "outbound": "direct"],
+            ["clash_mode": "global", "outbound": proxyTag]
+        ] + rules
         route["rules"] = rules
         // sing-box 1.12+: outbound dials that chain to domain-based routing require a
         // default domain resolver. Without this, sing-box warns now and will FATAL in 1.14.
@@ -1390,6 +1412,18 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         config["route"] = route
 
         return config
+    }
+
+    func isManagedRuntimeRule(_ rule: [String: Any]) -> Bool {
+        if let action = (rule["action"] as? String)?.lowercased() {
+            if action == "sniff" { return true }
+            if action == "hijack-dns",
+               (rule["protocol"] as? String)?.lowercased() == "dns" {
+                return true
+            }
+        }
+        guard let clashMode = (rule["clash_mode"] as? String)?.lowercased() else { return false }
+        return clashMode == "direct" || clashMode == "global"
     }
 
     func preferredProxyTag(from outbounds: [[String: Any]]) -> String {
@@ -1535,20 +1569,27 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
     func refreshStatus() {
         let isRunning = isProxyRuntimeRunning()
-        statusChip.isActive = isRunning
+        let isActiveOrRequested = isProxyServiceActiveOrRequested()
+        statusChip.isActive = isActiveOrRequested
         syncProxyPreferenceControls()
         refreshTrayIcon()
         refreshHomeFeatureStatus()
         
-        if isRunning {
+        if isActiveOrRequested {
             let activeNodeInfo = resolveActiveOutbound(proxiesObj: lastProxiesObj)
             let formattedNode = activeNodeInfo.isAuto ? "\(activeNodeInfo.name) (自动)" : activeNodeInfo.name
             currentNodeNameLabel.stringValue = formattedNode
             let activeDelay = nodes.first(where: { $0.tag == activeNodeInfo.name })?.delay ?? "—"
             currentNodeDelayLabel.stringValue = activeDelay == "未测试" ? "—" : activeDelay
             
-            if statsTimer == nil {
-                startStatsTimer()
+            if isRunning {
+                if statsTimer == nil {
+                    startStatsTimer()
+                }
+            } else {
+                clearConnections()
+                stopConnectionsRefreshTimer()
+                stopStatsTimer()
             }
         } else {
             currentNodeNameLabel.stringValue = "未连接"
