@@ -561,6 +561,7 @@ extension MainWindowController {
 
     func setCaptureMode(tunEnabled: Bool, source: String) {
         let previous = isTunEnabled
+        let wasServiceActiveOrRequested = isProxyServiceActiveOrRequested()
         guard previous != tunEnabled else {
             syncProxyPreferenceControls()
             return
@@ -573,24 +574,21 @@ extension MainWindowController {
         }
 
         isTunEnabled = tunEnabled
-        if tunEnabled {
-            isSystemProxyEnabled = true
-        }
         UserDefaults.standard.set(isTunEnabled, forKey: "tunEnabled")
         syncProxyPreferenceControls()
         do {
-            if isProxyRuntimeRunning() {
-                try applyTunPreference(restartIfRunning: false)
+            if wasServiceActiveOrRequested {
+                isSystemProxyEnabled = true
+                try applyTunPreference(restartIfRunning: true)
                 reconcileSystemProxyForCurrentMode()
-            } else if tunEnabled {
-                try applyTunPreference(restartIfRunning: false)
-                try TunServiceManager.enable(store: store, configText: editor.string)
-                appendLog("[\(source)] 已启动 TUN 模式\n")
-                appendLog("[TUN] 已交给 TUN 服务启动 sing-box\n")
-                // Delay status refresh so daemon has time to pick up the flag
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                    self?.refreshStatus()
+                if tunEnabled {
+                    appendLog("[TUN] 已交给 TUN 服务启动 sing-box\n")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                        self?.refreshStatus()
+                    }
                 }
+            } else {
+                try applyTunPreference(restartIfRunning: false)
             }
             appendLog("[\(source)] 接管方式已切换为 \(isTunEnabled ? "TUN 模式" : "系统代理")\n")
         } catch {
