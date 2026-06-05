@@ -21,7 +21,7 @@ final class LockedValue<Value>: @unchecked Sendable {
     }
 }
 
-final class Store {
+final class Store: @unchecked Sendable {
     let baseURL: URL
     let profilesURL: URL
     let subscriptionsURL: URL

@@ -682,53 +682,57 @@ extension MainWindowController {
     }
 
     @objc func installTunServiceClicked() {
-        do {
-            try TunServiceManager.install(store: store)
-            appendLog("[TUN] TUN 服务已安装\n")
-            showToast("TUN 服务已安装")
-            checkSingBoxInstall(showAlert: false)
-            refreshTunServiceStatus()
-            refreshStatus()
-        } catch {
-            tunServiceLogLabel.stringValue = "最近状态：安装失败\n\(error.localizedDescription)"
-            showError(error)
-        }
+        runTunServiceOperation(
+            progressText: "最近状态：正在安装 TUN 服务...",
+            successLog: "[TUN] TUN 服务已安装\n",
+            successToast: "TUN 服务已安装",
+            failurePrefix: "安装失败",
+            operation: { store in
+                try TunServiceManager.install(store: store)
+            },
+            completion: { [weak self] in
+                self?.checkSingBoxInstall(showAlert: false)
+            }
+        )
     }
 
     @objc func uninstallTunServiceClicked() {
-        do {
-            isTunEnabled = false
-            UserDefaults.standard.set(false, forKey: "tunEnabled")
-            try TunServiceManager.uninstall(store: store)
-            appendLog("[TUN] TUN 服务已卸载\n")
-            showToast("TUN 服务已卸载")
-            syncProxyPreferenceControls()
-            refreshTunServiceStatus()
-            refreshStatus()
-        } catch {
-            tunServiceLogLabel.stringValue = "最近状态：卸载失败\n\(error.localizedDescription)"
-            showError(error)
-        }
+        isTunEnabled = false
+        UserDefaults.standard.set(false, forKey: "tunEnabled")
+        runTunServiceOperation(
+            progressText: "最近状态：正在卸载 TUN 服务...",
+            successLog: "[TUN] TUN 服务已卸载\n",
+            successToast: "TUN 服务已卸载",
+            failurePrefix: "卸载失败",
+            operation: { store in
+                try TunServiceManager.uninstall(store: store)
+            },
+            completion: { [weak self] in
+                self?.syncProxyPreferenceControls()
+            }
+        )
     }
 
     @objc func reinstallTunServiceClicked() {
-        do {
-            let shouldRestoreTun = isTunEnabled
-            try TunServiceManager.install(store: store)
-            if shouldRestoreTun {
-                try applyTunPreference(restartIfRunning: false)
-                try enableTunServiceSafely(configText: editor.string)
+        let shouldRestoreTun = isTunEnabled
+        runTunServiceOperation(
+            progressText: "最近状态：正在重新安装 TUN 服务...",
+            successLog: "[TUN] TUN 服务已重新安装\n",
+            successToast: "TUN 服务已重新安装",
+            failurePrefix: "重新安装失败",
+            operation: { store in
+                try TunServiceManager.install(store: store)
+            },
+            completion: { [weak self] in
+                guard let self else { return }
+                if shouldRestoreTun {
+                    try self.applyTunPreference(restartIfRunning: false)
+                    try self.enableTunServiceSafely(configText: self.editor.string)
+                }
+                self.checkSingBoxInstall(showAlert: false)
+                self.syncProxyPreferenceControls()
             }
-            appendLog("[TUN] TUN 服务已重新安装\n")
-            showToast("TUN 服务已重新安装")
-            checkSingBoxInstall(showAlert: false)
-            syncProxyPreferenceControls()
-            refreshTunServiceStatus()
-            refreshStatus()
-        } catch {
-            tunServiceLogLabel.stringValue = "最近状态：重新安装失败\n\(error.localizedDescription)"
-            showError(error)
-        }
+        )
     }
 
     @objc func reloadTunServiceClicked() {
@@ -737,14 +741,64 @@ extension MainWindowController {
                 try applyTunPreference(restartIfRunning: false)
                 try enableTunServiceSafely(configText: editor.string)
             }
-            try TunServiceManager.reload(store: store)
-            appendLog("[TUN] TUN 服务已重载\n")
-            showToast("TUN 服务已重载")
-            refreshTunServiceStatus()
-            refreshStatus()
         } catch {
             tunServiceLogLabel.stringValue = "最近状态：重载失败\n\(error.localizedDescription)"
             showError(error)
+            return
+        }
+
+        runTunServiceOperation(
+            progressText: "最近状态：正在重载 TUN 服务...",
+            successLog: "[TUN] TUN 服务已重载\n",
+            successToast: "TUN 服务已重载",
+            failurePrefix: "重载失败",
+            operation: { store in
+                try TunServiceManager.reload(store: store)
+            }
+        )
+    }
+
+    func runTunServiceOperation(
+        progressText: String,
+        successLog: String,
+        successToast: String,
+        failurePrefix: String,
+        operation: @escaping @Sendable (Store) throws -> Void,
+        completion: (@MainActor @Sendable () throws -> Void)? = nil
+    ) {
+        setTunServiceControlsBusy(true, progressText: progressText)
+        let store = store
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = Result {
+                try operation(store)
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.setTunServiceControlsBusy(false, progressText: nil)
+                do {
+                    try result.get()
+                    try completion?()
+                    self.appendLog(successLog)
+                    self.showToast(successToast)
+                    self.refreshTunServiceStatus()
+                    self.refreshStatus()
+                } catch {
+                    self.tunServiceLogLabel.stringValue = "最近状态：\(failurePrefix)\n\(error.localizedDescription)"
+                    self.showError(error)
+                    self.refreshTunServiceStatus()
+                    self.refreshStatus()
+                }
+            }
+        }
+    }
+
+    func setTunServiceControlsBusy(_ busy: Bool, progressText: String?) {
+        tunServiceOperationInProgress = busy
+        tunServiceToggleButton.isEnabled = !busy
+        tunServiceReinstallButton.isEnabled = !busy
+        tunServiceReloadButton.isEnabled = !busy
+        if let progressText {
+            tunServiceLogLabel.stringValue = progressText
         }
     }
 
@@ -896,7 +950,24 @@ extension MainWindowController {
     }
 
     func refreshTunServiceStatus() {
-        let status = TunServiceManager.status(store: store)
+        tunServiceStatusLabel.stringValue = "TUN 服务状态：正在检查..."
+        let store = store
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let status = TunServiceManager.status(store: store)
+            let recentLog: String
+            if let text = TunServiceManager.recentLogText(maxBytes: 16 * 1024) {
+                recentLog = text
+            } else {
+                recentLog = ""
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.applyTunServiceStatus(status, recentLogText: recentLog)
+            }
+        }
+    }
+
+    func applyTunServiceStatus(_ status: TunServiceStatus, recentLogText: String) {
         tunServiceStatusLabel.stringValue = "TUN 服务状态：\(status.displayText)"
         if status.shouldReinstall {
             tunServiceToggleButton.title = "安装 TUN 服务"
@@ -905,9 +976,14 @@ extension MainWindowController {
             tunServiceToggleButton.title = status.isInstalled ? "卸载 TUN 服务" : "安装 TUN 服务"
             tunServiceToggleButton.style = status.isInstalled ? .destructive : .filled
         }
+        if tunServiceOperationInProgress {
+            return
+        }
+        tunServiceToggleButton.isEnabled = true
         tunServiceReinstallButton.isEnabled = status.isInstalled
         tunServiceReloadButton.isEnabled = status.isUsable
-        if let text = TunServiceManager.recentLogText(maxBytes: 16 * 1024) {
+        if !recentLogText.isEmpty {
+            let text = recentLogText
             let lines = text.components(separatedBy: .newlines).filter { !$0.isEmpty }
             tunServiceLogLabel.stringValue = "最近状态：\(lines.suffix(3).joined(separator: "\n"))"
         } else {

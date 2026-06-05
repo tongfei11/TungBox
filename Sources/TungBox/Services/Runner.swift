@@ -198,6 +198,32 @@ final class Runner: @unchecked Sendable {
         elevatedPID = nil
     }
 
+    func stopStaleUserProcesses() {
+        let binary = store.coreBinaryURL.path
+        let configDirectory = store.baseURL.path
+        let output = runAndWait("/bin/ps", ["-axo", "pid=,command="], timeoutSeconds: 2).output
+        for line in output.components(separatedBy: .newlines) {
+            guard line.contains(binary),
+                  line.contains(" run "),
+                  line.contains(" -c "),
+                  line.contains(configDirectory),
+                  !line.contains(TunServiceManager.configPath) else {
+                continue
+            }
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard let pidText = trimmed.split(separator: " ").first,
+                  let pid = Int32(pidText),
+                  isProcessRunning(pid) else {
+                continue
+            }
+            Darwin.kill(pid, SIGTERM)
+            DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(700)) { [weak self] in
+                guard let self, self.isProcessRunning(pid) else { return }
+                Darwin.kill(pid, SIGKILL)
+            }
+        }
+    }
+
     func urlTest(config: URL, outbound: String, testURL: String) throws -> String {
         guard let binary = findSingBox() else {
             throw NSError.user("找不到 sing-box。请先安装：brew install sing-box")

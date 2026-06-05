@@ -297,7 +297,7 @@ extension MainWindowController {
         coreStatusLabel.stringValue = "sing-box Core：\(detectedCoreVersion)"
         logStatusLabel.stringValue = "日志：\(logs.string.components(separatedBy: .newlines).filter { !$0.isEmpty }.count) 行"
         tunRuntimeStatusLabel.stringValue = isTunEnabled
-            ? (TunServiceManager.status(store: store).isUsable ? "TUN 服务：已安装，随代理开启" : "TUN 服务：不可用，请重新安装")
+            ? (TunServiceManager.hasInstalledServiceFiles ? "TUN 服务：已安装，随代理开启" : "TUN 服务：不可用，请重新安装")
             : "TUN 权限：未启用"
     }
 

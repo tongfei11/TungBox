@@ -69,6 +69,12 @@ enum TunServiceManager {
         URL(fileURLWithPath: logPath)
     }
 
+    static var hasInstalledServiceFiles: Bool {
+        FileManager.default.fileExists(atPath: plistPath)
+            && FileManager.default.fileExists(atPath: scriptPath)
+            && FileManager.default.isExecutableFile(atPath: corePath)
+    }
+
     static func status(store: Store) -> TunServiceStatus {
         guard FileManager.default.fileExists(atPath: plistPath) else {
             if hasInstalledArtifacts() {
@@ -116,7 +122,14 @@ enum TunServiceManager {
         process.standardError = pipe
         do {
             try process.run()
-            process.waitUntilExit()
+            let deadline = Date().addingTimeInterval(1.5)
+            while process.isRunning && Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+            if process.isRunning {
+                process.terminate()
+                return false
+            }
             return process.terminationStatus == 0
         } catch {
             return false
@@ -751,7 +764,14 @@ enum TunServiceManager {
         process.standardError = pipe
         do {
             try process.run()
-            process.waitUntilExit()
+            let deadline = Date().addingTimeInterval(1.5)
+            while process.isRunning && Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+            if process.isRunning {
+                process.terminate()
+                return ""
+            }
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             return String(data: data, encoding: .utf8) ?? ""
         } catch {

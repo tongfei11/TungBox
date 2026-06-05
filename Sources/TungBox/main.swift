@@ -114,6 +114,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     let tunServiceToggleButton = MD3Button()
     let tunServiceReinstallButton = MD3Button()
     let tunServiceReloadButton = MD3Button()
+    var tunServiceOperationInProgress = false
     let activeNodeLabel = NSTextField(labelWithString: "")
     let connectionsValueLabel = NSTextField(labelWithString: "0")
     let connectionsDetailLabel = NSTextField(labelWithString: "服务未运行")
@@ -289,8 +290,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             UserDefaults.standard.set(isSystemProxyDefaultEnabled, forKey: "systemProxyDefaultEnabled")
         }
 
-        let tunStatus = TunServiceManager.status(store: store)
-        if isTunEnabled && !tunStatus.isUsable {
+        if isTunEnabled && !TunServiceManager.hasInstalledServiceFiles {
             isTunEnabled = false
             UserDefaults.standard.set(false, forKey: "tunEnabled")
             try? TunServiceManager.disable(store: store)
@@ -300,21 +300,23 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
         guard isSystemProxyDefaultEnabled else {
             isSystemProxyEnabled = false
-            if tunStatus.isRunning || TunServiceManager.hasEnableRequest(store: store) {
+            runner.stopStaleUserProcesses()
+            if TunServiceManager.hasEnableRequest(store: store) {
                 try? TunServiceManager.disable(store: store)
                 appendLog("[启动] 默认开启代理服务未启用，已清理残留 TUN 请求。\n")
             }
             return
         }
 
-        if tunStatus.isRunning && !isTunEnabled {
+        let isTunRunning = TunServiceManager.activeSingBoxPID(store: store) != nil
+        if isTunRunning && !isTunEnabled {
             try? TunServiceManager.disable(store: store)
             isSystemProxyEnabled = false
             appendLog("[启动] 当前接管方式为系统代理，已清理残留 TUN 请求。\n")
             return
         }
 
-        if tunStatus.isRunning && isTunEnabled {
+        if isTunRunning && isTunEnabled {
             isSystemProxyEnabled = true
         }
     }
@@ -1991,6 +1993,8 @@ extension MainWindowController {
         NSApp.setActivationPolicy(.regular)
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
+        window?.orderFrontRegardless()
+        NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
         NSApp.activate(ignoringOtherApps: true)
         checkAppUpdateInBackground()
         appendLog("[窗口] 已从状态栏恢复控制台。\n")
