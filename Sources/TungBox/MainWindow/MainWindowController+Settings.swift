@@ -773,7 +773,6 @@ extension MainWindowController {
         settingsTunRadio.state = isTunEnabled ? .on : .off
         settingsLaunchAtLoginCheckbox.state = isLaunchAtLoginEnabled ? .on : .off
         settingsStartSilentlyCheckbox.state = UserDefaults.standard.bool(forKey: "startSilently") ? .on : .off
-        refreshTunServiceStatus()
     }
 
     func reconcileSystemProxyForCurrentMode() {
@@ -793,17 +792,17 @@ extension MainWindowController {
         isProxyServiceTransitioning
             || runner.isRunning
             || isTunRuntimeRunning()
-            || TunServiceManager.hasNetworkResidue()
             || (isTunEnabled && (isSystemProxyEnabled || TunServiceManager.hasEnableRequest(store: store)))
     }
 
     func isTunRuntimeRunning() -> Bool {
-        isTunEnabled && TunServiceManager.status(store: store).isRunning
+        isTunEnabled && TunServiceManager.activeSingBoxPID(store: store) != nil
     }
 
     func enableTunServiceSafely(configText: String) throws {
         try ensureTunRouteIsSafeToStart()
-        try TunServiceManager.enable(store: store, configText: configText)
+        let preparedConfig = try preparedTunConfigText(from: configText)
+        try TunServiceManager.enable(store: store, configText: preparedConfig)
         startTunRequestHeartbeat()
     }
 
@@ -852,7 +851,6 @@ extension MainWindowController {
         }
 
         let ifconfig = runProcessAndGetOutput("/sbin/ifconfig", args: [interface])
-        guard ifconfig.contains("inet 198.18.") else { return nil }
         var detail = "\(interface)"
         if let address = firstIPv4Address(in: ifconfig) {
             detail += " \(address)"
@@ -905,8 +903,7 @@ extension MainWindowController {
         }
         tunServiceReinstallButton.isEnabled = status.isInstalled
         tunServiceReloadButton.isEnabled = status.isUsable
-        if FileManager.default.fileExists(atPath: TunServiceManager.logURL.path),
-           let text = try? String(contentsOf: TunServiceManager.logURL, encoding: .utf8) {
+        if let text = TunServiceManager.recentLogText(maxBytes: 16 * 1024) {
             let lines = text.components(separatedBy: .newlines).filter { !$0.isEmpty }
             tunServiceLogLabel.stringValue = "最近状态：\(lines.suffix(3).joined(separator: "\n"))"
         } else {

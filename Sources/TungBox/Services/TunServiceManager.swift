@@ -91,9 +91,6 @@ enum TunServiceManager {
         if let pid = activeSingBoxPID(store: store), Darwin.kill(pid, 0) == 0 {
             return .installedRunning
         }
-        if let residue = networkResidueDescription() {
-            return .abnormal("检测到 TUN 路由残留：\(residue)")
-        }
         return .installedIdle
     }
 
@@ -165,6 +162,7 @@ enum TunServiceManager {
         try? FileManager.default.removeItem(at: store.tunRequestFlagURL)
         try? FileManager.default.removeItem(at: store.tunRequestConfigURL)
         try? FileManager.default.removeItem(at: store.tunRequestHeartbeatURL)
+        try? rotateLargeLogIfNeeded()
         let tempScript = FileManager.default.temporaryDirectory.appendingPathComponent("\(label).sh")
         try writeServiceScript(store: store, to: tempScript)
         let plist = launchDaemonPlist(scriptPath: scriptPath)
@@ -178,6 +176,10 @@ enum TunServiceManager {
             "cp \(shellQuote(store.coreBinaryURL.path)) \(shellQuote(corePath))",
             "cp \(shellQuote(tempPlist.path)) \(shellQuote(plistPath))",
             "rm -f \(shellQuote(flagPath)) \(shellQuote(legacyStdoutPath)) \(shellQuote(legacyStderrPath))",
+            "rm -f \(shellQuote(logPath)).old \(shellQuote(stdoutPath)).old \(shellQuote(stderrPath)).old",
+            "[ -f \(shellQuote(logPath)) ] && [ $(stat -f '%z' \(shellQuote(logPath)) 2>/dev/null || echo 0) -gt 1048576 ] && mv \(shellQuote(logPath)) \(shellQuote(logPath)).old || true",
+            "[ -f \(shellQuote(stdoutPath)) ] && [ $(stat -f '%z' \(shellQuote(stdoutPath)) 2>/dev/null || echo 0) -gt 1048576 ] && mv \(shellQuote(stdoutPath)) \(shellQuote(stdoutPath)).old || true",
+            "[ -f \(shellQuote(stderrPath)) ] && [ $(stat -f '%z' \(shellQuote(stderrPath)) 2>/dev/null || echo 0) -gt 1048576 ] && mv \(shellQuote(stderrPath)) \(shellQuote(stderrPath)).old || true",
             "touch \(shellQuote(logPath)) \(shellQuote(stdoutPath)) \(shellQuote(stderrPath))",
             "chown root:wheel \(shellQuote(installDirectoryPath)) \(shellQuote(scriptPath)) \(shellQuote(corePath)) \(shellQuote(logPath)) \(shellQuote(stdoutPath)) \(shellQuote(stderrPath)) \(shellQuote(plistPath))",
             "chmod 755 \(shellQuote(installDirectoryPath))",
@@ -264,6 +266,32 @@ enum TunServiceManager {
         try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: store.tunRequestHeartbeatURL.path)
     }
 
+    static func recentLogText(maxBytes: UInt64) -> String? {
+        guard FileManager.default.fileExists(atPath: logPath),
+              let handle = try? FileHandle(forReadingFrom: logURL) else {
+            return nil
+        }
+        defer { try? handle.close() }
+        let size = (try? handle.seekToEnd()) ?? 0
+        let start = size > maxBytes ? size - maxBytes : 0
+        try? handle.seek(toOffset: start)
+        let data = handle.readDataToEndOfFile()
+        return String(data: data, encoding: .utf8)
+    }
+
+    private static func rotateLargeLogIfNeeded(maxBytes: UInt64 = 1_048_576) throws {
+        for path in [logPath, stdoutPath, stderrPath] {
+            guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+                  let size = attrs[.size] as? UInt64,
+                  size > maxBytes else {
+                continue
+            }
+            let oldPath = "\(path).old"
+            try? FileManager.default.removeItem(atPath: oldPath)
+            try? FileManager.default.moveItem(atPath: path, toPath: oldPath)
+        }
+    }
+
     private static func requestHeartbeatIsFresh(store: Store) -> Bool {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: store.tunRequestHeartbeatURL.path),
               let modifiedAt = attrs[.modificationDate] as? Date else {
@@ -301,7 +329,20 @@ enum TunServiceManager {
         throw NSError.user("检测到系统网络已经被其它 TUN/VPN 接管（\(detail)）。为避免影响 Surge 等代理软件，TungBox 暂不启动 TUN。请改用系统代理模式，或先关闭其它 TUN/VPN 后再试。")
     }
 
+    static func defaultNetworkInterface() -> String? {
+        defaultRouteInterface()?.interface
+    }
+
     private static func externalTunDefaultRouteDescription() -> String? {
+        guard let route = defaultRouteInterface(),
+              route.interface.hasPrefix("utun") else { return nil }
+
+        let ifconfig = runProcessAndGetOutput("/sbin/ifconfig", args: [route.interface])
+        let address = firstIPv4Address(in: ifconfig)
+        return [route.interface, address].compactMap { $0 }.joined(separator: " ")
+    }
+
+    private static func defaultRouteInterface() -> (interface: String, text: String)? {
         let route = runProcessAndGetOutput("/sbin/route", args: ["-n", "get", "default"])
         guard let interface = route
             .components(separatedBy: .newlines)
@@ -313,15 +354,10 @@ enum TunServiceManager {
                     .trimmingCharacters(in: .whitespaces)
             })
             .first,
-            interface.hasPrefix("utun")
-        else {
+            !interface.isEmpty else {
             return nil
         }
-
-        let ifconfig = runProcessAndGetOutput("/sbin/ifconfig", args: [interface])
-        guard ifconfig.contains("inet 198.18.") else { return nil }
-        let address = firstIPv4Address(in: ifconfig)
-        return [interface, address].compactMap { $0 }.joined(separator: " ")
+        return (interface, route)
     }
 
     private static func firstIPv4Address(in text: String) -> String? {
@@ -346,7 +382,7 @@ enum TunServiceManager {
         PIDFILE=\(shellQuote(pidPath))
         LOG=\(shellQuote(logPath))
         CHILD=""
-        SCRIPT_VERSION="2026-06-tun-safe-stop-v8"
+        SCRIPT_VERSION="2026-06-tun-safe-stop-v9"
         REQUEST_MAX_AGE=30
 
         is_safe_root_file() {
@@ -387,10 +423,8 @@ enum TunServiceManager {
           iface="$(/sbin/route -n get default 2>/dev/null | awk '/interface:/{print $2; exit}')"
           case "$iface" in
             utun*)
-              if /sbin/ifconfig "$iface" 2>/dev/null | grep -q 'inet 198\\.18\\.'; then
-                echo "$(date '+%Y-%m-%d %H:%M:%S') refusing TUN start: default route already uses $iface 198.18.x" >> "$LOG"
-                return 1
-              fi
+              echo "$(date '+%Y-%m-%d %H:%M:%S') refusing TUN start: default route already uses $iface" >> "$LOG"
+              return 1
               ;;
           esac
           return 0
@@ -590,7 +624,7 @@ enum TunServiceManager {
             && script.contains("has_tungbox_tun_interface")
             && script.contains("shutdown_child")
             && script.contains("clean_routes")
-            && script.contains("2026-06-tun-safe-stop-v8")
+            && script.contains("2026-06-tun-safe-stop-v9")
             && plist.contains(stdoutPath)
             && plist.contains(stderrPath)
     }

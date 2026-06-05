@@ -995,6 +995,10 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         var inbounds = config["inbounds"] as? [[String: Any]] ?? []
         inbounds.removeAll { ($0["type"] as? String)?.lowercased() == "tun" }
         if enabled {
+            var log = config["log"] as? [String: Any] ?? [:]
+            log["level"] = "warn"
+            config["log"] = log
+
             inbounds.insert([
                 "type": "tun",
                 "tag": "tun-in",
@@ -1022,7 +1026,13 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             let outbounds = config["outbounds"] as? [[String: Any]] ?? []
             let proxyTag = preferredProxyTag(from: outbounds)
             var route = config["route"] as? [String: Any] ?? [:]
-            route["auto_detect_interface"] = true
+            if let interface = TunServiceManager.defaultNetworkInterface(), !interface.hasPrefix("utun") {
+                route["default_interface"] = interface
+                route.removeValue(forKey: "auto_detect_interface")
+            } else {
+                route["auto_detect_interface"] = true
+                route.removeValue(forKey: "default_interface")
+            }
             if proxyTag != "direct" {
                 if (route["final"] as? String).map({ $0 == "direct" }) ?? true {
                     route["final"] = proxyTag
