@@ -1120,6 +1120,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             route["default_interface"] = interface
             route.removeValue(forKey: "auto_detect_interface")
             config = bindTunRuntimeOutbounds(in: config, to: interface)
+            config = routeTunRuntimeDNSViaDirect(in: config)
             appendLog("[TUN] 运行时上游接口：\(interface)\n")
         } else {
             route["auto_detect_interface"] = true
@@ -1133,6 +1134,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
     func bindTunRuntimeOutbounds(in config: [String: Any], to interface: String) -> [String: Any] {
         var config = config
+        let bindAddress = TunServiceManager.ipv4Address(for: interface)
         let virtualOutboundTypes: Set<String> = ["selector", "urltest", "block", "dns"]
         guard var outbounds = config["outbounds"] as? [[String: Any]] else {
             return config
@@ -1144,8 +1146,32 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 continue
             }
             outbounds[index]["bind_interface"] = interface
+            if let bindAddress {
+                outbounds[index]["inet4_bind_address"] = bindAddress
+            }
         }
         config["outbounds"] = outbounds
+        return config
+    }
+
+    func routeTunRuntimeDNSViaDirect(in config: [String: Any]) -> [String: Any] {
+        let outbounds = config["outbounds"] as? [[String: Any]] ?? []
+        let hasBoundDirect = outbounds.contains { outbound in
+            (outbound["tag"] as? String) == "direct"
+                && outbound["bind_interface"] != nil
+        }
+        guard hasBoundDirect,
+              var dns = config["dns"] as? [String: Any],
+              var servers = dns["servers"] as? [[String: Any]] else {
+            return config
+        }
+
+        var config = config
+        for index in servers.indices where servers[index]["detour"] == nil {
+            servers[index]["detour"] = "direct"
+        }
+        dns["servers"] = servers
+        config["dns"] = dns
         return config
     }
 
