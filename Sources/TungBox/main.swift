@@ -1069,7 +1069,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         config = setTunEnabled(true, in: config)
         config = ensureModeSupport(in: config, mode: Mode(value: modeValue, displayName: modeDisplayName(modeValue)))
         config = keepLoopbackLocalProxyInboundForTunRuntime(in: config)
-        config = applyTunRuntimeRouting(in: config)
+        config = clearTunRuntimeEgressBindings(in: config)
         return try renderConfig(config)
     }
 
@@ -1113,65 +1113,41 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         return config
     }
 
-    func applyTunRuntimeRouting(in config: [String: Any]) -> [String: Any] {
+    func clearTunRuntimeEgressBindings(in config: [String: Any]) -> [String: Any] {
         var config = config
-        var route = config["route"] as? [String: Any] ?? [:]
-        if let interface = TunServiceManager.defaultNetworkInterface(), !interface.hasPrefix("utun") {
-            route["default_interface"] = interface
-            route.removeValue(forKey: "auto_detect_interface")
-            config = bindTunRuntimeOutbounds(in: config, to: interface)
-            config = routeTunRuntimeDNSViaDirect(in: config)
-            appendLog("[TUN] 运行时上游接口：\(interface)\n")
+        var changed = false
+
+        if var route = config["route"] as? [String: Any],
+           route.removeValue(forKey: "default_interface") != nil {
+            config["route"] = route
+            changed = true
+        }
+
+        if var outbounds = config["outbounds"] as? [[String: Any]] {
+            var outboundsChanged = false
+            for index in outbounds.indices {
+                if outbounds[index].removeValue(forKey: "bind_interface") != nil {
+                    outboundsChanged = true
+                }
+                if outbounds[index].removeValue(forKey: "inet4_bind_address") != nil {
+                    outboundsChanged = true
+                }
+                if outbounds[index].removeValue(forKey: "inet6_bind_address") != nil {
+                    outboundsChanged = true
+                }
+            }
+            if outboundsChanged {
+                config["outbounds"] = outbounds
+                changed = true
+            }
+        }
+
+        if changed {
+            appendLog("[TUN] 已清理运行时出口绑定，交由 sing-box/macOS 自动选择上游接口\n")
         } else {
-            route["auto_detect_interface"] = true
-            route.removeValue(forKey: "default_interface")
-            appendLog("[TUN] 运行时上游接口：由 sing-box 自动检测\n")
-        }
-        config["route"] = route
-
-        return config
-    }
-
-    func bindTunRuntimeOutbounds(in config: [String: Any], to interface: String) -> [String: Any] {
-        var config = config
-        let bindAddress = TunServiceManager.ipv4Address(for: interface)
-        let virtualOutboundTypes: Set<String> = ["selector", "urltest", "block", "dns"]
-        guard var outbounds = config["outbounds"] as? [[String: Any]] else {
-            return config
+            appendLog("[TUN] 运行时出口：未强制绑定物理接口\n")
         }
 
-        for index in outbounds.indices {
-            guard let type = (outbounds[index]["type"] as? String)?.lowercased(),
-                  !virtualOutboundTypes.contains(type) else {
-                continue
-            }
-            outbounds[index]["bind_interface"] = interface
-            if let bindAddress {
-                outbounds[index]["inet4_bind_address"] = bindAddress
-            }
-        }
-        config["outbounds"] = outbounds
-        return config
-    }
-
-    func routeTunRuntimeDNSViaDirect(in config: [String: Any]) -> [String: Any] {
-        let outbounds = config["outbounds"] as? [[String: Any]] ?? []
-        let hasBoundDirect = outbounds.contains { outbound in
-            (outbound["tag"] as? String) == "direct"
-                && outbound["bind_interface"] != nil
-        }
-        guard hasBoundDirect,
-              var dns = config["dns"] as? [String: Any],
-              var servers = dns["servers"] as? [[String: Any]] else {
-            return config
-        }
-
-        var config = config
-        for index in servers.indices where servers[index]["detour"] == nil {
-            servers[index]["detour"] = "direct"
-        }
-        dns["servers"] = servers
-        config["dns"] = dns
         return config
     }
 
