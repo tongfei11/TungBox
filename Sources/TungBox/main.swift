@@ -1116,11 +1116,36 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     func applyTunRuntimeRouting(in config: [String: Any]) -> [String: Any] {
         var config = config
         var route = config["route"] as? [String: Any] ?? [:]
-        route["auto_detect_interface"] = true
-        route.removeValue(forKey: "default_interface")
-        appendLog("[TUN] 运行时上游接口：由 sing-box 自动检测\n")
+        if let interface = TunServiceManager.defaultNetworkInterface(), !interface.hasPrefix("utun") {
+            route["default_interface"] = interface
+            route.removeValue(forKey: "auto_detect_interface")
+            config = bindTunRuntimeOutbounds(in: config, to: interface)
+            appendLog("[TUN] 运行时上游接口：\(interface)\n")
+        } else {
+            route["auto_detect_interface"] = true
+            route.removeValue(forKey: "default_interface")
+            appendLog("[TUN] 运行时上游接口：由 sing-box 自动检测\n")
+        }
         config["route"] = route
 
+        return config
+    }
+
+    func bindTunRuntimeOutbounds(in config: [String: Any], to interface: String) -> [String: Any] {
+        var config = config
+        let virtualOutboundTypes: Set<String> = ["selector", "urltest", "block", "dns"]
+        guard var outbounds = config["outbounds"] as? [[String: Any]] else {
+            return config
+        }
+
+        for index in outbounds.indices {
+            guard let type = (outbounds[index]["type"] as? String)?.lowercased(),
+                  !virtualOutboundTypes.contains(type) else {
+                continue
+            }
+            outbounds[index]["bind_interface"] = interface
+        }
+        config["outbounds"] = outbounds
         return config
     }
 
