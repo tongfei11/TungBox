@@ -83,6 +83,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var isSystemProxyEnabled = false
     var isTunEnabled = UserDefaults.standard.object(forKey: "tunEnabled") as? Bool ?? false
     var isProxyServiceTransitioning = false
+    var systemProxyOperationID = 0
     var isLaunchAtLoginEnabled: Bool {
         if #available(macOS 13.0, *) {
             return SMAppService.mainApp.status == .enabled
@@ -1025,6 +1026,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         guard let interface = TunServiceManager.defaultNetworkInterface(), !interface.hasPrefix("utun") else {
             return config
         }
+        let bindAddress = TunServiceManager.ipv4Address(for: interface)
 
         var config = config
         let virtualOutboundTypes: Set<String> = ["selector", "urltest", "block", "dns"]
@@ -1035,6 +1037,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                     continue
                 }
                 outbounds[index]["bind_interface"] = interface
+                if let bindAddress {
+                    outbounds[index]["inet4_bind_address"] = bindAddress
+                }
             }
             config["outbounds"] = outbounds
         }
@@ -1824,6 +1829,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     }
 
     func setSystemProxy(enabled: Bool, port: Int, rollbackOnMismatch: Bool = false) {
+        systemProxyOperationID += 1
+        let operationID = systemProxyOperationID
         // Run networksetup commands in background
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
@@ -1850,34 +1857,35 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 }
             }
             
-            // Check if another proxy is overriding settings
             if enabled {
                 Thread.sleep(forTimeInterval: 1.0)
-                let status = self.currentSystemProxyStatus(expectedPort: port)
-                if !status.matches {
-                    Task { @MainActor [weak self] in
-                        guard let self else { return }
-                        self.appendLog("[警告] 检测到当前系统代理没有指向 TungBox（\(status.message)）。请先关闭其他代理软件（如 Surge、Clash Verge）以避免冲突。\n")
-                        if rollbackOnMismatch {
-                            if self.runner.isRunning {
-                                self.runner.stop()
-                                self.appendLog("[TungBox] 已停止普通代理服务，避免后台空跑\n")
-                            }
-                            self.isSystemProxyEnabled = false
-                            self.serviceSwitch.isOn = false
-                            self.syncProxyPreferenceControls()
-                            self.showToast("系统代理被其他软件接管，已停止 TungBox 代理")
-                            self.refreshStatus()
+                Task { @MainActor [weak self] in
+                    guard let self,
+                          operationID == self.systemProxyOperationID,
+                          self.isSystemProxyEnabled,
+                          !self.isTunEnabled else { return }
+                    let status = self.currentSystemProxyStatus(expectedPort: port)
+                    guard status.hasExternalProxy else { return }
+                    self.appendLog("[警告] 检测到系统代理指向非 TungBox 地址（\(status.message)）。如代理不可用，请检查其他代理软件设置。\n")
+                    if rollbackOnMismatch {
+                        if self.runner.isRunning {
+                            self.runner.stop()
+                            self.appendLog("[TungBox] 已停止普通代理服务，避免后台空跑\n")
                         }
+                        self.isSystemProxyEnabled = false
+                        self.serviceSwitch.isOn = false
+                        self.syncProxyPreferenceControls()
+                        self.showToast("系统代理未指向 TungBox，已停止代理")
+                        self.refreshStatus()
                     }
                 }
             }
         }
     }
 
-    nonisolated func currentSystemProxyStatus(expectedPort port: Int) -> (matches: Bool, message: String) {
+    nonisolated func currentSystemProxyStatus(expectedPort port: Int) -> (matches: Bool, hasExternalProxy: Bool, message: String) {
         guard let settings = CFNetworkCopySystemProxySettings()?.takeRetainedValue() as? [String: Any] else {
-            return (false, "无法读取系统代理")
+            return (false, false, "无法读取系统代理")
         }
         let httpEnabled = settings[kCFNetworkProxiesHTTPEnable as String] as? Int ?? 0
         let httpHost = settings[kCFNetworkProxiesHTTPProxy as String] as? String ?? "-"
@@ -1888,9 +1896,11 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         let httpMatches = httpEnabled == 1 && isLocalProxyHost(httpHost) && httpPort == port
         let httpsMatches = httpsEnabled == 1 && isLocalProxyHost(httpsHost) && httpsPort == port
         if httpMatches && httpsMatches {
-            return (true, "HTTP/HTTPS 已指向 127.0.0.1:\(port)")
+            return (true, false, "HTTP/HTTPS 已指向 127.0.0.1:\(port)")
         }
-        return (false, "HTTP \(httpHost):\(httpPort) \(httpEnabled == 1 ? "开启" : "关闭")，HTTPS \(httpsHost):\(httpsPort) \(httpsEnabled == 1 ? "开启" : "关闭")，预期 127.0.0.1:\(port)")
+        let httpExternal = httpEnabled == 1 && !(isLocalProxyHost(httpHost) && httpPort == port)
+        let httpsExternal = httpsEnabled == 1 && !(isLocalProxyHost(httpsHost) && httpsPort == port)
+        return (false, httpExternal || httpsExternal, "HTTP \(httpHost):\(httpPort) \(httpEnabled == 1 ? "开启" : "关闭")，HTTPS \(httpsHost):\(httpsPort) \(httpsEnabled == 1 ? "开启" : "关闭")，预期 127.0.0.1:\(port)")
     }
 
     nonisolated func isLocalProxyHost(_ host: String) -> Bool {

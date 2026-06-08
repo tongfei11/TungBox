@@ -64,6 +64,7 @@ enum TunServiceManager {
     static let legacyStdoutPath = "/tmp/\(label).out.log"
     static let legacyStderrPath = "/tmp/\(label).err.log"
     static let requestHeartbeatTimeout: TimeInterval = 30
+    private static let cachedTunProcessPID = LockedValue<(pid: Int32?, checkedAt: Date)?>(nil)
 
     static var logURL: URL {
         URL(fileURLWithPath: logPath)
@@ -140,9 +141,19 @@ enum TunServiceManager {
         if let text = try? String(contentsOfFile: pidPath).trimmingCharacters(in: .whitespacesAndNewlines),
            let pid = Int32(text),
            Darwin.kill(pid, 0) == 0 {
+            cachedTunProcessPID.set((pid, Date()))
             return pid
         }
-        return activeTunProcessPID()
+        if let cached = cachedTunProcessPID.get(),
+           Date().timeIntervalSince(cached.checkedAt) < 2.0 {
+            if let pid = cached.pid, Darwin.kill(pid, 0) != 0 {
+                return nil
+            }
+            return cached.pid
+        }
+        let pid = activeTunProcessPID()
+        cachedTunProcessPID.set((pid, Date()))
+        return pid
     }
 
     private static func activeTunProcessPID() -> Int32? {
@@ -366,6 +377,11 @@ enum TunServiceManager {
             return route.interface
         }
         return activePhysicalNetworkInterface()
+    }
+
+    static func ipv4Address(for interface: String) -> String? {
+        let ifconfig = runProcessAndGetOutput("/sbin/ifconfig", args: [interface])
+        return firstIPv4Address(in: ifconfig)
     }
 
     private static func externalTunDefaultRouteDescription() -> String? {
