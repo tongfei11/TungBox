@@ -794,9 +794,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                     directOK ? nil : "国内站点不可达",
                     proxyOK ? nil : "代理站点不可达"
                 ].compactMap { $0 }.joined(separator: "，")
-                self.appendLog("[TUN] 连通性检查失败：\(failed)，已自动关闭 TUN\n")
-                self.stopService()
-                self.showError(NSError.user("TUN 启动后网络不可用（\(failed)），已自动关闭以恢复网络。"))
+                self.appendLog("[TUN] 连通性检查异常：\(failed)，已保留 TUN 现场用于诊断\n")
+                self.showToast("TUN 连通性异常，已保留现场")
             }
         }
     }
@@ -1069,19 +1068,48 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         let modeValue = readMode(from: config)
         config = setTunEnabled(true, in: config)
         config = ensureModeSupport(in: config, mode: Mode(value: modeValue, displayName: modeDisplayName(modeValue)))
-        config = removeLocalProxyInboundForTunRuntime(in: config)
+        config = keepLoopbackLocalProxyInboundForTunRuntime(in: config)
         config = applyTunRuntimeRouting(in: config)
         return try renderConfig(config)
     }
 
-    func removeLocalProxyInboundForTunRuntime(in config: [String: Any]) -> [String: Any] {
+    func keepLoopbackLocalProxyInboundForTunRuntime(in config: [String: Any]) -> [String: Any] {
         var config = config
         var inbounds = config["inbounds"] as? [[String: Any]] ?? []
-        inbounds.removeAll { inbound in
-            guard let type = (inbound["type"] as? String)?.lowercased() else { return false }
-            return ["mixed", "http", "socks"].contains(type)
+        let localTypes: Set<String> = ["mixed", "http", "socks"]
+        var keptLoopbackProxy = false
+        var droppedExternalProxy = false
+
+        inbounds = inbounds.compactMap { inbound in
+            guard let type = (inbound["type"] as? String)?.lowercased(),
+                  localTypes.contains(type) else {
+                return inbound
+            }
+
+            var inbound = inbound
+            let listen = (inbound["listen"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            if listen == nil || listen?.isEmpty == true {
+                inbound["listen"] = "127.0.0.1"
+                keptLoopbackProxy = true
+                return inbound
+            }
+            if let listen, ["127.0.0.1", "localhost", "::1"].contains(listen) {
+                keptLoopbackProxy = true
+                return inbound
+            }
+
+            droppedExternalProxy = true
+            return nil
         }
         config["inbounds"] = inbounds
+        if keptLoopbackProxy {
+            appendLog("[TUN] 调试：保留本地回环代理入口用于对照测试\n")
+        }
+        if droppedExternalProxy {
+            appendLog("[TUN] 已移除非回环本地代理入口，避免 root TUN 服务暴露端口\n")
+        }
         return config
     }
 
@@ -1111,13 +1139,16 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 "stack": "mixed",
                 "mtu": 1500,
                 "address": [
-                    "172.19.0.1/30"
+                    "172.19.0.1/30",
+                    "fdfe:dcba:9876::1/126"
                 ],
                 "auto_route": true,
                 "strict_route": false,
                 "route_address": [
                     "0.0.0.0/1",
-                    "128.0.0.0/1"
+                    "128.0.0.0/1",
+                    "::/1",
+                    "8000::/1"
                 ],
                 "route_exclude_address": [
                     "10.0.0.0/8",
@@ -1125,7 +1156,11 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                     "192.168.0.0/16",
                     "169.254.0.0/16",
                     "224.0.0.0/4",
-                    "240.0.0.0/4"
+                    "240.0.0.0/4",
+                    "fe80::/10",
+                    "fec0::/10",
+                    "fc00::/7",
+                    "ff00::/8"
                 ]
             ], at: 0)
 

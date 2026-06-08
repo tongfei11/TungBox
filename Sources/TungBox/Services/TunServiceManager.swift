@@ -500,7 +500,7 @@ enum TunServiceManager {
         PIDFILE=\(shellQuote(pidPath))
         LOG=\(shellQuote(logPath))
         CHILD=""
-        SCRIPT_VERSION="2026-06-tun-safe-stop-v13"
+        SCRIPT_VERSION="2026-06-tun-safe-stop-v14"
         REQUEST_MAX_AGE=30
 
         is_safe_root_file() {
@@ -623,6 +623,9 @@ enum TunServiceManager {
             /sbin/route -n delete -net 0.0.0.0/1 -iface "$ifname" 2>/dev/null || true
             /sbin/route -n delete -net 128.0.0.0/1 -ifscope "$ifname" 2>/dev/null || true
             /sbin/route -n delete -net 128.0.0.0/1 -iface "$ifname" 2>/dev/null || true
+            /sbin/route -n delete -inet6 -net ::/1 2>/dev/null || true
+            /sbin/route -n delete -inet6 -net 8000::/1 2>/dev/null || true
+            /sbin/route -n delete -inet6 default -iface "$ifname" 2>/dev/null || true
             /sbin/route -n delete -net default -iface "$ifname" 2>/dev/null || true
           done
 
@@ -795,7 +798,7 @@ enum TunServiceManager {
             && script.contains("clean_routes")
             && script.contains("wait_for_pid_exit")
             && script.contains("stop_pid")
-            && script.contains("2026-06-tun-safe-stop-v13")
+            && script.contains("2026-06-tun-safe-stop-v14")
             && plist.contains(stdoutPath)
             && plist.contains(stderrPath)
     }
@@ -803,7 +806,7 @@ enum TunServiceManager {
     private static func stopChildCommand() -> String {
         """
         if [ -f \(shellQuote(pidPath)) ]; then PID=$(cat \(shellQuote(pidPath)) 2>/dev/null || true); case "$PID" in ''|*[!0-9]*) ;; *) kill -TERM "$PID" >/dev/null 2>&1 || true; i=0; while kill -0 "$PID" >/dev/null 2>&1 && [ "$i" -lt 4 ]; do sleep 1; i=$((i + 1)); done; if kill -0 "$PID" >/dev/null 2>&1; then kill -KILL "$PID" >/dev/null 2>&1 || true; i=0; while kill -0 "$PID" >/dev/null 2>&1 && [ "$i" -lt 3 ]; do sleep 1; i=$((i + 1)); done; fi ;; esac; fi
-        for ifname in $(/sbin/ifconfig -l 2>/dev/null | tr ' ' '\\n' | grep '^utun'); do if /sbin/ifconfig "$ifname" 2>/dev/null | grep -Eq 'inet 172\\.19\\.0\\.1'; then /sbin/route -n delete -net 0.0.0.0/1 -ifscope "$ifname" 2>/dev/null || true; /sbin/route -n delete -net 0.0.0.0/1 -iface "$ifname" 2>/dev/null || true; /sbin/route -n delete -net 128.0.0.0/1 -ifscope "$ifname" 2>/dev/null || true; /sbin/route -n delete -net 128.0.0.0/1 -iface "$ifname" 2>/dev/null || true; /sbin/route -n delete -net default -iface "$ifname" 2>/dev/null || true; fi; done
+        for ifname in $(/sbin/ifconfig -l 2>/dev/null | tr ' ' '\\n' | grep '^utun'); do if /sbin/ifconfig "$ifname" 2>/dev/null | grep -Eq 'inet 172\\.19\\.0\\.1'; then /sbin/route -n delete -net 0.0.0.0/1 -ifscope "$ifname" 2>/dev/null || true; /sbin/route -n delete -net 0.0.0.0/1 -iface "$ifname" 2>/dev/null || true; /sbin/route -n delete -net 128.0.0.0/1 -ifscope "$ifname" 2>/dev/null || true; /sbin/route -n delete -net 128.0.0.0/1 -iface "$ifname" 2>/dev/null || true; /sbin/route -n delete -inet6 -net ::/1 2>/dev/null || true; /sbin/route -n delete -inet6 -net 8000::/1 2>/dev/null || true; /sbin/route -n delete -inet6 default -iface "$ifname" 2>/dev/null || true; /sbin/route -n delete -net default -iface "$ifname" 2>/dev/null || true; fi; done
         /usr/sbin/networksetup -listallnetworkservices 2>/dev/null | tail -n +2 | while IFS= read -r svc; do case "$svc" in \\**) continue ;; esac; if /usr/sbin/networksetup -getinfo "$svc" 2>/dev/null | grep -q '^IP address'; then /usr/sbin/networksetup -renewdhcp "$svc" 2>/dev/null || true; break; fi; done
         """
     }
