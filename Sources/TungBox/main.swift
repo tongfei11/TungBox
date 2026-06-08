@@ -690,11 +690,12 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             }
 
             if isTunEnabled {
-                guard TunServiceManager.status(store: store).isUsable else {
+                let tunStatus = TunServiceManager.status(store: store)
+                guard tunStatus.isUsable else {
                     isTunEnabled = false
                     UserDefaults.standard.set(false, forKey: "tunEnabled")
                     syncProxyPreferenceControls()
-                    throw NSError.user("TUN 服务不可用。请先到 设置 > TUN 设置 重新安装 TUN 服务。")
+                    throw NSError.user("TUN 服务不可用：\(tunStatus.displayText)。请到 设置 > TUN 设置处理。")
                 }
                 runner.stop()
                 try enableTunServiceSafely(configText: editor.string)
@@ -1033,15 +1034,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             appendLog("[TUN] 运行时上游接口：由 sing-box 自动检测\n")
         }
         config["route"] = route
-
-        if var dns = config["dns"] as? [String: Any],
-           var servers = dns["servers"] as? [[String: Any]] {
-            for index in servers.indices where servers[index]["detour"] == nil {
-                servers[index]["detour"] = "direct"
-            }
-            dns["servers"] = servers
-            config["dns"] = dns
-        }
 
         return config
     }

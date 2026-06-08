@@ -568,10 +568,11 @@ extension MainWindowController {
             syncProxyPreferenceControls()
             return
         }
-        if tunEnabled, !TunServiceManager.status(store: store).isUsable {
+        let tunStatus = TunServiceManager.status(store: store)
+        if tunEnabled, !tunStatus.isUsable {
             syncProxyPreferenceControls()
             showToast("请先安装 TUN 服务")
-            showError(NSError.user("TUN 服务不可用。请先到 设置 > TUN 设置 重新安装 TUN 服务。"))
+            showError(NSError.user("TUN 服务不可用：\(tunStatus.displayText)。请到 设置 > TUN 设置处理。"))
             return
         }
         if tunEnabled {

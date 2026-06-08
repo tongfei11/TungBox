@@ -500,7 +500,7 @@ enum TunServiceManager {
         PIDFILE=\(shellQuote(pidPath))
         LOG=\(shellQuote(logPath))
         CHILD=""
-        SCRIPT_VERSION="2026-06-tun-safe-stop-v12"
+        SCRIPT_VERSION="2026-06-tun-safe-stop-v13"
         REQUEST_MAX_AGE=30
 
         is_safe_root_file() {
@@ -728,6 +728,14 @@ enum TunServiceManager {
               fi
               sleep 1
             done
+            if [ -n "$CHILD" ]; then
+              wait "$CHILD" >/dev/null 2>&1
+              child_status="$?"
+              if [ "$child_status" -ne 0 ] && has_request; then
+                echo "$(date '+%Y-%m-%d %H:%M:%S') sing-box TUN exited with status $child_status, disabling current request" >> "$LOG"
+                rm -f "$FLAG" "$PIDFILE" "$REQUEST_FLAG" "$REQUEST_CONFIG" "$REQUEST_HEARTBEAT"
+              fi
+            fi
             rm -f "$PIDFILE"
             CHILD=""
             sleep 1
@@ -787,7 +795,7 @@ enum TunServiceManager {
             && script.contains("clean_routes")
             && script.contains("wait_for_pid_exit")
             && script.contains("stop_pid")
-            && script.contains("2026-06-tun-safe-stop-v12")
+            && script.contains("2026-06-tun-safe-stop-v13")
             && plist.contains(stdoutPath)
             && plist.contains(stderrPath)
     }
