@@ -590,7 +590,7 @@ extension MainWindowController {
         syncProxyPreferenceControls()
         do {
             if wasServiceActiveOrRequested {
-                isSystemProxyEnabled = true
+                isSystemProxyEnabled = !tunEnabled
                 try applyTunPreference(restartIfRunning: true)
                 reconcileSystemProxyForCurrentMode()
                 if tunEnabled {

@@ -376,6 +376,9 @@ enum TunServiceManager {
         if let route = defaultRouteInterface(), !route.interface.hasPrefix("utun") {
             return route.interface
         }
+        if let route = physicalDefaultRouteInterface() {
+            return route
+        }
         return activePhysicalNetworkInterface()
     }
 
@@ -412,23 +415,49 @@ enum TunServiceManager {
         return (interface, route)
     }
 
-    private static func activePhysicalNetworkInterface() -> String? {
-        for interface in hardwarePortInterfaces() + fallbackPhysicalInterfaces() {
-            guard !interface.isEmpty,
-                  !interface.hasPrefix("utun"),
-                  interface != "bridge0",
-                  interface.hasPrefix("en") else {
+    private static func physicalDefaultRouteInterface() -> String? {
+        let routes = runProcessAndGetOutput("/usr/sbin/netstat", args: ["-rn", "-f", "inet"])
+        for line in routes.components(separatedBy: .newlines) {
+            let parts = line
+                .split(whereSeparator: { $0 == " " || $0 == "\t" })
+                .map(String.init)
+            guard parts.count >= 4,
+                  parts[0] == "default",
+                  !parts[1].hasPrefix("link#") else {
                 continue
             }
-            let ifconfig = runProcessAndGetOutput("/sbin/ifconfig", args: [interface])
-            guard ifconfig.contains("status: active"),
-                  ifconfig.contains("inet "),
-                  !ifconfig.contains("inet 169.254.") else {
-                continue
-            }
+            let interface = parts[parts.count - 1]
+            guard isUsablePhysicalInterface(interface) else { continue }
             return interface
         }
         return nil
+    }
+
+    private static func activePhysicalNetworkInterface() -> String? {
+        for interface in hardwarePortInterfaces() + fallbackPhysicalInterfaces() {
+            guard isUsablePhysicalInterface(interface) else { continue }
+            return interface
+        }
+        return nil
+    }
+
+    private static func isUsablePhysicalInterface(_ interface: String) -> Bool {
+        guard !interface.isEmpty,
+              !isVirtualOrSpecialInterface(interface) else {
+            return false
+        }
+        let ifconfig = runProcessAndGetOutput("/sbin/ifconfig", args: [interface])
+        return ifconfig.contains("status: active")
+            && ifconfig.contains("inet ")
+            && !ifconfig.contains("inet 169.254.")
+    }
+
+    private static func isVirtualOrSpecialInterface(_ interface: String) -> Bool {
+        let blockedPrefixes = [
+            "utun", "lo", "bridge", "awdl", "llw", "gif", "stf",
+            "p2p", "feth", "vmnet", "vboxnet", "tap", "tun"
+        ]
+        return blockedPrefixes.contains { interface.hasPrefix($0) }
     }
 
     private static func hardwarePortInterfaces() -> [String] {
@@ -446,7 +475,7 @@ enum TunServiceManager {
         runProcessAndGetOutput("/sbin/ifconfig", args: ["-l"])
             .split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" })
             .map(String.init)
-            .filter { $0.hasPrefix("en") }
+            .filter { !isVirtualOrSpecialInterface($0) }
     }
 
     private static func firstIPv4Address(in text: String) -> String? {
@@ -471,7 +500,7 @@ enum TunServiceManager {
         PIDFILE=\(shellQuote(pidPath))
         LOG=\(shellQuote(logPath))
         CHILD=""
-        SCRIPT_VERSION="2026-06-tun-safe-stop-v11"
+        SCRIPT_VERSION="2026-06-tun-safe-stop-v12"
         REQUEST_MAX_AGE=30
 
         is_safe_root_file() {
@@ -522,19 +551,37 @@ enum TunServiceManager {
         }
 
         active_physical_interface() {
-          for ifname in $(/usr/sbin/networksetup -listnetworkserviceorder 2>/dev/null | awk -F'Device: ' '/Device:/{gsub(/\\).*/, "", $2); print $2}' | grep '^en'); do
-            if /sbin/ifconfig "$ifname" 2>/dev/null | grep -q 'status: active' && /sbin/ifconfig "$ifname" 2>/dev/null | grep -q 'inet ' && ! /sbin/ifconfig "$ifname" 2>/dev/null | grep -q 'inet 169\\.254\\.'; then
+          for ifname in $(/usr/sbin/netstat -rn -f inet 2>/dev/null | awk '$1=="default" && $2 !~ /^link#/ {print $NF}'); do
+            if is_physical_interface "$ifname"; then
               echo "$ifname"
               return 0
             fi
           done
-          for ifname in $(/sbin/ifconfig -l 2>/dev/null | tr ' ' '\\n' | grep '^en'); do
-            if /sbin/ifconfig "$ifname" 2>/dev/null | grep -q 'status: active' && /sbin/ifconfig "$ifname" 2>/dev/null | grep -q 'inet ' && ! /sbin/ifconfig "$ifname" 2>/dev/null | grep -q 'inet 169\\.254\\.'; then
+          for ifname in $(/usr/sbin/networksetup -listnetworkserviceorder 2>/dev/null | awk -F'Device: ' '/Device:/{gsub(/\\).*/, "", $2); print $2}'); do
+            if is_physical_interface "$ifname"; then
+              echo "$ifname"
+              return 0
+            fi
+          done
+          for ifname in $(/sbin/ifconfig -l 2>/dev/null | tr ' ' '\\n'); do
+            if is_physical_interface "$ifname"; then
               echo "$ifname"
               return 0
             fi
           done
           return 1
+        }
+
+        is_physical_interface() {
+          ifname="$1"
+          case "$ifname" in
+            ''|utun*|lo*|bridge*|awdl*|llw*|gif*|stf*|p2p*|feth*|vmnet*|vboxnet*|tap*|tun*) return 1 ;;
+          esac
+          ifconfig_text="$(/sbin/ifconfig "$ifname" 2>/dev/null || true)"
+          echo "$ifconfig_text" | grep -q 'status: active' || return 1
+          echo "$ifconfig_text" | grep -q 'inet ' || return 1
+          echo "$ifconfig_text" | grep -q 'inet 169\\.254\\.' && return 1
+          return 0
         }
 
         is_tungbox_tun_interface() {
@@ -740,7 +787,7 @@ enum TunServiceManager {
             && script.contains("clean_routes")
             && script.contains("wait_for_pid_exit")
             && script.contains("stop_pid")
-            && script.contains("2026-06-tun-safe-stop-v11")
+            && script.contains("2026-06-tun-safe-stop-v12")
             && plist.contains(stdoutPath)
             && plist.contains(stderrPath)
     }

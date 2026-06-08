@@ -697,7 +697,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                     throw NSError.user("TUN 服务不可用。请先到 设置 > TUN 设置 重新安装 TUN 服务。")
                 }
                 runner.stop()
-                setSystemProxySync(enabled: false, port: getMixedProxyPort())
                 try enableTunServiceSafely(configText: editor.string)
                 appendLog("[TUN] 已交给 TUN 服务启动 sing-box\n")
                 isProxyServiceTransitioning = false
@@ -989,7 +988,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         } else if wasRunning {
             if isTunEnabled {
                 runner.stop()
-                setSystemProxySync(enabled: false, port: getMixedProxyPort())
                 try enableTunServiceSafely(configText: editor.string)
             } else {
                 try stopTunBeforeStartingNormalProxy(timeout: 8)
@@ -1007,7 +1005,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         config = setTunEnabled(true, in: config)
         config = ensureModeSupport(in: config, mode: Mode(value: modeValue, displayName: modeDisplayName(modeValue)))
         config = removeLocalProxyInboundForTunRuntime(in: config)
-        config = bindTunRuntimeDialersToPhysicalInterface(in: config)
+        config = applyTunRuntimeRouting(in: config)
         return try renderConfig(config)
     }
 
@@ -1022,27 +1020,19 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         return config
     }
 
-    func bindTunRuntimeDialersToPhysicalInterface(in config: [String: Any]) -> [String: Any] {
-        guard let interface = TunServiceManager.defaultNetworkInterface(), !interface.hasPrefix("utun") else {
-            return config
-        }
-        let bindAddress = TunServiceManager.ipv4Address(for: interface)
-
+    func applyTunRuntimeRouting(in config: [String: Any]) -> [String: Any] {
         var config = config
-        let virtualOutboundTypes: Set<String> = ["selector", "urltest", "block", "dns"]
-        if var outbounds = config["outbounds"] as? [[String: Any]] {
-            for index in outbounds.indices {
-                guard let type = (outbounds[index]["type"] as? String)?.lowercased(),
-                      !virtualOutboundTypes.contains(type) else {
-                    continue
-                }
-                outbounds[index]["bind_interface"] = interface
-                if let bindAddress {
-                    outbounds[index]["inet4_bind_address"] = bindAddress
-                }
-            }
-            config["outbounds"] = outbounds
+        var route = config["route"] as? [String: Any] ?? [:]
+        if let interface = TunServiceManager.defaultNetworkInterface(), !interface.hasPrefix("utun") {
+            route["default_interface"] = interface
+            route.removeValue(forKey: "auto_detect_interface")
+            appendLog("[TUN] 运行时上游接口：\(interface)\n")
+        } else {
+            route["auto_detect_interface"] = true
+            route.removeValue(forKey: "default_interface")
+            appendLog("[TUN] 运行时上游接口：由 sing-box 自动检测\n")
         }
+        config["route"] = route
 
         if var dns = config["dns"] as? [String: Any],
            var servers = dns["servers"] as? [[String: Any]] {
@@ -1092,19 +1082,22 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             let outbounds = config["outbounds"] as? [[String: Any]] ?? []
             let proxyTag = preferredProxyTag(from: outbounds)
             var route = config["route"] as? [String: Any] ?? [:]
-            if let interface = TunServiceManager.defaultNetworkInterface(), !interface.hasPrefix("utun") {
-                route["default_interface"] = interface
-                route.removeValue(forKey: "auto_detect_interface")
-            } else {
-                route["auto_detect_interface"] = true
-                route.removeValue(forKey: "default_interface")
-            }
             if proxyTag != "direct" {
                 if (route["final"] as? String).map({ $0 == "direct" }) ?? true {
                     route["final"] = proxyTag
                 }
             }
             config["route"] = route
+        } else {
+            if var route = config["route"] as? [String: Any] {
+                route.removeValue(forKey: "default_interface")
+                route.removeValue(forKey: "auto_detect_interface")
+                if route.isEmpty {
+                    config.removeValue(forKey: "route")
+                } else {
+                    config["route"] = route
+                }
+            }
         }
         config["inbounds"] = inbounds
         config = setTunCacheFile(enabled: enabled, in: config)
