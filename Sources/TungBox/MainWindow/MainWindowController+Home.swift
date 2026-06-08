@@ -599,6 +599,7 @@ extension MainWindowController {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                         self?.refreshStatus()
                     }
+                    scheduleTunHealthCheck()
                 }
             } else {
                 try applyTunPreference(restartIfRunning: false)

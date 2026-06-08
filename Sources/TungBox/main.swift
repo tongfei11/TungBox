@@ -95,6 +95,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var subscriptionTimer: Timer?
     var connectionsRefreshTimer: Timer?
     var tunRequestHeartbeatTimer: Timer?
+    var tunHealthCheckID = 0
     var isRefreshingConnections = false
     weak var zeroStateView: NSView?
     let connectionFilterField = MD3TextField()
@@ -706,6 +707,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                     self?.refreshStatus()
                 }
+                scheduleTunHealthCheck()
                 scheduleConnectionsRefreshAfterStart()
                 return
             }
@@ -767,6 +769,68 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             self.updateRunningStats()
             self.refreshConnections(showErrors: false)
         }
+    }
+
+    func scheduleTunHealthCheck() {
+        tunHealthCheckID += 1
+        let checkID = tunHealthCheckID
+        appendLog("[TUN] 正在进行连通性检查...\n")
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 4.0) { [weak self] in
+            guard let self else { return }
+            let directOK = self.runHTTPHealthCheck(url: "http://www.baidu.com", timeout: 6)
+            let proxyOK = self.runHTTPHealthCheck(url: "https://www.gstatic.com/generate_204", timeout: 8)
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      checkID == self.tunHealthCheckID,
+                      self.isTunEnabled,
+                      TunServiceManager.hasEnableRequest(store: self.store) else {
+                    return
+                }
+                if directOK && proxyOK {
+                    self.appendLog("[TUN] 连通性检查通过：国内与代理站点均可访问\n")
+                    return
+                }
+                let failed = [
+                    directOK ? nil : "国内站点不可达",
+                    proxyOK ? nil : "代理站点不可达"
+                ].compactMap { $0 }.joined(separator: "，")
+                self.appendLog("[TUN] 连通性检查失败：\(failed)，已自动关闭 TUN\n")
+                self.stopService()
+                self.showError(NSError.user("TUN 启动后网络不可用（\(failed)），已自动关闭以恢复网络。"))
+            }
+        }
+    }
+
+    nonisolated func runHTTPHealthCheck(url: String, timeout: TimeInterval) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
+        process.arguments = [
+            "--silent",
+            "--show-error",
+            "--fail",
+            "--location",
+            "--max-time", "\(Int(timeout))",
+            "--output", "/dev/null",
+            url
+        ]
+        do {
+            try process.run()
+        } catch {
+            return false
+        }
+        let deadline = Date().addingTimeInterval(timeout + 1)
+        while process.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if process.isRunning {
+            process.terminate()
+            Thread.sleep(forTimeInterval: 0.2)
+            if process.isRunning {
+                _ = Darwin.kill(process.processIdentifier, SIGKILL)
+            }
+            return false
+        }
+        return process.terminationStatus == 0
     }
 
     func isConnectionsPageSelected() -> Bool {
@@ -1024,15 +1088,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     func applyTunRuntimeRouting(in config: [String: Any]) -> [String: Any] {
         var config = config
         var route = config["route"] as? [String: Any] ?? [:]
-        if let interface = TunServiceManager.defaultNetworkInterface(), !interface.hasPrefix("utun") {
-            route["default_interface"] = interface
-            route.removeValue(forKey: "auto_detect_interface")
-            appendLog("[TUN] 运行时上游接口：\(interface)\n")
-        } else {
-            route["auto_detect_interface"] = true
-            route.removeValue(forKey: "default_interface")
-            appendLog("[TUN] 运行时上游接口：由 sing-box 自动检测\n")
-        }
+        route["auto_detect_interface"] = true
+        route.removeValue(forKey: "default_interface")
+        appendLog("[TUN] 运行时上游接口：由 sing-box 自动检测\n")
         config["route"] = route
 
         return config

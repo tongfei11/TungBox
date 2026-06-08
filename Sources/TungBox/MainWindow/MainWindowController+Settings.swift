@@ -728,6 +728,7 @@ extension MainWindowController {
                 if shouldRestoreTun {
                     try self.applyTunPreference(restartIfRunning: false)
                     try self.enableTunServiceSafely(configText: self.editor.string)
+                    self.scheduleTunHealthCheck()
                 }
                 self.checkSingBoxInstall(showAlert: false)
                 self.syncProxyPreferenceControls()
