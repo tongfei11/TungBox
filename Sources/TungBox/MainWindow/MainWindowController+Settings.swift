@@ -858,6 +858,11 @@ extension MainWindowController {
         try ensureTunRouteIsSafeToStart()
         let preparedConfig = try preparedTunConfigText(from: configText)
         setSystemProxy(enabled: false, port: getMixedProxyPort())
+
+        // 调试：保存 tun-request 副本
+        let debugRequestPath = NSHomeDirectory() + "/Library/Application Support/TungBox/tun-request-debug.json"
+        try? preparedConfig.write(toFile: debugRequestPath, atomically: true, encoding: .utf8)
+
         try TunServiceManager.enable(store: store, configText: preparedConfig)
         startTunRequestHeartbeat()
     }
