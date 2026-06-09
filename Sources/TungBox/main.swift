@@ -1082,6 +1082,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         config = ensureModeSupport(in: config, mode: Mode(value: modeValue, displayName: modeDisplayName(modeValue)))
         config = keepLoopbackLocalProxyInboundForTunRuntime(in: config)
         config = bindTunEgressToPhysicalInterface(in: config)
+        config = setTunCacheFile(enabled: true, in: config)
 
         // 最终检查
         let finalOutbounds = config["outbounds"] as? [[String: Any]] ?? []
