@@ -1069,7 +1069,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         config = setTunEnabled(true, in: config)
         config = ensureModeSupport(in: config, mode: Mode(value: modeValue, displayName: modeDisplayName(modeValue)))
         config = keepLoopbackLocalProxyInboundForTunRuntime(in: config)
-        config = clearTunRuntimeEgressBindings(in: config)
         return try renderConfig(config)
     }
 
