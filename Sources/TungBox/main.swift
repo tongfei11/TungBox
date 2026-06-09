@@ -1082,27 +1082,45 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
         appendLog("[TUN] 绑定 sing-box 出站流量到物理接口: \(interface)\n")
 
-        // 设置全局默认接口
+        // 设置全局默认接口（用于 direct 和未显式绑定的出站）
         var route = config["route"] as? [String: Any] ?? [:]
         route["default_interface"] = interface
         config["route"] = route
 
-        // 为真实节点 outbound 绑定物理接口
-        if var outbounds = config["outbounds"] as? [[String: Any]] {
-            let virtualTypes: Set<String> = ["selector", "urltest", "url-test", "direct", "block", "dns"]
-            for i in outbounds.indices {
-                let type = (outbounds[i]["type"] as? String ?? "").lowercased()
-                guard !virtualTypes.contains(type) else { continue }
-                outbounds[i]["bind_interface"] = interface
+        // 确保 direct outbound 存在（但不绑定接口，让它走 default_interface）
+        var outbounds = config["outbounds"] as? [[String: Any]] ?? []
+        var hasDirectOutbound = false
+        for outbound in outbounds {
+            if (outbound["type"] as? String)?.lowercased() == "direct",
+               (outbound["tag"] as? String) == "direct" {
+                hasDirectOutbound = true
+                break
             }
-            config["outbounds"] = outbounds
+        }
+        if !hasDirectOutbound {
+            outbounds.append([
+                "type": "direct",
+                "tag": "direct"
+            ])
+            appendLog("[TUN] 已添加 direct outbound\n")
         }
 
-        // 确保 DNS 服务器走正确的出口
+        // 只为真实代理节点 outbound 绑定物理接口
+        let virtualTypes: Set<String> = ["selector", "urltest", "url-test", "direct", "block", "dns"]
+        for i in outbounds.indices {
+            let type = (outbounds[i]["type"] as? String ?? "").lowercased()
+            guard !virtualTypes.contains(type) else { continue }
+            outbounds[i]["bind_interface"] = interface
+        }
+        config["outbounds"] = outbounds
+
+        // 确保 DNS 服务器有正确的 detour（走 direct，会使用 default_interface）
         if var dns = config["dns"] as? [String: Any],
            var servers = dns["servers"] as? [[String: Any]] {
             for i in servers.indices {
-                if servers[i]["detour"] == nil {
+                // 本地 DNS（如 223.5.5.5）应该走 direct
+                let server = servers[i]["server"] as? String ?? ""
+                if servers[i]["detour"] == nil && !server.contains("1.1.1.1") {
                     servers[i]["detour"] = "direct"
                 }
             }
