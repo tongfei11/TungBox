@@ -1089,6 +1089,10 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         let finalHasDirect = finalOutbounds.contains(where: { ($0["tag"] as? String) == "direct" })
         appendLog("[TUN] 最终配置 direct outbound 状态: \(finalHasDirect ? "存在" : "缺失")\n")
 
+        // 打印所有 outbound tags 用于调试
+        let tags = finalOutbounds.compactMap { $0["tag"] as? String }
+        appendLog("[TUN] 最终配置中的所有 outbound tags: \(tags.joined(separator: ", "))\n")
+
         let finalConfigText = try renderConfig(config)
 
         // 调试：保存最终配置副本用于诊断
