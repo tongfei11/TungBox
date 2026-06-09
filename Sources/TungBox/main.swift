@@ -1068,9 +1068,13 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
         // 确保配置中有 direct outbound（即使原始配置没有）
         var outbounds = config["outbounds"] as? [[String: Any]] ?? []
-        if !outbounds.contains(where: { ($0["tag"] as? String) == "direct" }) {
+        let hadDirect = outbounds.contains(where: { ($0["tag"] as? String) == "direct" })
+        if !hadDirect {
             outbounds.append(["type": "direct", "tag": "direct"])
             config["outbounds"] = outbounds
+            appendLog("[TUN] 原始配置缺少 direct outbound，已添加\n")
+        } else {
+            appendLog("[TUN] 原始配置已有 direct outbound\n")
         }
 
         let modeValue = readMode(from: config)
@@ -1078,6 +1082,12 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         config = ensureModeSupport(in: config, mode: Mode(value: modeValue, displayName: modeDisplayName(modeValue)))
         config = keepLoopbackLocalProxyInboundForTunRuntime(in: config)
         config = bindTunEgressToPhysicalInterface(in: config)
+
+        // 最终检查
+        let finalOutbounds = config["outbounds"] as? [[String: Any]] ?? []
+        let finalHasDirect = finalOutbounds.contains(where: { ($0["tag"] as? String) == "direct" })
+        appendLog("[TUN] 最终配置 direct outbound 状态: \(finalHasDirect ? "存在" : "缺失")\n")
+
         return try renderConfig(config)
     }
 
