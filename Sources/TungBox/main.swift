@@ -1065,6 +1065,14 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         guard var config = parseConfigObject(from: configText) else {
             throw NSError.user("当前配置不是有效 JSON")
         }
+
+        // 确保配置中有 direct outbound（即使原始配置没有）
+        var outbounds = config["outbounds"] as? [[String: Any]] ?? []
+        if !outbounds.contains(where: { ($0["tag"] as? String) == "direct" }) {
+            outbounds.append(["type": "direct", "tag": "direct"])
+            config["outbounds"] = outbounds
+        }
+
         let modeValue = readMode(from: config)
         config = setTunEnabled(true, in: config)
         config = ensureModeSupport(in: config, mode: Mode(value: modeValue, displayName: modeDisplayName(modeValue)))
