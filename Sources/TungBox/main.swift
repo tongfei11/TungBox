@@ -1264,6 +1264,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 }
             }
             config["route"] = route
+            config["outbounds"] = outbounds
         } else {
             if var route = config["route"] as? [String: Any] {
                 route.removeValue(forKey: "default_interface")
