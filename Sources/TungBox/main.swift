@@ -1132,21 +1132,19 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         }
         config["outbounds"] = outbounds
 
-        // 确保 DNS 服务器有正确的 detour（走 direct，会使用 default_interface）
-        // 暂时禁用此逻辑以绕过 "empty direct outbound" 错误
-        /*
+        // 确保 DNS 服务器有正确的 detour（走 direct，避免 DNS 查询走 TUN 递归）
         if var dns = config["dns"] as? [String: Any],
            var servers = dns["servers"] as? [[String: Any]] {
             for i in servers.indices {
-                let server = servers[i]["server"] as? String ?? ""
-                if servers[i]["detour"] == nil && !server.contains("1.1.1.1") {
+                // 没有 detour 的 DNS 服务器必须走 direct
+                if servers[i]["detour"] == nil {
                     servers[i]["detour"] = "direct"
+                    appendLog("[TUN] DNS 服务器 \(servers[i]["tag"] as? String ?? "unknown") 已设置 detour=direct\n")
                 }
             }
             dns["servers"] = servers
             config["dns"] = dns
         }
-        */
 
         return config
     }
