@@ -1088,7 +1088,14 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         let finalHasDirect = finalOutbounds.contains(where: { ($0["tag"] as? String) == "direct" })
         appendLog("[TUN] 最终配置 direct outbound 状态: \(finalHasDirect ? "存在" : "缺失")\n")
 
-        return try renderConfig(config)
+        let finalConfigText = try renderConfig(config)
+
+        // 调试：保存最终配置副本用于诊断
+        let debugPath = NSHomeDirectory() + "/Library/Application Support/TungBox/tun-config-debug.json"
+        try? finalConfigText.write(toFile: debugPath, atomically: true, encoding: .utf8)
+        appendLog("[TUN] 已保存调试配置到: \(debugPath)\n")
+
+        return finalConfigText
     }
 
     func bindTunEgressToPhysicalInterface(in config: [String: Any]) -> [String: Any] {
