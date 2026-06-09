@@ -1249,7 +1249,13 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 ]
             ], at: 0)
 
-            let outbounds = config["outbounds"] as? [[String: Any]] ?? []
+            var outbounds = config["outbounds"] as? [[String: Any]] ?? []
+
+            // 确保 direct outbound 存在
+            if !outbounds.contains(where: { ($0["tag"] as? String) == "direct" }) {
+                outbounds.append(["type": "direct", "tag": "direct"])
+            }
+
             let proxyTag = preferredProxyTag(from: outbounds)
             var route = config["route"] as? [String: Any] ?? [:]
             if proxyTag != "direct" {
