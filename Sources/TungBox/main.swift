@@ -1136,11 +1136,12 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         if var dns = config["dns"] as? [String: Any],
            var servers = dns["servers"] as? [[String: Any]] {
             for i in servers.indices {
+                // 暂时不强制设置 detour，避免 "empty direct" 错误
                 // 本地 DNS（如 223.5.5.5）应该走 direct
-                let server = servers[i]["server"] as? String ?? ""
-                if servers[i]["detour"] == nil && !server.contains("1.1.1.1") {
-                    servers[i]["detour"] = "direct"
-                }
+                // let server = servers[i]["server"] as? String ?? ""
+                // if servers[i]["detour"] == nil && !server.contains("1.1.1.1") {
+                //     servers[i]["detour"] = "direct"
+                // }
             }
             dns["servers"] = servers
             config["dns"] = dns
