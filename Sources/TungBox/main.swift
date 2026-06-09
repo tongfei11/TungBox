@@ -1069,9 +1069,48 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         config = setTunEnabled(true, in: config)
         config = ensureModeSupport(in: config, mode: Mode(value: modeValue, displayName: modeDisplayName(modeValue)))
         config = keepLoopbackLocalProxyInboundForTunRuntime(in: config)
-        // 暂时不清理出口绑定，避免 sing-box 自身流量走回 TUN 形成递归
-        // config = clearTunRuntimeEgressBindings(in: config)
+        config = bindTunEgressToPhysicalInterface(in: config)
         return try renderConfig(config)
+    }
+
+    func bindTunEgressToPhysicalInterface(in config: [String: Any]) -> [String: Any] {
+        var config = config
+        guard let interface = TunServiceManager.defaultNetworkInterface() else {
+            appendLog("[TUN] 警告：未找到物理网络接口，TUN 出站流量可能形成递归\n")
+            return config
+        }
+
+        appendLog("[TUN] 绑定 sing-box 出站流量到物理接口: \(interface)\n")
+
+        // 设置全局默认接口
+        var route = config["route"] as? [String: Any] ?? [:]
+        route["default_interface"] = interface
+        config["route"] = route
+
+        // 为真实节点 outbound 绑定物理接口
+        if var outbounds = config["outbounds"] as? [[String: Any]] {
+            let virtualTypes: Set<String> = ["selector", "urltest", "url-test", "direct", "block", "dns"]
+            for i in outbounds.indices {
+                let type = (outbounds[i]["type"] as? String ?? "").lowercased()
+                guard !virtualTypes.contains(type) else { continue }
+                outbounds[i]["bind_interface"] = interface
+            }
+            config["outbounds"] = outbounds
+        }
+
+        // 确保 DNS 服务器走正确的出口
+        if var dns = config["dns"] as? [String: Any],
+           var servers = dns["servers"] as? [[String: Any]] {
+            for i in servers.indices {
+                if servers[i]["detour"] == nil {
+                    servers[i]["detour"] = "direct"
+                }
+            }
+            dns["servers"] = servers
+            config["dns"] = dns
+        }
+
+        return config
     }
 
     func keepLoopbackLocalProxyInboundForTunRuntime(in config: [String: Any]) -> [String: Any] {
