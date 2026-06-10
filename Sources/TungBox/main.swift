@@ -1402,7 +1402,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                     "172.19.0.1/30"
                 ],
                 "auto_route": true,
-                "strict_route": true,
+                "strict_route": false,
                 "route_exclude_address": [
                     "10.0.0.0/8",
                     "100.64.0.0/10",
