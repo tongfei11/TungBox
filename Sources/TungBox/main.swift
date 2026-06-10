@@ -1082,6 +1082,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         config = ensureModeSupport(in: config, mode: Mode(value: modeValue, displayName: modeDisplayName(modeValue)))
         config = keepLoopbackLocalProxyInboundForTunRuntime(in: config)
         config = applyTunAutomaticEgressRouting(in: config)
+        config = applyTunRuntimeRouteExclusions(in: config)
         config = setTunCacheFile(enabled: true, in: config)
         try validateTunRuntimeRouting(in: config)
 
@@ -1223,6 +1224,164 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         }
 
         return config
+    }
+
+    func applyTunRuntimeRouteExclusions(in config: [String: Any]) -> [String: Any] {
+        var config = config
+        var bypassCIDRs: [String] = []
+        var seen = Set<String>()
+
+        func add(_ cidr: String) {
+            if seen.insert(cidr).inserted {
+                bypassCIDRs.append(cidr)
+            }
+        }
+
+        let alwaysBypass = [
+            "1.0.0.1",
+            "1.1.1.1",
+            "8.8.4.4",
+            "8.8.8.8",
+            "114.114.114.114",
+            "119.29.29.29",
+            "120.53.53.53",
+            "180.76.76.76",
+            "223.5.5.5",
+            "223.6.6.6"
+        ]
+        for ip in alwaysBypass {
+            if let cidr = routeExcludeCIDR(for: ip) {
+                add(cidr)
+            }
+        }
+
+        if let dns = config["dns"] as? [String: Any],
+           let servers = dns["servers"] as? [[String: Any]] {
+            for server in servers {
+                if let address = server["server"] as? String,
+                   let cidr = routeExcludeCIDR(for: address) {
+                    add(cidr)
+                }
+            }
+        }
+
+        let virtualTypes: Set<String> = ["selector", "urltest", "url-test", "direct", "block", "dns"]
+        let outbounds = config["outbounds"] as? [[String: Any]] ?? []
+        var resolvedHostCount = 0
+        for outbound in outbounds {
+            let type = (outbound["type"] as? String ?? "").lowercased()
+            guard !virtualTypes.contains(type),
+                  let server = outbound["server"] as? String,
+                  !server.isEmpty else {
+                continue
+            }
+            if let cidr = routeExcludeCIDR(for: server) {
+                add(cidr)
+                continue
+            }
+            guard resolvedHostCount < 16 else { continue }
+            let resolved = resolvePublicIPv4Addresses(for: server)
+            if !resolved.isEmpty {
+                resolvedHostCount += 1
+            }
+            for ip in resolved.prefix(4) {
+                if let cidr = routeExcludeCIDR(for: ip) {
+                    add(cidr)
+                }
+            }
+        }
+
+        guard !bypassCIDRs.isEmpty else {
+            return config
+        }
+
+        var inbounds = config["inbounds"] as? [[String: Any]] ?? []
+        var updatedTun = false
+        for index in inbounds.indices {
+            guard (inbounds[index]["type"] as? String)?.lowercased() == "tun" else {
+                continue
+            }
+            var excludes = inbounds[index]["route_exclude_address"] as? [String] ?? []
+            var excludeSet = Set(excludes)
+            var added = 0
+            for cidr in bypassCIDRs where excludeSet.insert(cidr).inserted {
+                excludes.append(cidr)
+                added += 1
+            }
+            if added > 0 {
+                inbounds[index]["route_exclude_address"] = excludes
+                updatedTun = true
+            }
+        }
+        if updatedTun {
+            config["inbounds"] = inbounds
+            appendLog("[TUN] 已排除 DNS/节点上游地址 \(bypassCIDRs.count) 个，避免代理握手被 TUN 捕获\n")
+        }
+
+        if var dns = config["dns"] as? [String: Any] {
+            if dns["strategy"] as? String != "ipv4_only" {
+                dns["strategy"] = "ipv4_only"
+                config["dns"] = dns
+                appendLog("[TUN] DNS 策略已切换为 ipv4_only，降低 IPv6 无路由导致的失败\n")
+            }
+        }
+
+        return config
+    }
+
+    func routeExcludeCIDR(for address: String) -> String? {
+        let trimmed = address
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        guard isPublicIPv4Address(trimmed) else { return nil }
+        return "\(trimmed)/32"
+    }
+
+    func isPublicIPv4Address(_ value: String) -> Bool {
+        let parts = value.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 4 else { return false }
+        let octets = parts.compactMap { Int($0) }
+        guard octets.count == 4, octets.allSatisfy({ (0...255).contains($0) }) else {
+            return false
+        }
+        let first = octets[0]
+        let second = octets[1]
+        switch first {
+        case 0, 10, 127:
+            return false
+        case 100 where (64...127).contains(second):
+            return false
+        case 169 where second == 254:
+            return false
+        case 172 where (16...31).contains(second):
+            return false
+        case 192 where second == 168:
+            return false
+        case 198 where second == 18 || second == 19:
+            return false
+        case 224...255:
+            return false
+        default:
+            return true
+        }
+    }
+
+    func resolvePublicIPv4Addresses(for host: String) -> [String] {
+        let output = runProcessAndGetOutput("/usr/bin/dscacheutil", args: ["-q", "host", "-a", "name", host])
+        var addresses: [String] = []
+        var seen = Set<String>()
+        for line in output.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("ip_address:") else { continue }
+            let address = trimmed
+                .replacingOccurrences(of: "ip_address:", with: "")
+                .trimmingCharacters(in: .whitespaces)
+            guard isPublicIPv4Address(address), seen.insert(address).inserted else {
+                continue
+            }
+            addresses.append(address)
+        }
+        return addresses
     }
 
     func setTunEnabled(_ enabled: Bool, in config: [String: Any]) -> [String: Any] {
