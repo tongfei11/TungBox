@@ -1399,28 +1399,20 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 "stack": "mixed",
                 "mtu": 1500,
                 "address": [
-                    "172.19.0.1/30",
-                    "fdfe:dcba:9876::1/126"
+                    "172.19.0.1/30"
                 ],
                 "auto_route": true,
-                "strict_route": false,
-                "route_address": [
-                    "0.0.0.0/1",
-                    "128.0.0.0/1",
-                    "::/1",
-                    "8000::/1"
-                ],
+                "strict_route": true,
                 "route_exclude_address": [
                     "10.0.0.0/8",
+                    "100.64.0.0/10",
+                    "127.0.0.0/8",
+                    "169.254.0.0/16",
                     "172.16.0.0/12",
                     "192.168.0.0/16",
-                    "169.254.0.0/16",
-                    "224.0.0.0/4",
-                    "240.0.0.0/4",
-                    "fe80::/10",
-                    "fec0::/10",
+                    "::1/128",
                     "fc00::/7",
-                    "ff00::/8"
+                    "fe80::/10"
                 ]
             ], at: 0)
 
