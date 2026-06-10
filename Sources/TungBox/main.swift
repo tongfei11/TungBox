@@ -1399,7 +1399,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 "stack": "mixed",
                 "mtu": 1500,
                 "address": [
-                    "172.19.0.1/30"
+                    "\(TunServiceManager.tunIPv4Address)/30"
                 ],
                 "auto_route": true,
                 "strict_route": false,

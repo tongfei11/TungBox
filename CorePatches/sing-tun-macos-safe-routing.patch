@@ -1,0 +1,58 @@
+diff --git a/monitor_darwin.go b/monitor_darwin.go
+index f937c37..9d6f1cb 100644
+--- a/monitor_darwin.go
++++ b/monitor_darwin.go
+@@ -4,6 +4,8 @@ import (
+ 	"net"
+ 	"net/netip"
+ 	"os"
++	"slices"
++	"strings"
+ 	"sync"
+ 	"time"
+ 
+@@ -158,6 +160,12 @@ func (m *defaultInterfaceMonitor) checkUpdate() error {
+ 			// if routeMessage.Flags&unix.RTF_IFSCOPE != 0 {
+ 			//continue
+ 			//}
++			if routeInterface.Flags&net.FlagLoopback != 0 {
++				continue
++			}
++			if isDarwinVirtualInterface(routeInterface.Name) || slices.Contains(m.MyInterfaces(), routeInterface.Name) {
++				continue
++			}
+ 			defaultInterface = routeInterface
+ 			break
+ 		}
+@@ -222,3 +230,11 @@ func (m *defaultInterfaceMonitor) getDefaultInterfaceBySocket() (*control.Interf
+ 	}
+ 	return m.interfaceFinder.ByAddr(selectedAddr)
+ }
++
++func isDarwinVirtualInterface(name string) bool {
++	return strings.HasPrefix(name, "utun") ||
++		strings.HasPrefix(name, "tun") ||
++		strings.HasPrefix(name, "tap") ||
++		strings.HasPrefix(name, "ppp") ||
++		strings.HasPrefix(name, "ipsec")
++}
+diff --git a/tun_darwin.go b/tun_darwin.go
+index f4ca0ed..df47c35 100644
+--- a/tun_darwin.go
++++ b/tun_darwin.go
+@@ -448,14 +448,7 @@ func (t *NativeTun) setRoutes() error {
+ 				err = execRoute(unix.RTM_ADD, t.options.InterfaceScope, interfaceIndex, destination, gateway)
+ 				if err != nil {
+ 					if errors.Is(err, unix.EEXIST) {
+-						err = execRoute(unix.RTM_DELETE, false, 0, destination, gateway)
+-						if err != nil {
+-							return E.Cause(err, "remove existing route: ", destination)
+-						}
+-						err = execRoute(unix.RTM_ADD, t.options.InterfaceScope, interfaceIndex, destination, gateway)
+-						if err != nil {
+-							return E.Cause(err, "re-add route: ", destination)
+-						}
++						return E.Cause(err, "route already exists, refusing to replace an existing macOS route: ", destination)
+ 					} else {
+ 						return E.Cause(err, "add route: ", destination)
+ 					}

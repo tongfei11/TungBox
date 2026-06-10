@@ -63,6 +63,8 @@ enum TunServiceManager {
     static let stderrPath = "\(installDirectoryPath)/tun-service.err.log"
     static let legacyStdoutPath = "/tmp/\(label).out.log"
     static let legacyStderrPath = "/tmp/\(label).err.log"
+    static let tunIPv4Address = "198.18.0.1"
+    static let legacyTunIPv4Address = "172.19.0.1"
     static let requestHeartbeatTimeout: TimeInterval = 30
     private static let cachedTunProcessPID = LockedValue<(pid: Int32?, checkedAt: Date)?>(nil)
 
@@ -355,13 +357,20 @@ enum TunServiceManager {
 
         for interface in interfaceNames {
             let ifconfig = runProcessAndGetOutput("/sbin/ifconfig", args: [interface])
-            guard ifconfig.contains("inet 172.19.0.1") else { continue }
-            return "\(interface) 172.19.0.1"
+            if ifconfig.contains("inet \(tunIPv4Address)") {
+                return "\(interface) \(tunIPv4Address)"
+            }
+            if ifconfig.contains("inet \(legacyTunIPv4Address)") {
+                return "\(interface) \(legacyTunIPv4Address)"
+            }
         }
 
         let routes = runProcessAndGetOutput("/usr/sbin/netstat", args: ["-rn", "-f", "inet"])
-        if routes.contains("172.19.0.1") {
-            return "路由表仍包含 172.19.0.1"
+        if routes.contains(tunIPv4Address) {
+            return "路由表仍包含 \(tunIPv4Address)"
+        }
+        if routes.contains(legacyTunIPv4Address) {
+            return "路由表仍包含 \(legacyTunIPv4Address)"
         }
         return nil
     }
@@ -500,7 +509,7 @@ enum TunServiceManager {
         PIDFILE=\(shellQuote(pidPath))
         LOG=\(shellQuote(logPath))
         CHILD=""
-        SCRIPT_VERSION="2026-06-tun-safe-stop-v14"
+        SCRIPT_VERSION="2026-06-tun-safe-stop-v15"
         REQUEST_MAX_AGE=30
 
         is_safe_root_file() {
@@ -586,7 +595,7 @@ enum TunServiceManager {
 
         is_tungbox_tun_interface() {
           ifconfig_text="$(/sbin/ifconfig "$1" 2>/dev/null || true)"
-          echo "$ifconfig_text" | grep -Eq 'inet 172\\.19\\.0\\.1'
+          echo "$ifconfig_text" | grep -Eq 'inet (198\\.18\\.0\\.1|172\\.19\\.0\\.1)'
         }
 
         has_tungbox_tun_interface() {
@@ -619,10 +628,10 @@ enum TunServiceManager {
           for ifname in $(/sbin/ifconfig -l 2>/dev/null | tr ' ' '\\n' | grep '^utun'); do
             is_tungbox_tun_interface "$ifname" || continue
             cleaned=1
-            /sbin/route -n delete -net 0.0.0.0/1 -ifscope "$ifname" 2>/dev/null || true
-            /sbin/route -n delete -net 0.0.0.0/1 -iface "$ifname" 2>/dev/null || true
-            /sbin/route -n delete -net 128.0.0.0/1 -ifscope "$ifname" 2>/dev/null || true
-            /sbin/route -n delete -net 128.0.0.0/1 -iface "$ifname" 2>/dev/null || true
+            for net in 1.0.0.0/8 2.0.0.0/7 4.0.0.0/6 8.0.0.0/5 16.0.0.0/4 32.0.0.0/3 64.0.0.0/2 128.0.0.0/1 0.0.0.0/1; do
+              /sbin/route -n delete -net "$net" -ifscope "$ifname" 2>/dev/null || true
+              /sbin/route -n delete -net "$net" -iface "$ifname" 2>/dev/null || true
+            done
             /sbin/route -n delete -inet6 -net ::/1 2>/dev/null || true
             /sbin/route -n delete -inet6 -net 8000::/1 2>/dev/null || true
             /sbin/route -n delete -inet6 default -iface "$ifname" 2>/dev/null || true
@@ -798,7 +807,8 @@ enum TunServiceManager {
             && script.contains("clean_routes")
             && script.contains("wait_for_pid_exit")
             && script.contains("stop_pid")
-            && script.contains("2026-06-tun-safe-stop-v14")
+            && script.contains("2026-06-tun-safe-stop-v15")
+            && script.contains("1.0.0.0/8 2.0.0.0/7")
             && plist.contains(stdoutPath)
             && plist.contains(stderrPath)
     }
@@ -806,7 +816,7 @@ enum TunServiceManager {
     private static func stopChildCommand() -> String {
         """
         if [ -f \(shellQuote(pidPath)) ]; then PID=$(cat \(shellQuote(pidPath)) 2>/dev/null || true); case "$PID" in ''|*[!0-9]*) ;; *) kill -TERM "$PID" >/dev/null 2>&1 || true; i=0; while kill -0 "$PID" >/dev/null 2>&1 && [ "$i" -lt 4 ]; do sleep 1; i=$((i + 1)); done; if kill -0 "$PID" >/dev/null 2>&1; then kill -KILL "$PID" >/dev/null 2>&1 || true; i=0; while kill -0 "$PID" >/dev/null 2>&1 && [ "$i" -lt 3 ]; do sleep 1; i=$((i + 1)); done; fi ;; esac; fi
-        for ifname in $(/sbin/ifconfig -l 2>/dev/null | tr ' ' '\\n' | grep '^utun'); do if /sbin/ifconfig "$ifname" 2>/dev/null | grep -Eq 'inet 172\\.19\\.0\\.1'; then /sbin/route -n delete -net 0.0.0.0/1 -ifscope "$ifname" 2>/dev/null || true; /sbin/route -n delete -net 0.0.0.0/1 -iface "$ifname" 2>/dev/null || true; /sbin/route -n delete -net 128.0.0.0/1 -ifscope "$ifname" 2>/dev/null || true; /sbin/route -n delete -net 128.0.0.0/1 -iface "$ifname" 2>/dev/null || true; /sbin/route -n delete -inet6 -net ::/1 2>/dev/null || true; /sbin/route -n delete -inet6 -net 8000::/1 2>/dev/null || true; /sbin/route -n delete -inet6 default -iface "$ifname" 2>/dev/null || true; /sbin/route -n delete -net default -iface "$ifname" 2>/dev/null || true; fi; done
+        for ifname in $(/sbin/ifconfig -l 2>/dev/null | tr ' ' '\\n' | grep '^utun'); do if /sbin/ifconfig "$ifname" 2>/dev/null | grep -Eq 'inet (198\\.18\\.0\\.1|172\\.19\\.0\\.1)'; then for net in 1.0.0.0/8 2.0.0.0/7 4.0.0.0/6 8.0.0.0/5 16.0.0.0/4 32.0.0.0/3 64.0.0.0/2 128.0.0.0/1 0.0.0.0/1; do /sbin/route -n delete -net "$net" -ifscope "$ifname" 2>/dev/null || true; /sbin/route -n delete -net "$net" -iface "$ifname" 2>/dev/null || true; done; /sbin/route -n delete -inet6 -net ::/1 2>/dev/null || true; /sbin/route -n delete -inet6 -net 8000::/1 2>/dev/null || true; /sbin/route -n delete -inet6 default -iface "$ifname" 2>/dev/null || true; /sbin/route -n delete -net default -iface "$ifname" 2>/dev/null || true; fi; done
         /usr/sbin/networksetup -listallnetworkservices 2>/dev/null | tail -n +2 | while IFS= read -r svc; do case "$svc" in \\**) continue ;; esac; if /usr/sbin/networksetup -getinfo "$svc" 2>/dev/null | grep -q '^IP address'; then /usr/sbin/networksetup -renewdhcp "$svc" 2>/dev/null || true; break; fi; done
         """
     }
