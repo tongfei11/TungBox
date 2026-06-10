@@ -1081,8 +1081,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         config = setTunEnabled(true, in: config)
         config = ensureModeSupport(in: config, mode: Mode(value: modeValue, displayName: modeDisplayName(modeValue)))
         config = keepLoopbackLocalProxyInboundForTunRuntime(in: config)
-        config = bindTunEgressToPhysicalInterface(in: config)
+        config = applyTunAutomaticEgressRouting(in: config)
         config = setTunCacheFile(enabled: true, in: config)
+        try validateTunRuntimeRouting(in: config)
 
         // 最终检查
         let finalOutbounds = config["outbounds"] as? [[String: Any]] ?? []
@@ -1103,62 +1104,27 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         return finalConfigText
     }
 
-    func bindTunEgressToPhysicalInterface(in config: [String: Any]) -> [String: Any] {
-        var config = config
-        guard let interface = TunServiceManager.defaultNetworkInterface() else {
-            appendLog("[TUN] 警告：未找到物理网络接口，TUN 出站流量可能形成递归\n")
-            return config
+    func validateTunRuntimeRouting(in config: [String: Any]) throws {
+        let inbounds = config["inbounds"] as? [[String: Any]] ?? []
+        let hasAutoRouteTun = inbounds.contains { inbound in
+            (inbound["type"] as? String)?.lowercased() == "tun"
+                && (inbound["auto_route"] as? Bool) == true
+        }
+        guard hasAutoRouteTun else { return }
+
+        let route = config["route"] as? [String: Any] ?? [:]
+        let autoDetect = route["auto_detect_interface"] as? Bool == true
+        let hasDefaultInterface = (route["default_interface"] as? String)?.isEmpty == false
+        let outbounds = config["outbounds"] as? [[String: Any]] ?? []
+        let hasBoundOutbound = outbounds.contains { outbound in
+            (outbound["bind_interface"] as? String)?.isEmpty == false
+                || (outbound["inet4_bind_address"] as? String)?.isEmpty == false
+                || (outbound["inet6_bind_address"] as? String)?.isEmpty == false
         }
 
-        appendLog("[TUN] 绑定 sing-box 出站流量到物理接口: \(interface)\n")
-
-        // 设置全局默认接口（用于 direct 和未显式绑定的出站）
-        var route = config["route"] as? [String: Any] ?? [:]
-        route["default_interface"] = interface
-        config["route"] = route
-
-        // 确保 direct outbound 存在（但不绑定接口，让它走 default_interface）
-        var outbounds = config["outbounds"] as? [[String: Any]] ?? []
-        var hasDirectOutbound = false
-        for outbound in outbounds {
-            if (outbound["type"] as? String)?.lowercased() == "direct",
-               (outbound["tag"] as? String) == "direct" {
-                hasDirectOutbound = true
-                break
-            }
+        guard autoDetect || hasDefaultInterface || hasBoundOutbound else {
+            throw NSError.user("TUN 配置缺少出口防回环设置：auto_route=true 时必须启用 auto_detect_interface、default_interface 或 outbound 绑定。")
         }
-        if !hasDirectOutbound {
-            outbounds.append([
-                "type": "direct",
-                "tag": "direct"
-            ])
-            appendLog("[TUN] 已添加 direct outbound\n")
-        }
-
-        // 只为真实代理节点 outbound 绑定物理接口
-        let virtualTypes: Set<String> = ["selector", "urltest", "url-test", "direct", "block", "dns"]
-        for i in outbounds.indices {
-            let type = (outbounds[i]["type"] as? String ?? "").lowercased()
-            guard !virtualTypes.contains(type) else { continue }
-            outbounds[i]["bind_interface"] = interface
-        }
-        config["outbounds"] = outbounds
-
-        // 确保 DNS 服务器有正确的 detour（走 direct，避免 DNS 查询走 TUN 递归）
-        if var dns = config["dns"] as? [String: Any],
-           var servers = dns["servers"] as? [[String: Any]] {
-            for i in servers.indices {
-                // 没有 detour 的 DNS 服务器必须走 direct
-                if servers[i]["detour"] == nil {
-                    servers[i]["detour"] = "direct"
-                    appendLog("[TUN] DNS 服务器 \(servers[i]["tag"] as? String ?? "unknown") 已设置 detour=direct\n")
-                }
-            }
-            dns["servers"] = servers
-            config["dns"] = dns
-        }
-
-        return config
     }
 
     func keepLoopbackLocalProxyInboundForTunRuntime(in config: [String: Any]) -> [String: Any] {
@@ -1201,14 +1167,20 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         return config
     }
 
-    func clearTunRuntimeEgressBindings(in config: [String: Any]) -> [String: Any] {
+    func applyTunAutomaticEgressRouting(in config: [String: Any]) -> [String: Any] {
         var config = config
         var changed = false
 
-        if var route = config["route"] as? [String: Any],
-           route.removeValue(forKey: "default_interface") != nil {
-            config["route"] = route
+        var route = config["route"] as? [String: Any] ?? [:]
+        if route.removeValue(forKey: "default_interface") != nil {
             changed = true
+        }
+        if route["auto_detect_interface"] as? Bool != true {
+            route["auto_detect_interface"] = true
+            changed = true
+        }
+        if !route.isEmpty {
+            config["route"] = route
         }
 
         if var outbounds = config["outbounds"] as? [[String: Any]] {
@@ -1230,10 +1202,24 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             }
         }
 
+        if var dns = config["dns"] as? [String: Any],
+           var servers = dns["servers"] as? [[String: Any]] {
+            var dnsChanged = false
+            for index in servers.indices where servers[index]["detour"] as? String == "direct" {
+                servers[index].removeValue(forKey: "detour")
+                dnsChanged = true
+            }
+            if dnsChanged {
+                dns["servers"] = servers
+                config["dns"] = dns
+                changed = true
+            }
+        }
+
         if changed {
-            appendLog("[TUN] 已清理运行时出口绑定，交由 sing-box/macOS 自动选择上游接口\n")
+            appendLog("[TUN] 已启用 auto_detect_interface，并清理固定出口绑定和 DNS direct detour\n")
         } else {
-            appendLog("[TUN] 运行时出口：未强制绑定物理接口\n")
+            appendLog("[TUN] 运行时出口：auto_detect_interface 已启用\n")
         }
 
         return config
