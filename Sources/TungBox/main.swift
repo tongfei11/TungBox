@@ -1168,7 +1168,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         config = ensureModeSupport(in: config, mode: mode)
         editor.string = try renderConfig(config)
         let url = try saveCurrent()
-        if restartIfRunning, wasRunning {
+        if restartIfRunning {
             if isTunEnabled {
                 runner.stop()
                 try enableTunServiceSafely(configText: editor.string)

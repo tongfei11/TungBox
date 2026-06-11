@@ -509,7 +509,7 @@ enum TunServiceManager {
         PIDFILE=\(shellQuote(pidPath))
         LOG=\(shellQuote(logPath))
         CHILD=""
-        SCRIPT_VERSION="2026-06-tun-safe-stop-v16"
+        SCRIPT_VERSION="2026-06-tun-safe-stop-v17"
         REQUEST_MAX_AGE=30
 
         is_safe_root_file() {
@@ -683,6 +683,7 @@ enum TunServiceManager {
             PID="$(cat "$PIDFILE" 2>/dev/null || true)"
             stop_pid "$PID" "stale sing-box"
           fi
+          /usr/bin/pkill -KILL -f "$CORE" >/dev/null 2>&1 || true
           clean_routes
           CHILD=""
           rm -f "$PIDFILE"
@@ -690,9 +691,19 @@ enum TunServiceManager {
 
         cleanup() {
           shutdown_child
+          /usr/bin/pkill -KILL -f "$CORE" >/dev/null 2>&1 || true
           exit 0
         }
         trap cleanup TERM INT
+
+        # Startup cleanup: ensure no orphaned processes or routes survive daemon restart
+        if [ -f "$PIDFILE" ]; then
+          PID="$(cat "$PIDFILE" 2>/dev/null || true)"
+          case "$PID" in ''|*[!0-9]*) ;; *) kill -KILL "$PID" >/dev/null 2>&1 || true ;; esac
+        fi
+        /usr/bin/pkill -KILL -f "$CORE" >/dev/null 2>&1 || true
+        sleep 0.5
+        clean_routes
 
         echo "$(date '+%Y-%m-%d %H:%M:%S') TUN service started" >> "$LOG"
         while true; do
@@ -803,7 +814,7 @@ enum TunServiceManager {
             && script.contains("clean_routes")
             && script.contains("wait_for_pid_exit")
             && script.contains("stop_pid")
-            && script.contains("2026-06-tun-safe-stop-v16")
+            && script.contains("2026-06-tun-safe-stop-v17")
             && script.contains("1.0.0.0/8 2.0.0.0/7")
             && script.contains("ifconfig \"$ifname\" down")
             && !script.contains("networksetup -renewdhcp")

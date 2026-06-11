@@ -611,6 +611,7 @@ extension MainWindowController {
         } catch {
             isTunEnabled = previous
             UserDefaults.standard.set(isTunEnabled, forKey: "tunEnabled")
+            isSystemProxyEnabled = wasServiceActiveOrRequested ? !isTunEnabled : false
             syncProxyPreferenceControls()
             showError(error)
         }
