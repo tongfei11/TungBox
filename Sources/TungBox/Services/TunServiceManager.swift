@@ -244,6 +244,9 @@ enum TunServiceManager {
         if result.status != 0 {
             throw NSError.user(result.output.isEmpty ? "安装 TUN 服务失败" : result.output)
         }
+        guard waitUntilServiceUsable(store: store, timeout: 3) else {
+            throw NSError.user("TUN 服务已写入，但 launchd 尚未确认可用。请稍等几秒后重试。")
+        }
     }
 
     static func uninstall(store: Store) throws {
@@ -279,6 +282,20 @@ enum TunServiceManager {
         if result.status != 0 {
             throw NSError.user(result.output.isEmpty ? "重载 TUN 服务失败" : result.output)
         }
+        guard waitUntilServiceUsable(store: store, timeout: 3) else {
+            throw NSError.user("TUN 服务已重载，但 launchd 尚未确认可用。请稍等几秒后重试。")
+        }
+    }
+
+    static func waitUntilServiceUsable(store: Store, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if status(store: store).isUsable {
+                return true
+            }
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        return status(store: store).isUsable
     }
 
     static func enable(store: Store, configText: String) throws {
@@ -371,6 +388,13 @@ enum TunServiceManager {
         }
         if routes.contains(legacyTunIPv4Address) {
             return "路由表仍包含 \(legacyTunIPv4Address)"
+        }
+        let dns = runProcessAndGetOutput("/usr/sbin/scutil", args: ["--dns"])
+        if dns.contains(" : 198.18.0.2") {
+            return "DNS 解析器仍包含 198.18.0.2"
+        }
+        if dns.contains(" : 172.19.0.2") {
+            return "DNS 解析器仍包含 172.19.0.2"
         }
         return nil
     }
@@ -509,7 +533,7 @@ enum TunServiceManager {
         PIDFILE=\(shellQuote(pidPath))
         LOG=\(shellQuote(logPath))
         CHILD=""
-        SCRIPT_VERSION="2026-06-tun-safe-stop-v18"
+        SCRIPT_VERSION="2026-06-tun-safe-stop-v19"
         REQUEST_MAX_AGE=30
         CLEANING_UP=0
 
@@ -608,13 +632,28 @@ enum TunServiceManager {
           return 1
         }
 
+        has_tungbox_dns_residue() {
+          /usr/sbin/scutil --dns 2>/dev/null | grep -Eq 'nameserver\\[[0-9]+\\] : (198\\.18\\.0\\.2|172\\.19\\.0\\.2)'
+        }
+
         clean_dns() {
-          /usr/bin/dscacheutil -flushcache >/dev/null 2>&1 || true
-          /usr/bin/killall -HUP mDNSResponder >/dev/null 2>&1 || true
-          if /usr/sbin/scutil --dns 2>/dev/null | grep -q '198\\.18\\.0\\.2'; then
-            echo "$(date '+%Y-%m-%d %H:%M:%S') TUN DNS resolver still present after cleanup: 198.18.0.2" >> "$LOG"
+          i=0
+          while [ "$i" -lt 10 ]; do
+            /usr/bin/dscacheutil -flushcache >/dev/null 2>&1 || true
+            /usr/bin/killall -HUP mDNSResponder >/dev/null 2>&1 || true
+            if ! has_tungbox_dns_residue; then
+              echo "$(date '+%Y-%m-%d %H:%M:%S') TUN DNS cleanup verified" >> "$LOG"
+              return 0
+            fi
+            sleep 0.5
+            i=$((i + 1))
+          done
+          if has_tungbox_dns_residue; then
+            echo "$(date '+%Y-%m-%d %H:%M:%S') TUN DNS resolver still present after cleanup: 198.18.0.2/172.19.0.2" >> "$LOG"
+            return 1
           else
             echo "$(date '+%Y-%m-%d %H:%M:%S') TUN DNS cleanup verified" >> "$LOG"
+            return 0
           fi
         }
 
@@ -654,7 +693,7 @@ enum TunServiceManager {
             echo "$(date '+%Y-%m-%d %H:%M:%S') route cleanup skipped: no TungBox TUN interface" >> "$LOG"
           fi
 
-          clean_dns
+          clean_dns || true
           echo "$(date '+%Y-%m-%d %H:%M:%S') route cleanup done" >> "$LOG"
         }
 
@@ -713,7 +752,7 @@ enum TunServiceManager {
               echo "$(date '+%Y-%m-%d %H:%M:%S') removing stale TUN request" >> "$LOG"
               rm -f "$REQUEST_FLAG" "$REQUEST_CONFIG" "$REQUEST_HEARTBEAT"
             fi
-            if [ -f "$FLAG" ] || [ -f "$PIDFILE" ] || has_tungbox_tun_interface; then
+            if [ -f "$FLAG" ] || [ -f "$PIDFILE" ] || has_tungbox_tun_interface || has_tungbox_dns_residue; then
               shutdown_child
             fi
             rm -f "$FLAG"
@@ -816,8 +855,9 @@ enum TunServiceManager {
             && script.contains("clean_routes")
             && script.contains("wait_for_pid_exit")
             && script.contains("stop_pid")
-            && script.contains("2026-06-tun-safe-stop-v18")
+            && script.contains("2026-06-tun-safe-stop-v19")
             && script.contains("clean_dns")
+            && script.contains("has_tungbox_dns_residue")
             && script.contains("child_status=\"$?\"")
             && script.contains("trap cleanup EXIT TERM INT HUP QUIT")
             && script.contains("1.0.0.0/8 2.0.0.0/7")
