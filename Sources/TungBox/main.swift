@@ -3,6 +3,25 @@ import Darwin
 import Foundation
 import ServiceManagement
 
+enum TrayIconStyle: Int {
+    case iconOnly = 0
+    case iconAndSpeed = 1
+    case speedOnly = 2
+
+    static let defaultsKey = "trayIconStyle"
+
+    static var current: TrayIconStyle {
+        TrayIconStyle(rawValue: UserDefaults.standard.integer(forKey: defaultsKey)) ?? .iconOnly
+    }
+
+    var title: String {
+        switch self {
+        case .iconOnly: return "仅显示图标"
+        case .iconAndSpeed: return "显示图标和实时速度"
+        case .speedOnly: return "仅显示实时速度"
+        }
+    }
+}
 
 final class MainWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate, NSWindowDelegate {
     let store = Store()
@@ -112,6 +131,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     let settingsSystemProxyCheckbox = MD3Checkbox(checkboxWithTitle: "默认开启代理服务", target: nil, action: nil)
     let settingsLaunchAtLoginCheckbox = MD3Checkbox(checkboxWithTitle: "开机自启动", target: nil, action: nil)
     let settingsStartSilentlyCheckbox = MD3Checkbox(checkboxWithTitle: "静默启动", target: nil, action: nil)
+    let trayIconStylePopup = MD3PopUpButton()
     let tunServiceStatusLabel = NSTextField(labelWithString: "TUN 服务状态：未检测")
     let tunServiceLogLabel = NSTextField(labelWithString: "最近状态：暂无")
     let tunServiceToggleButton = MD3Button()
@@ -123,6 +143,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     let connectionsDetailLabel = NSTextField(labelWithString: "服务未运行")
     let uploadValueLabel = NSTextField(labelWithString: "0 KB/s")
     let downloadValueLabel = NSTextField(labelWithString: "0 KB/s")
+    var currentUploadSpeed = 0
+    var currentDownloadSpeed = 0
     var statsTimer: Timer?
     var lastProxiesObj: [String: Any]? = nil
     var prevConnections: [ConnectionInfo] = []
@@ -2142,16 +2164,22 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                     startStatsTimer()
                 }
             } else {
+                currentUploadSpeed = 0
+                currentDownloadSpeed = 0
                 clearConnections()
                 stopConnectionsRefreshTimer()
                 stopStatsTimer()
+                refreshTrayIcon()
             }
         } else {
             currentNodeNameLabel.stringValue = "未连接"
             currentNodeDelayLabel.stringValue = "—"
+            currentUploadSpeed = 0
+            currentDownloadSpeed = 0
             clearConnections()
             stopConnectionsRefreshTimer()
             stopStatsTimer()
+            refreshTrayIcon()
         }
     }
 

@@ -496,6 +496,9 @@ extension MainWindowController {
                 if apiConnections == nil {
                     self.uploadValueLabel.stringValue = "—"
                     self.downloadValueLabel.stringValue = "—"
+                    self.currentUploadSpeed = 0
+                    self.currentDownloadSpeed = 0
+                    self.refreshTrayIcon()
                 }
             }
         }

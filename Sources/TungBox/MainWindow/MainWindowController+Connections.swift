@@ -244,8 +244,11 @@ extension MainWindowController {
     }
 
     func updateRealtimeTraffic(uploadSpeed: Int, downloadSpeed: Int, deltaUpload: Int, deltaDownload: Int) {
+        currentUploadSpeed = uploadSpeed
+        currentDownloadSpeed = downloadSpeed
         uploadValueLabel.stringValue = "\(formatBytes(uploadSpeed))/s"
         downloadValueLabel.stringValue = "\(formatBytes(downloadSpeed))/s"
+        refreshTrayIcon()
 
         guard deltaUpload > 0 || deltaDownload > 0 else { return }
         totalUploadBytes += deltaUpload

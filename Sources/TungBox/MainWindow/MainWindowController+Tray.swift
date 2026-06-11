@@ -154,15 +154,48 @@ extension MainWindowController {
 
     func configureStatusButton(_ button: NSStatusBarButton?) {
         guard let button else { return }
-        if let image = trayIcon() {
+        let style = TrayIconStyle.current
+        let shouldShowIcon = style != .speedOnly
+        let shouldShowSpeed = style != .iconOnly
+
+        if shouldShowIcon, let image = trayIcon() {
             button.image = image
-            button.title = ""
+            button.imagePosition = shouldShowSpeed ? .imageLeft : .imageOnly
         } else {
             button.image = nil
-            button.title = "TB"
+            button.imagePosition = .noImage
         }
+
+        if shouldShowSpeed {
+            button.attributedTitle = traySpeedAttributedString()
+        } else {
+            button.attributedTitle = NSAttributedString()
+            button.title = shouldShowIcon ? "" : "TB"
+        }
+
         button.imageScaling = .scaleProportionallyDown
         button.toolTip = TungBoxVersion.display
+    }
+
+    func traySpeedAttributedString() -> NSAttributedString {
+        let uploadText = "\(formatBytes(currentUploadSpeed))/s"
+        let downloadText = "\(formatBytes(currentDownloadSpeed))/s"
+        let fullText = "\(uploadText)\n\(downloadText)"
+        
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .right
+        paragraphStyle.minimumLineHeight = 9.5
+        paragraphStyle.maximumLineHeight = 9.5
+        paragraphStyle.lineSpacing = 0.0
+        
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 8.5, weight: .regular)
+        
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .paragraphStyle: paragraphStyle
+        ]
+        
+        return NSAttributedString(string: fullText, attributes: attributes)
     }
 
     @objc func toggleProxyServiceFromTray() {

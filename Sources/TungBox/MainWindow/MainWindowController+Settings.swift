@@ -146,6 +146,25 @@ extension MainWindowController {
         settingsStartSilentlyCheckbox.action = #selector(settingsStartSilentlyChanged(_:))
         settingsStartSilentlyCheckbox.state = UserDefaults.standard.bool(forKey: "startSilently") ? .on : .off
 
+        let trayIconStyleLabel = settingsLabel("状态栏图标样式")
+        trayIconStylePopup.removeAllItems()
+        let trayIconStyles: [TrayIconStyle] = [.iconOnly, .iconAndSpeed, .speedOnly]
+        for style in trayIconStyles {
+            trayIconStylePopup.addItem(withTitle: style.title)
+        }
+        trayIconStylePopup.selectItem(at: TrayIconStyle.current.rawValue)
+        trayIconStylePopup.target = self
+        trayIconStylePopup.action = #selector(trayIconStyleChanged(_:))
+        trayIconStylePopup.translatesAutoresizingMaskIntoConstraints = false
+        trayIconStylePopup.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        trayIconStylePopup.widthAnchor.constraint(equalToConstant: 190).isActive = true
+
+        let trayIconStyleRow = NSStackView(views: [trayIconStyleLabel, trayIconStylePopup])
+        trayIconStyleRow.orientation = .horizontal
+        trayIconStyleRow.alignment = .centerY
+        trayIconStyleRow.spacing = 12
+        trayIconStyleRow.translatesAutoresizingMaskIntoConstraints = false
+
         let proxyHint = NSTextField(labelWithString: "代理服务开启后会按接管方式启动；系统代理和 TUN 模式互斥。")
         proxyHint.textColor = MD3.onSurfaceVariant
         proxyHint.font = .systemFont(ofSize: 13)
@@ -187,7 +206,8 @@ extension MainWindowController {
             ]),
             settingsPanel(title: "软件启动配置", views: [
                 settingsLaunchAtLoginCheckbox,
-                settingsStartSilentlyCheckbox
+                settingsStartSilentlyCheckbox,
+                trayIconStyleRow
             ]),
             settingsPanel(title: "订阅", views: [refreshRow]),
             settingsPanel(title: "软件信息", views: [detailsText, openFolderButton])
@@ -670,6 +690,14 @@ extension MainWindowController {
         refreshStatus()
     }
 
+    @objc func trayIconStyleChanged(_ sender: MD3PopUpButton) {
+        let index = max(0, min(sender.indexOfSelectedItem, TrayIconStyle.speedOnly.rawValue))
+        let style = TrayIconStyle(rawValue: index) ?? .iconOnly
+        UserDefaults.standard.set(style.rawValue, forKey: TrayIconStyle.defaultsKey)
+        refreshTrayIcon()
+        appendLog("[设置] 状态栏图标样式已设为 \(style.title)\n")
+    }
+
     @objc func toggleTunServiceInstallClicked() {
         let status = TunServiceManager.status(store: store)
         if status.shouldReinstall {
@@ -828,6 +856,9 @@ extension MainWindowController {
         settingsTunRadio.state = isTunEnabled ? .on : .off
         settingsLaunchAtLoginCheckbox.state = isLaunchAtLoginEnabled ? .on : .off
         settingsStartSilentlyCheckbox.state = UserDefaults.standard.bool(forKey: "startSilently") ? .on : .off
+        if trayIconStylePopup.numberOfItems > TrayIconStyle.current.rawValue {
+            trayIconStylePopup.selectItem(at: TrayIconStyle.current.rawValue)
+        }
     }
 
     func reconcileSystemProxyForCurrentMode() {
