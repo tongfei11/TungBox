@@ -33,6 +33,7 @@ final class Store: @unchecked Sendable {
     let tunRequestFlagURL: URL
     let tunRequestHeartbeatURL: URL
     let logURL: URL
+    let appLogURL: URL
 
     init() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -47,6 +48,7 @@ final class Store: @unchecked Sendable {
         tunRequestFlagURL = baseURL.appendingPathComponent("tun-request-enabled")
         tunRequestHeartbeatURL = baseURL.appendingPathComponent("tun-request-heartbeat")
         logURL = baseURL.appendingPathComponent("sing-box.log")
+        appLogURL = baseURL.appendingPathComponent("app.log")
         try? FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: ruleSetsURL, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: coreURL, withIntermediateDirectories: true)

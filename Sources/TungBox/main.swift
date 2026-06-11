@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 import ServiceManagement
 
@@ -65,7 +66,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     let subscriptionNameField = MD3TextField()
     let subscriptionURLField = MD3TextField()
     let serviceLabel = NSTextField(labelWithString: "sing-box：检测中")
-    let nodeTestURLField = MD3TextField(string: "https://www.google.com/generate_204")
+    let nodeTestURLField = MD3TextField(string: TungBoxConfig.urlTestURL)
     let tcpAddressField = MD3TextField(string: "www.google.com:443")
     let modeControl = MD3SegmentedControl()
     let nodesModeControl = MD3SegmentedControl()
@@ -712,12 +713,10 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 return
             }
             try stopTunBeforeStartingNormalProxy(timeout: 8)
-            try runner.start(config: url, elevated: false)
-            appendLog("[TungBox] 已启动\n")
-            isProxyServiceTransitioning = false
-            
             let port = getMixedProxyPort()
-            setSystemProxy(enabled: isSystemProxyEnabled && !isTunEnabled, port: port, rollbackOnMismatch: true)
+            try startNormalProxy(config: url, port: port, reason: "启动代理服务")
+            isProxyServiceTransitioning = false
+            setSystemProxy(enabled: isSystemProxyEnabled && !isTunEnabled, port: port)
             
             refreshStatus()
             scheduleConnectionsRefreshAfterStart()
@@ -753,6 +752,46 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         appendLog("[TUN] 已停止，继续启动系统代理\n")
     }
 
+    func startNormalProxy(config: URL, port: Int, reason: String) throws {
+        appendLog("[TungBox] 正在检查普通代理配置...\n")
+        _ = try runner.check(config: config)
+        try runner.start(config: config, elevated: false)
+        guard waitForLocalTCPPort(port, timeout: 3.0) else {
+            runner.stop()
+            throw NSError.user("普通代理启动失败：本地端口 \(port) 未开始监听，系统代理没有切换到空端口。请查看日志中的 sing-box 退出原因。")
+        }
+        appendLog("[TungBox] \(reason)完成，本地代理端口 \(port) 已监听\n")
+    }
+
+    func waitForLocalTCPPort(_ port: Int, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if canConnectLocalTCPPort(port) {
+                return true
+            }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        return false
+    }
+
+    func canConnectLocalTCPPort(_ port: Int) -> Bool {
+        let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { return false }
+        defer { Darwin.close(fd) }
+
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = in_port_t(UInt16(port).bigEndian)
+        addr.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+
+        return withUnsafePointer(to: &addr) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                Darwin.connect(fd, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0
+            }
+        }
+    }
+
     func ensureRuntimeAPISupport() throws {
         guard var config = parseConfigObject(from: editor.string) else { return }
         let currentMode = readMode(from: config)
@@ -778,7 +817,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 4.0) { [weak self] in
             guard let self else { return }
             let directOK = self.runHTTPHealthCheck(url: "http://www.baidu.com", timeout: 6)
-            let proxyOK = self.runHTTPHealthCheck(url: "https://www.google.com/generate_204", timeout: 10)
+            let proxyOK = self.runHTTPHealthCheck(url: TungBoxConfig.urlTestURL, timeout: 8)
             DispatchQueue.main.async { [weak self] in
                 guard let self,
                       checkID == self.tunHealthCheckID,
@@ -891,10 +930,11 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
         // 3. Turn off system proxy synchronously — must complete before app exits
         if shouldClearSystemProxy {
+            let port = getMixedProxyPort()
             if clearSystemProxySynchronously {
-                setSystemProxySync(enabled: false, port: 7890)
+                setSystemProxySync(enabled: false, port: port)
             } else {
-                setSystemProxy(enabled: false, port: 7890)
+                setSystemProxy(enabled: false, port: port)
             }
             appendLog("[TungBox] 系统代理已关闭\n")
         }
@@ -917,15 +957,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 _ = runCommand("/usr/sbin/networksetup", args: ["-setsecurewebproxystate", service, "on"])
                 _ = runCommand("/usr/sbin/networksetup", args: ["-setsocksfirewallproxystate", service, "on"])
             } else {
-                _ = runCommand("/usr/sbin/networksetup", args: ["-setwebproxystate", service, "off"])
-                _ = runCommand("/usr/sbin/networksetup", args: ["-setsecurewebproxystate", service, "off"])
-                _ = runCommand("/usr/sbin/networksetup", args: ["-setsocksfirewallproxystate", service, "off"])
-            }
-        }
-        if !enabled {
-            // Clear proxy bypass domains that may have been set
-            if !services.isEmpty {
-                _ = runCommand("/usr/sbin/networksetup", args: ["-setproxybypassdomains", services[0], "Empty"])
+                disableSystemProxyIfOwned(service: service, port: port)
             }
         }
     }
@@ -938,7 +970,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         selectedIndex = index
         table.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
         let url = store.configURL(for: profiles[index])
-        editor.string = (try? String(contentsOf: url)) ?? ""
+        let rawConfig = (try? String(contentsOf: url)) ?? ""
+        editor.string = normalizeLatencyTestURLs(inConfigText: rawConfig) ?? rawConfig
         refreshNodesFromEditor()
         refreshModeFromEditor()
         refreshRulesFromEditor()
@@ -960,6 +993,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     @discardableResult
     func saveCurrent() throws -> URL {
         guard let index = selectedIndex else { throw NSError.user("请先选择一个配置") }
+        if let normalized = normalizeLatencyTestURLs(inConfigText: editor.string) {
+            editor.string = normalized
+        }
         let data = editor.string.data(using: .utf8) ?? Data()
         _ = try JSONSerialization.jsonObject(with: data)
         profiles[index].updatedAt = Date()
@@ -970,6 +1006,29 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         refreshNodesFromEditor()
         refreshRulesFromEditor()
         return url
+    }
+
+    func normalizeLatencyTestURLs(inConfigText text: String) -> String? {
+        guard var config = parseConfigObject(from: text),
+              var outbounds = config["outbounds"] as? [[String: Any]] else {
+            return nil
+        }
+
+        var changed = false
+        for index in outbounds.indices {
+            let type = (outbounds[index]["type"] as? String ?? "").lowercased()
+            guard ["urltest", "url-test", "fallback"].contains(type),
+                  let url = outbounds[index]["url"] as? String,
+                  url == "https://www.google.com/generate_204" else {
+                continue
+            }
+            outbounds[index]["url"] = TungBoxConfig.urlTestURL
+            changed = true
+        }
+
+        guard changed else { return nil }
+        config["outbounds"] = outbounds
+        return try? renderConfig(config)
     }
 
     func refreshNodesFromEditor() {
@@ -1025,7 +1084,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                             if self.isTunEnabled {
                                 try self.enableTunServiceSafely(configText: self.editor.string)
                             } else {
-                                try self.runner.start(config: url, elevated: false)
+                                try self.startNormalProxy(config: url, port: self.getMixedProxyPort(), reason: "节点切换后重启")
                             }
                             self.appendLog("[节点] 服务已按新节点重启\n")
                             self.refreshStatus()
@@ -1059,7 +1118,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             } else {
                 runner.stop()
                 try stopTunBeforeStartingNormalProxy(timeout: 8)
-                try runner.start(config: url, elevated: false)
+                try startNormalProxy(config: url, port: getMixedProxyPort(), reason: "从 TUN 切回系统代理")
                 appendLog("[TUN] 已关闭 TUN 并用普通代理重启\n")
             }
         } else if wasRunning {
@@ -1095,8 +1154,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         config = ensureModeSupport(in: config, mode: Mode(value: modeValue, displayName: modeDisplayName(modeValue)))
         config = keepLoopbackLocalProxyInboundForTunRuntime(in: config)
         config = applyTunAutomaticEgressRouting(in: config)
+        config = applyTunPhysicalEgressBinding(in: config)
         config = applyTunRuntimeRouteExclusions(in: config)
-        config = applyTunRuntimeBrowserCompatibility(in: config)
         config = setTunCacheFile(enabled: true, in: config)
         try validateTunRuntimeRouting(in: config)
 
@@ -1240,6 +1299,51 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         return config
     }
 
+    func applyTunPhysicalEgressBinding(in config: [String: Any]) -> [String: Any] {
+        var config = config
+        guard let interface = TunServiceManager.defaultNetworkInterface() else {
+            appendLog("[TUN] 未找到可用物理出口接口，保留 auto_detect_interface\n")
+            return config
+        }
+
+        var route = config["route"] as? [String: Any] ?? [:]
+        route["default_interface"] = interface
+        route.removeValue(forKey: "auto_detect_interface")
+        config["route"] = route
+
+        var outbounds = config["outbounds"] as? [[String: Any]] ?? []
+        var changedOutbounds = false
+        let virtualTypes: Set<String> = ["selector", "urltest", "url-test", "direct", "block", "dns"]
+        for index in outbounds.indices {
+            let type = (outbounds[index]["type"] as? String ?? "").lowercased()
+            guard !virtualTypes.contains(type) else { continue }
+            outbounds[index]["bind_interface"] = interface
+            changedOutbounds = true
+        }
+        if changedOutbounds {
+            config["outbounds"] = outbounds
+        }
+
+        if var dns = config["dns"] as? [String: Any],
+           var servers = dns["servers"] as? [[String: Any]] {
+            var dnsChanged = false
+            for index in servers.indices {
+                let server = (servers[index]["server"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if routeExcludeCIDR(for: server) != nil, servers[index]["detour"] == nil {
+                    servers[index]["detour"] = "direct"
+                    dnsChanged = true
+                }
+            }
+            if dnsChanged {
+                dns["servers"] = servers
+                config["dns"] = dns
+            }
+        }
+
+        appendLog("[TUN] 已绑定 direct/节点出站到物理接口 \(interface)，避免 direct 出口无路由\n")
+        return config
+    }
+
     func applyTunRuntimeRouteExclusions(in config: [String: Any]) -> [String: Any] {
         var config = config
         var bypassCIDRs: [String] = []
@@ -1340,46 +1444,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             }
         }
 
-        return config
-    }
-
-    func applyTunRuntimeBrowserCompatibility(in config: [String: Any]) -> [String: Any] {
-        var config = config
-        if var outbounds = config["outbounds"] as? [[String: Any]] {
-            var changedURLTest = false
-            for index in outbounds.indices {
-                let type = (outbounds[index]["type"] as? String ?? "").lowercased()
-                guard ["urltest", "url-test", "fallback"].contains(type) else { continue }
-                if (outbounds[index]["url"] as? String)?.contains("google.com") != true {
-                    outbounds[index]["url"] = TungBoxConfig.urlTestURL
-                    changedURLTest = true
-                }
-            }
-            if changedURLTest {
-                config["outbounds"] = outbounds
-                appendLog("[TUN] 已将自动测速目标切换为 Google 主站，避免 gstatic 假阳性\n")
-            }
-        }
-
-        var route = config["route"] as? [String: Any] ?? [:]
-        var rules = route["rules"] as? [[String: Any]] ?? []
-        let hasQUICBlock = rules.contains { rule in
-            (rule["network"] as? String)?.lowercased() == "udp"
-                && (rule["port"] as? Int) == 443
-                && (rule["action"] as? String)?.lowercased() == "reject"
-        }
-        if !hasQUICBlock {
-            let quicRule: [String: Any] = [
-                "network": "udp",
-                "port": 443,
-                "action": "reject"
-            ]
-            let insertIndex = min(2, rules.count)
-            rules.insert(quicRule, at: insertIndex)
-            route["rules"] = rules
-            config["route"] = route
-            appendLog("[TUN] 已阻止 UDP/443，避免浏览器优先使用 QUIC 导致 Google 访问卡住\n")
-        }
         return config
     }
 
@@ -1821,7 +1885,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             if isTunEnabled {
                 try enableTunServiceSafely(configText: editor.string)
             } else {
-                try runner.start(config: url, elevated: false)
+                try startNormalProxy(config: url, port: getMixedProxyPort(), reason: "模式切换后重启")
             }
             appendLog("[mode] sing-box 已按新模式重启\n")
             refreshStatus()
@@ -2235,9 +2299,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                     _ = self.runCommand("/usr/sbin/networksetup", args: ["-setsecurewebproxystate", service, "on"])
                     _ = self.runCommand("/usr/sbin/networksetup", args: ["-setsocksfirewallproxystate", service, "on"])
                 } else {
-                    _ = self.runCommand("/usr/sbin/networksetup", args: ["-setwebproxystate", service, "off"])
-                    _ = self.runCommand("/usr/sbin/networksetup", args: ["-setsecurewebproxystate", service, "off"])
-                    _ = self.runCommand("/usr/sbin/networksetup", args: ["-setsocksfirewallproxystate", service, "off"])
+                    self.disableSystemProxyIfOwned(service: service, port: port)
                 }
             }
             Task { @MainActor [weak self] in
@@ -2259,19 +2321,36 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                     guard status.hasExternalProxy else { return }
                     self.appendLog("[警告] 检测到系统代理指向非 TungBox 地址（\(status.message)）。如代理不可用，请检查其他代理软件设置。\n")
                     if rollbackOnMismatch {
-                        if self.runner.isRunning {
-                            self.runner.stop()
-                            self.appendLog("[TungBox] 已停止普通代理服务，避免后台空跑\n")
-                        }
-                        self.isSystemProxyEnabled = false
-                        self.serviceSwitch.isOn = false
-                        self.syncProxyPreferenceControls()
-                        self.showToast("系统代理未指向 TungBox，已停止代理")
-                        self.refreshStatus()
+                        self.showToast("系统代理被其他软件覆盖")
                     }
                 }
             }
         }
+    }
+
+    nonisolated func disableSystemProxyIfOwned(service: String, port: Int) {
+        if proxySettingMatches(service: service, getter: "-getwebproxy", port: port) {
+            _ = runCommand("/usr/sbin/networksetup", args: ["-setwebproxystate", service, "off"])
+        }
+        if proxySettingMatches(service: service, getter: "-getsecurewebproxy", port: port) {
+            _ = runCommand("/usr/sbin/networksetup", args: ["-setsecurewebproxystate", service, "off"])
+        }
+        if proxySettingMatches(service: service, getter: "-getsocksfirewallproxy", port: port) {
+            _ = runCommand("/usr/sbin/networksetup", args: ["-setsocksfirewallproxystate", service, "off"])
+        }
+    }
+
+    nonisolated func proxySettingMatches(service: String, getter: String, port: Int) -> Bool {
+        let output = runCommand("/usr/sbin/networksetup", args: [getter, service])
+        let lines = output.components(separatedBy: .newlines)
+        let enabled = lines.contains { $0.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare("Enabled: Yes") == .orderedSame }
+        let server = lines.first { $0.hasPrefix("Server:") }?
+            .replacingOccurrences(of: "Server:", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let currentPort = lines.first { $0.hasPrefix("Port:") }?
+            .replacingOccurrences(of: "Port:", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return enabled && isLocalProxyHost(server) && currentPort == "\(port)"
     }
 
     nonisolated func currentSystemProxyStatus(expectedPort port: Int) -> (matches: Bool, hasExternalProxy: Bool, message: String) {

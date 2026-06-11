@@ -226,6 +226,18 @@ extension MainWindowController {
         logBuffer += text
         logLineCount += text.components(separatedBy: .newlines).filter { !$0.isEmpty }.count
         logStatusLabel.stringValue = "日志：\(logLineCount) 行"
+        appendPersistentLog(text)
         scheduleLogRefresh()
+    }
+
+    func appendPersistentLog(_ text: String) {
+        guard let data = text.data(using: .utf8) else { return }
+        if !FileManager.default.fileExists(atPath: store.appLogURL.path) {
+            FileManager.default.createFile(atPath: store.appLogURL.path, contents: nil)
+        }
+        guard let handle = try? FileHandle(forWritingTo: store.appLogURL) else { return }
+        defer { try? handle.close() }
+        _ = try? handle.seekToEnd()
+        handle.write(data)
     }
 }
