@@ -145,6 +145,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     let downloadValueLabel = NSTextField(labelWithString: "0 KB/s")
     var currentUploadSpeed = 0
     var currentDownloadSpeed = 0
+    var trayImageView: NSImageView?
+    var traySpeedLabel: NSTextField?
     var statsTimer: Timer?
     var lastProxiesObj: [String: Any]? = nil
     var prevConnections: [ConnectionInfo] = []

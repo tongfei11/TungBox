@@ -152,61 +152,101 @@ extension MainWindowController {
         configureStatusButton(statusItem?.button)
     }
 
+    func getOrCreateTraySubviews(in button: NSStatusBarButton) -> (NSImageView, NSTextField) {
+        if let imageView = self.trayImageView, let label = self.traySpeedLabel {
+            return (imageView, label)
+        }
+        
+        let imageView = NSImageView()
+        imageView.imageScaling = .scaleProportionallyDown
+        button.addSubview(imageView)
+        self.trayImageView = imageView
+        
+        let label = NSTextField(labelWithString: "")
+        label.isBezeled = false
+        label.drawsBackground = false
+        label.isEditable = false
+        label.isSelectable = false
+        label.alignment = .right
+        label.textColor = NSColor.labelColor
+        label.cell?.isScrollable = false
+        label.cell?.wraps = true
+        label.maximumNumberOfLines = 2
+        button.addSubview(label)
+        self.traySpeedLabel = label
+        
+        return (imageView, label)
+    }
+
     func configureStatusButton(_ button: NSStatusBarButton?) {
-        guard let button else { return }
+        guard let button, let statusItem = self.statusItem else { return }
+        let (imageView, label) = getOrCreateTraySubviews(in: button)
+        
         let style = TrayIconStyle.current
         let shouldShowIcon = style != .speedOnly
         let shouldShowSpeed = style != .iconOnly
-
-        if shouldShowIcon, let image = trayIcon() {
-            button.image = image
-            button.imagePosition = shouldShowSpeed ? .imageLeft : .imageOnly
+        
+        let itemWidth: CGFloat
+        if shouldShowIcon && shouldShowSpeed {
+            itemWidth = 78
+        } else if shouldShowIcon {
+            itemWidth = 24
         } else {
-            button.image = nil
-            button.imagePosition = .noImage
+            itemWidth = 52
         }
-
+        statusItem.length = itemWidth
+        
+        button.image = nil
+        button.title = ""
+        button.attributedTitle = NSAttributedString()
+        
+        if shouldShowIcon {
+            imageView.isHidden = false
+            imageView.image = trayIcon()
+            imageView.frame = NSRect(x: 4, y: 1, width: 20, height: 20)
+        } else {
+            imageView.isHidden = true
+            imageView.image = nil
+        }
+        
         if shouldShowSpeed {
-            button.attributedTitle = traySpeedAttributedString()
+            label.isHidden = false
+            label.frame = shouldShowIcon ? NSRect(x: 26, y: 2, width: 48, height: 18) : NSRect(x: 2, y: 2, width: 48, height: 18)
+            
+            let uploadText = formatTraySpeed(currentUploadSpeed)
+            let downloadText = formatTraySpeed(currentDownloadSpeed)
+            let fullText = "\(uploadText)\n\(downloadText)"
+            
+            let paragraphStyle = NSMutableParagraphStyle()
+            paragraphStyle.alignment = .right
+            paragraphStyle.minimumLineHeight = 9.0
+            paragraphStyle.maximumLineHeight = 9.0
+            paragraphStyle.lineSpacing = 0.0
+            
+            let font = NSFont.monospacedDigitSystemFont(ofSize: 8.5, weight: .regular)
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .paragraphStyle: paragraphStyle,
+                .foregroundColor: NSColor.labelColor
+            ]
+            label.attributedStringValue = NSAttributedString(string: fullText, attributes: attributes)
         } else {
-            button.attributedTitle = NSAttributedString()
-            button.title = shouldShowIcon ? "" : "TB"
+            label.isHidden = true
+            label.attributedStringValue = NSAttributedString()
         }
-
-        button.imageScaling = .scaleProportionallyDown
+        
         button.toolTip = TungBoxVersion.display
     }
 
-    func traySpeedAttributedString() -> NSAttributedString {
-        let uploadText = formatTraySpeed(currentUploadSpeed)
-        let downloadText = formatTraySpeed(currentDownloadSpeed)
-        let fullText = "\(uploadText)\n\(downloadText)"
-        
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.alignment = .right
-        paragraphStyle.minimumLineHeight = 9.5
-        paragraphStyle.maximumLineHeight = 9.5
-        paragraphStyle.lineSpacing = 0.0
-        
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 8.5, weight: .regular)
-        
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .paragraphStyle: paragraphStyle
-        ]
-        
-        return NSAttributedString(string: fullText, attributes: attributes)
-    }
-
     func formatTraySpeed(_ bytes: Int) -> String {
-        let units = ["KB/s", "MB/s", "GB/s", "TB/s"]
-        var value = Double(bytes) / 1024.0
+        let units = ["B/s", "KB/s", "MB/s", "GB/s", "TB/s"]
+        var value = Double(bytes)
         var index = 0
-        while value >= 999.95 && index < units.count - 1 {
+        while value >= 999.5 && index < units.count - 1 {
             value /= 1024.0
             index += 1
         }
-        return String(format: "%5.1f %@", value, units[index])
+        return "\(Int(value.rounded()))\(units[index])"
     }
 
     @objc func toggleProxyServiceFromTray() {
