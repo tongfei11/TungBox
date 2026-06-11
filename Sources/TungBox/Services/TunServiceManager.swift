@@ -509,8 +509,9 @@ enum TunServiceManager {
         PIDFILE=\(shellQuote(pidPath))
         LOG=\(shellQuote(logPath))
         CHILD=""
-        SCRIPT_VERSION="2026-06-tun-safe-stop-v16"
+        SCRIPT_VERSION="2026-06-tun-safe-stop-v18"
         REQUEST_MAX_AGE=30
+        CLEANING_UP=0
 
         is_safe_root_file() {
           path="$1"
@@ -607,6 +608,16 @@ enum TunServiceManager {
           return 1
         }
 
+        clean_dns() {
+          /usr/bin/dscacheutil -flushcache >/dev/null 2>&1 || true
+          /usr/bin/killall -HUP mDNSResponder >/dev/null 2>&1 || true
+          if /usr/sbin/scutil --dns 2>/dev/null | grep -q '198\\.18\\.0\\.2'; then
+            echo "$(date '+%Y-%m-%d %H:%M:%S') TUN DNS resolver still present after cleanup: 198.18.0.2" >> "$LOG"
+          else
+            echo "$(date '+%Y-%m-%d %H:%M:%S') TUN DNS cleanup verified" >> "$LOG"
+          fi
+        }
+
         sync_requested_config() {
           has_request || return 1
           if ! "$CORE" check -c "$REQUEST_CONFIG" >> "$LOG" 2>&1; then
@@ -639,13 +650,11 @@ enum TunServiceManager {
             /sbin/ifconfig "$ifname" down 2>/dev/null || true
           done
 
-          [ "$cleaned" -eq 1 ] || {
+          if [ "$cleaned" -ne 1 ]; then
             echo "$(date '+%Y-%m-%d %H:%M:%S') route cleanup skipped: no TungBox TUN interface" >> "$LOG"
-            return 0
-          }
+          fi
 
-          /usr/bin/dscacheutil -flushcache >/dev/null 2>&1 || true
-          /usr/bin/killall -HUP mDNSResponder >/dev/null 2>&1 || true
+          clean_dns
           echo "$(date '+%Y-%m-%d %H:%M:%S') route cleanup done" >> "$LOG"
         }
 
@@ -689,10 +698,13 @@ enum TunServiceManager {
         }
 
         cleanup() {
+          [ "$CLEANING_UP" = "1" ] && exit 0
+          CLEANING_UP=1
+          trap - EXIT TERM INT HUP QUIT
           shutdown_child
           exit 0
         }
-        trap cleanup TERM INT
+        trap cleanup EXIT TERM INT HUP QUIT
 
         echo "$(date '+%Y-%m-%d %H:%M:%S') TUN service started" >> "$LOG"
         while true; do
@@ -739,6 +751,7 @@ enum TunServiceManager {
             if [ -n "$CHILD" ]; then
               wait "$CHILD" >/dev/null 2>&1
               child_status="$?"
+              clean_routes
               if [ "$child_status" -ne 0 ] && has_request; then
                 echo "$(date '+%Y-%m-%d %H:%M:%S') sing-box TUN exited with status $child_status, disabling current request" >> "$LOG"
                 rm -f "$FLAG" "$PIDFILE" "$REQUEST_FLAG" "$REQUEST_CONFIG" "$REQUEST_HEARTBEAT"
@@ -803,7 +816,10 @@ enum TunServiceManager {
             && script.contains("clean_routes")
             && script.contains("wait_for_pid_exit")
             && script.contains("stop_pid")
-            && script.contains("2026-06-tun-safe-stop-v16")
+            && script.contains("2026-06-tun-safe-stop-v18")
+            && script.contains("clean_dns")
+            && script.contains("child_status=\"$?\"")
+            && script.contains("trap cleanup EXIT TERM INT HUP QUIT")
             && script.contains("1.0.0.0/8 2.0.0.0/7")
             && script.contains("ifconfig \"$ifname\" down")
             && !script.contains("networksetup -renewdhcp")

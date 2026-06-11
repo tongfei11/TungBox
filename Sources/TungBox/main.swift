@@ -1324,22 +1324,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             config["outbounds"] = outbounds
         }
 
-        if var dns = config["dns"] as? [String: Any],
-           var servers = dns["servers"] as? [[String: Any]] {
-            var dnsChanged = false
-            for index in servers.indices {
-                let server = (servers[index]["server"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                if routeExcludeCIDR(for: server) != nil, servers[index]["detour"] == nil {
-                    servers[index]["detour"] = "direct"
-                    dnsChanged = true
-                }
-            }
-            if dnsChanged {
-                dns["servers"] = servers
-                config["dns"] = dns
-            }
-        }
-
         appendLog("[TUN] 已绑定 direct/节点出站到物理接口 \(interface)，避免 direct 出口无路由\n")
         return config
     }
