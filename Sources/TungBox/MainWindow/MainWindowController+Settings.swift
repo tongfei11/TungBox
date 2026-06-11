@@ -146,24 +146,6 @@ extension MainWindowController {
         settingsStartSilentlyCheckbox.action = #selector(settingsStartSilentlyChanged(_:))
         settingsStartSilentlyCheckbox.state = UserDefaults.standard.bool(forKey: "startSilently") ? .on : .off
 
-        let trayIconStyleLabel = settingsLabel("状态栏图标样式")
-        trayIconStylePopup.removeAllItems()
-        let trayIconStyles: [TrayIconStyle] = [.iconOnly, .iconAndSpeed, .speedOnly]
-        for style in trayIconStyles {
-            trayIconStylePopup.addItem(withTitle: style.title)
-        }
-        trayIconStylePopup.selectItem(at: TrayIconStyle.current.rawValue)
-        trayIconStylePopup.target = self
-        trayIconStylePopup.action = #selector(trayIconStyleChanged(_:))
-        trayIconStylePopup.translatesAutoresizingMaskIntoConstraints = false
-        trayIconStylePopup.heightAnchor.constraint(equalToConstant: 36).isActive = true
-        trayIconStylePopup.widthAnchor.constraint(equalToConstant: 190).isActive = true
-
-        let trayIconStyleRow = NSStackView(views: [trayIconStyleLabel, trayIconStylePopup])
-        trayIconStyleRow.orientation = .horizontal
-        trayIconStyleRow.alignment = .centerY
-        trayIconStyleRow.spacing = 12
-        trayIconStyleRow.translatesAutoresizingMaskIntoConstraints = false
 
         let proxyHint = NSTextField(labelWithString: "代理服务开启后会按接管方式启动；系统代理和 TUN 模式互斥。")
         proxyHint.textColor = MD3.onSurfaceVariant
@@ -206,8 +188,7 @@ extension MainWindowController {
             ]),
             settingsPanel(title: "软件启动配置", views: [
                 settingsLaunchAtLoginCheckbox,
-                settingsStartSilentlyCheckbox,
-                trayIconStyleRow
+                settingsStartSilentlyCheckbox
             ]),
             settingsPanel(title: "订阅", views: [refreshRow]),
             settingsPanel(title: "软件信息", views: [detailsText, openFolderButton])
@@ -314,6 +295,27 @@ extension MainWindowController {
     }
 
     func makeSettingsAppearancePage() -> NSView {
+        let trayIconStyleLabel = settingsLabel("图标样式")
+        trayIconStylePopup.removeAllItems()
+        let trayIconStyles: [TrayIconStyle] = [.iconOnly, .iconAndSpeed, .speedOnly]
+        for style in trayIconStyles {
+            trayIconStylePopup.addItem(withTitle: style.title)
+        }
+        trayIconStylePopup.selectItem(at: TrayIconStyle.current.rawValue)
+        trayIconStylePopup.target = self
+        trayIconStylePopup.action = #selector(trayIconStyleChanged(_:))
+        trayIconStylePopup.translatesAutoresizingMaskIntoConstraints = false
+        trayIconStylePopup.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        trayIconStylePopup.widthAnchor.constraint(equalToConstant: 190).isActive = true
+
+        let trayIconStyleRow = NSStackView(views: [trayIconStyleLabel, trayIconStylePopup])
+        trayIconStyleRow.orientation = .horizontal
+        trayIconStyleRow.alignment = .centerY
+        trayIconStyleRow.spacing = 12
+        trayIconStyleRow.translatesAutoresizingMaskIntoConstraints = false
+
+        let statusBarPanel = settingsPanel(title: "状态栏", views: [trayIconStyleRow])
+
         let themeButton = settingsButton(title: "切换深浅色", action: #selector(toggleThemeClicked), style: .tonal)
         colorSchemeRows = (0..<MD3.colorSchemes.count).map { index in
             let row = MD3ColorSchemeRow(index: index)
@@ -356,7 +358,9 @@ extension MainWindowController {
         columnsStack.translatesAutoresizingMaskIntoConstraints = false
         columnsStack.widthAnchor.constraint(equalToConstant: 640).isActive = true
         
-        return settingsPageStack([settingsPanel(title: "外观", views: [themeButton, columnsStack])])
+        let appearancePanel = settingsPanel(title: "外观", views: [themeButton, columnsStack])
+
+        return settingsPageStack([statusBarPanel, appearancePanel])
     }
 
     private func settingsPageStack(_ cards: [NSView]) -> NSView {
