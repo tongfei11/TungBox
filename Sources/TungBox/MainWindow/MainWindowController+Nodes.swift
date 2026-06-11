@@ -386,7 +386,7 @@ extension MainWindowController {
         do {
             let config = try saveCurrent()
             let testURL = nodeTestURLField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            let finalURL = testURL.isEmpty ? "https://www.gstatic.com/generate_204" : testURL
+            let finalURL = testURL.isEmpty ? TungBoxConfig.urlTestURL : testURL
             
             let members = group.members.isEmpty ? nodes.map(\.tag) : group.members
             guard !members.isEmpty else { return }
@@ -442,7 +442,7 @@ extension MainWindowController {
         do {
             let config = try saveCurrent()
             let testURL = nodeTestURLField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            let finalURL = testURL.isEmpty ? "https://www.gstatic.com/generate_204" : testURL
+            let finalURL = testURL.isEmpty ? TungBoxConfig.urlTestURL : testURL
             
             if let idx = nodes.firstIndex(where: { $0.tag == tag }) {
                 nodes[idx].delay = "测试中"

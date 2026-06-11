@@ -111,7 +111,7 @@ enum TungBoxConfig {
         ruleSetGeoIPCN: "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs"
     ]
 
-    static let urlTestURL = "https://www.gstatic.com/generate_204"
+    static let urlTestURL = "https://www.google.com/generate_204"
     static let clashAPIListen = "127.0.0.1:9090"
     static let clashAPIURL = "http://127.0.0.1:9090"
     static let mixedPort = 7890

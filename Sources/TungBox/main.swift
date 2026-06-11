@@ -65,7 +65,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     let subscriptionNameField = MD3TextField()
     let subscriptionURLField = MD3TextField()
     let serviceLabel = NSTextField(labelWithString: "sing-box：检测中")
-    let nodeTestURLField = MD3TextField(string: "https://www.gstatic.com/generate_204")
+    let nodeTestURLField = MD3TextField(string: "https://www.google.com/generate_204")
     let tcpAddressField = MD3TextField(string: "www.google.com:443")
     let modeControl = MD3SegmentedControl()
     let nodesModeControl = MD3SegmentedControl()
@@ -778,7 +778,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 4.0) { [weak self] in
             guard let self else { return }
             let directOK = self.runHTTPHealthCheck(url: "http://www.baidu.com", timeout: 6)
-            let proxyOK = self.runHTTPHealthCheck(url: "https://www.gstatic.com/generate_204", timeout: 8)
+            let proxyOK = self.runHTTPHealthCheck(url: "https://www.google.com/generate_204", timeout: 10)
             DispatchQueue.main.async { [weak self] in
                 guard let self,
                       checkID == self.tunHealthCheckID,
@@ -808,9 +808,22 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             "--show-error",
             "--fail",
             "--location",
+            "--http1.1",
+            "--noproxy", "*",
             "--max-time", "\(Int(timeout))",
             "--output", "/dev/null",
             url
+        ]
+        process.environment = [
+            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            "http_proxy": "",
+            "https_proxy": "",
+            "all_proxy": "",
+            "HTTP_PROXY": "",
+            "HTTPS_PROXY": "",
+            "ALL_PROXY": "",
+            "NO_PROXY": "*",
+            "no_proxy": "*"
         ]
         do {
             try process.run()
@@ -1083,6 +1096,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         config = keepLoopbackLocalProxyInboundForTunRuntime(in: config)
         config = applyTunAutomaticEgressRouting(in: config)
         config = applyTunRuntimeRouteExclusions(in: config)
+        config = applyTunRuntimeBrowserCompatibility(in: config)
         config = setTunCacheFile(enabled: true, in: config)
         try validateTunRuntimeRouting(in: config)
 
@@ -1326,6 +1340,46 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             }
         }
 
+        return config
+    }
+
+    func applyTunRuntimeBrowserCompatibility(in config: [String: Any]) -> [String: Any] {
+        var config = config
+        if var outbounds = config["outbounds"] as? [[String: Any]] {
+            var changedURLTest = false
+            for index in outbounds.indices {
+                let type = (outbounds[index]["type"] as? String ?? "").lowercased()
+                guard ["urltest", "url-test", "fallback"].contains(type) else { continue }
+                if (outbounds[index]["url"] as? String)?.contains("google.com") != true {
+                    outbounds[index]["url"] = TungBoxConfig.urlTestURL
+                    changedURLTest = true
+                }
+            }
+            if changedURLTest {
+                config["outbounds"] = outbounds
+                appendLog("[TUN] 已将自动测速目标切换为 Google 主站，避免 gstatic 假阳性\n")
+            }
+        }
+
+        var route = config["route"] as? [String: Any] ?? [:]
+        var rules = route["rules"] as? [[String: Any]] ?? []
+        let hasQUICBlock = rules.contains { rule in
+            (rule["network"] as? String)?.lowercased() == "udp"
+                && (rule["port"] as? Int) == 443
+                && (rule["action"] as? String)?.lowercased() == "reject"
+        }
+        if !hasQUICBlock {
+            let quicRule: [String: Any] = [
+                "network": "udp",
+                "port": 443,
+                "action": "reject"
+            ]
+            let insertIndex = min(2, rules.count)
+            rules.insert(quicRule, at: insertIndex)
+            route["rules"] = rules
+            config["route"] = route
+            appendLog("[TUN] 已阻止 UDP/443，避免浏览器优先使用 QUIC 导致 Google 访问卡住\n")
+        }
         return config
     }
 
