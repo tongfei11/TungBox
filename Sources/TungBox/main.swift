@@ -1577,6 +1577,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 "address": [
                     "\(TunServiceManager.tunIPv4Address)/30"
                 ],
+                "interface_name": TunServiceManager.tunInterfaceName,
                 "auto_route": true,
                 "strict_route": false,
                 "route_exclude_address": [
