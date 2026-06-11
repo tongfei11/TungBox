@@ -178,8 +178,8 @@ extension MainWindowController {
     }
 
     func traySpeedAttributedString() -> NSAttributedString {
-        let uploadText = "\(formatBytes(currentUploadSpeed))/s"
-        let downloadText = "\(formatBytes(currentDownloadSpeed))/s"
+        let uploadText = formatTraySpeed(currentUploadSpeed)
+        let downloadText = formatTraySpeed(currentDownloadSpeed)
         let fullText = "\(uploadText)\n\(downloadText)"
         
         let paragraphStyle = NSMutableParagraphStyle()
@@ -196,6 +196,17 @@ extension MainWindowController {
         ]
         
         return NSAttributedString(string: fullText, attributes: attributes)
+    }
+
+    func formatTraySpeed(_ bytes: Int) -> String {
+        let units = ["KB/s", "MB/s", "GB/s", "TB/s"]
+        var value = Double(bytes) / 1024.0
+        var index = 0
+        while value >= 999.95 && index < units.count - 1 {
+            value /= 1024.0
+            index += 1
+        }
+        return String(format: "%5.1f %@", value, units[index])
     }
 
     @objc func toggleProxyServiceFromTray() {
