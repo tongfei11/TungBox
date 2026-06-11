@@ -267,6 +267,15 @@ final class Runner: @unchecked Sendable {
         process.currentDirectoryURL = store.baseURL
         process.executableURL = URL(fileURLWithPath: binary)
         process.arguments = args
+
+        // Remove proxy environment variables to guarantee direct connection without interference
+        var env = ProcessInfo.processInfo.environment
+        let proxyKeys = ["http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"]
+        for key in proxyKeys {
+            env.removeValue(forKey: key)
+        }
+        process.environment = env
+
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
@@ -351,24 +360,30 @@ final class Runner: @unchecked Sendable {
         
         json.removeValue(forKey: "experimental")
         json.removeValue(forKey: "inbounds")
-        if var route = json["route"] as? [String: Any] {
-            route.removeValue(forKey: "rule_set")
-            if let rules = route["rules"] as? [[String: Any]] {
-                route["rules"] = rules.filter { $0["rule_set"] == nil }
-            }
-            json["route"] = route
+        
+        // 1. Simplify route: force final to direct, enable auto_detect_interface to bypass virtual TUN interfaces
+        var simplifiedRoute: [String: Any] = [
+            "final": "direct",
+            "auto_detect_interface": true
+        ]
+        if let originalRoute = json["route"] as? [String: Any],
+           let resolver = originalRoute["default_domain_resolver"] as? String {
+            simplifiedRoute["default_domain_resolver"] = resolver
         }
+        json["route"] = simplifiedRoute
+        
+        // 2. Simplify dns: remove all rules and detour fields, direct DNS resolution for testing
         if var dns = json["dns"] as? [String: Any] {
-            if let rules = dns["rules"] as? [[String: Any]] {
-                dns["rules"] = rules.filter { $0["rule_set"] == nil }
-            }
+            dns.removeValue(forKey: "rules")
+            dns.removeValue(forKey: "rule_set")
             if var servers = dns["servers"] as? [[String: Any]] {
                 for i in servers.indices {
-                    if servers[i]["detour"] as? String == "direct" {
-                        servers[i].removeValue(forKey: "detour")
-                    }
+                    servers[i].removeValue(forKey: "detour")
                 }
                 dns["servers"] = servers
+                if let firstTag = servers.first?["tag"] as? String {
+                    dns["final"] = firstTag
+                }
             }
             json["dns"] = dns
         }
