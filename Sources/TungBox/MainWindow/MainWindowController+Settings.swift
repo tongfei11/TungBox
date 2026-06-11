@@ -900,6 +900,7 @@ extension MainWindowController {
 
         try TunServiceManager.enable(store: store, configText: preparedConfig)
         startTunRequestHeartbeat()
+        wasTunActiveInThisSession = true
     }
 
     func startTunRequestHeartbeat() {

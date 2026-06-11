@@ -145,6 +145,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     let downloadValueLabel = NSTextField(labelWithString: "0 KB/s")
     var currentUploadSpeed = 0
     var currentDownloadSpeed = 0
+    var wasTunActiveInThisSession = false
+    var wasProxyActiveInThisSession = false
+    var lastTrayActiveState: Bool? = nil
     var trayImageView: NSImageView?
     var traySpeedLabel: NSTextField?
     var statsTimer: Timer?
@@ -756,6 +759,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         stopTunRequestHeartbeat()
         try? TunServiceManager.disable(store: store)
         _ = TunServiceManager.waitUntilStopped(store: store, timeout: 3)
+        wasTunActiveInThisSession = false
+        wasProxyActiveInThisSession = false
         serviceSwitch.isOn = false
         syncProxyPreferenceControls()
     }
@@ -774,6 +779,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             throw NSError.user("TUN 尚未完全停止，暂不启动系统代理，避免进入断网状态。请稍等后重试。\(residue)")
         }
         appendLog("[TUN] 已停止，继续启动系统代理\n")
+        wasTunActiveInThisSession = false
     }
 
     func startNormalProxy(config: URL, port: Int, reason: String) throws {
@@ -924,26 +930,51 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     }
 
     func stopService(clearSystemProxySynchronously: Bool = false) {
-        let shouldDisableTun = isTunEnabled
+        let shouldDisableTun = wasTunActiveInThisSession && (
+            isTunEnabled
             || TunServiceManager.status(store: store).isRunning
             || TunServiceManager.hasRequestFiles(store: store)
             || TunServiceManager.hasNetworkResidue()
+        )
         let shouldStopNormalProxy = runner.isRunning
-        let shouldClearSystemProxy = isSystemProxyEnabled || shouldStopNormalProxy
+        let shouldClearSystemProxy = wasProxyActiveInThisSession && (isSystemProxyEnabled || shouldStopNormalProxy)
 
         // 1. Tell TUN daemon to stop (removes enabled flag; daemon cleanly kills TUN child, keeps daemon alive)
         if shouldDisableTun {
             stopTunRequestHeartbeat()
             try? TunServiceManager.disable(store: store)
             appendLog("[TungBox] TUN 标记已关闭\n")
-            let timeout: TimeInterval = clearSystemProxySynchronously ? 8 : 6
-            if TunServiceManager.waitUntilStopped(store: store, timeout: timeout) {
-                appendLog("[TungBox] TUN 已确认回收\n")
+            if clearSystemProxySynchronously {
+                let timeout: TimeInterval = 8
+                if TunServiceManager.waitUntilStopped(store: store, timeout: timeout) {
+                    appendLog("[TungBox] TUN 已确认回收\n")
+                } else {
+                    let residue = TunServiceManager.networkResidueDescription() ?? "未知残留"
+                    appendLog("[警告] TUN 未在 \(Int(timeout)) 秒内确认回收：\(residue)。请到设置重新安装 TUN 服务以更新安全停机脚本。\n")
+                    showToast("TUN 未确认回收，请重新安装 TUN 服务")
+                }
+                wasTunActiveInThisSession = false
             } else {
-                let residue = TunServiceManager.networkResidueDescription() ?? "未知残留"
-                appendLog("[警告] TUN 未在 \(Int(timeout)) 秒内确认回收：\(residue)。请到设置重新安装 TUN 服务以更新安全停机脚本。\n")
-                showToast("TUN 未确认回收，请重新安装 TUN 服务")
+                let storeCopy = self.store
+                appendLog("[TungBox] 正在后台等待回收 TUN 网卡...\n")
+                Task.detached { [weak self] in
+                    let success = TunServiceManager.waitUntilStopped(store: storeCopy, timeout: 6)
+                    let residue = success ? nil : (TunServiceManager.networkResidueDescription() ?? "未知残留")
+                    
+                    await MainActor.run { [weak self] in
+                        guard let self = self else { return }
+                        if success {
+                            self.appendLog("[TungBox] TUN 已确认回收\n")
+                        } else {
+                            self.appendLog("[警告] TUN 未能在后台确认回收：\(residue ?? "")。请到设置重新安装 TUN 服务以更新安全停机脚本。\n")
+                            self.showToast("TUN 未确认回收，请重新安装 TUN 服务")
+                        }
+                        self.wasTunActiveInThisSession = false
+                    }
+                }
             }
+        } else {
+            wasTunActiveInThisSession = false
         }
 
         // 2. Stop sing-box processes (normal + elevated)
@@ -962,6 +993,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             }
             appendLog("[TungBox] 系统代理已关闭\n")
         }
+        wasProxyActiveInThisSession = false
 
         isSystemProxyEnabled = false
         isProxyServiceTransitioning = false
@@ -969,8 +1001,10 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         refreshStatus()
     }
 
-    /// Synchronous system proxy toggle — used during app quit/crash where async dispatch might not complete.
     func setSystemProxySync(enabled: Bool, port: Int) {
+        if enabled {
+            wasProxyActiveInThisSession = true
+        }
         let services = getActiveNetworkServices()
         for service in services {
             if enabled {
@@ -2316,6 +2350,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     func setSystemProxy(enabled: Bool, port: Int, rollbackOnMismatch: Bool = false) {
         systemProxyOperationID += 1
         let operationID = systemProxyOperationID
+        if enabled {
+            wasProxyActiveInThisSession = true
+        }
         // Run networksetup commands in background
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
