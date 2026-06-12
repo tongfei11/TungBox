@@ -215,6 +215,25 @@ enum ConfigCompatibilityChecker {
             c["outbounds"] = newOutbounds
         }
 
+        // 2b. Clean up invalid outbound network fields (e.g. network: grpc/ws) which are invalid in sing-box
+        if let outbounds = c["outbounds"] as? [[String: Any]] {
+            var newOutbounds = outbounds
+            var changed = false
+            for i in outbounds.indices {
+                if let network = newOutbounds[i]["network"] as? String {
+                    let networkLower = network.lowercased()
+                    if networkLower != "tcp" && networkLower != "udp" {
+                        newOutbounds[i].removeValue(forKey: "network")
+                        fixed.append("outbounds[\(i)] (\(newOutbounds[i]["tag"] ?? "")): 移除无效的 network = \(network)")
+                        changed = true
+                    }
+                }
+            }
+            if changed {
+                c["outbounds"] = newOutbounds
+            }
+        }
+
         // 3. Migrate dns.servers[].address URL → type + server
         if var dns = c["dns"] as? [String: Any],
            let servers = dns["servers"] as? [[String: Any]] {

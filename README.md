@@ -25,7 +25,18 @@
 
 TungBox 是 [sing-box](https://github.com/SagerNet/sing-box) 的 macOS 原生客户端，使用 Swift 6 + AppKit 构建，适配 macOS 13 及以上版本。支持订阅管理、规则分流、节点选择、TUN 模式、状态栏控制等日常代理需求。发布包内置 sing-box Core，开箱即用。
 
-> Release 版本 **0.1.3** · 当前编译版本 **0.1.3(0084)**
+> [!WARNING]
+> 目前 TUN 透明代理功能不可用，仍在调试中。建议当前使用系统代理模式。
+
+> Release 版本 **0.1.4** · 当前编译版本 **0.1.4(0095)**
+
+## 安装
+
+从 [Releases](https://github.com/tongfei11/TungBox/releases/latest) 下载 `TungBox-x.x.x-macos-arm64.dmg`，挂载后将 `TungBox.app` 拖入 `/Applications`。
+
+首次打开时，macOS Gatekeeper 可能提示"无法验证开发者"。请在 **系统设置 → 隐私与安全性** 中点击"仍要打开"。
+
+> TungBox 内置 sing-box Core，无需额外安装。TUN 功能需要管理员密码授权安装系统服务。
 
 ## 功能
 
@@ -99,14 +110,6 @@ TungBox 是 [sing-box](https://github.com/SagerNet/sing-box) 的 macOS 原生客
 - 订阅配置兼容性检查
 - Clash YAML 订阅识别转换
 - 设置页分为常规 / Core / TUN 设置 / 规则集 / 外观
-
-## 安装
-
-从 [Releases](https://github.com/tongfei11/TungBox/releases/latest) 下载 `TungBox-x.x.x-macos-arm64.dmg`，挂载后将 `TungBox.app` 拖入 `/Applications`。
-
-首次打开时，macOS Gatekeeper 可能提示"无法验证开发者"。请在 **系统设置 → 隐私与安全性** 中点击"仍要打开"。
-
-> TungBox 内置 sing-box Core，无需额外安装。TUN 功能需要管理员密码授权安装系统服务。
 
 ## 许可
 

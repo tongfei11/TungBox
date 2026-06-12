@@ -74,13 +74,20 @@ enum SubscriptionFormatParser {
                 continue
             }
 
-            if inProxies && currentIndent <= indentLevel && !trimmed.hasPrefix("- ") && !trimmed.hasPrefix("-{") && currentIndent > 0 {
+            if inProxies && currentIndent <= indentLevel && !trimmed.hasPrefix("- ") && !trimmed.hasPrefix("-{") && trimmed != "-" && currentIndent > 0 {
                 if !current.isEmpty { proxies.append(current) }
                 inProxies = false
                 continue
             }
 
             guard inProxies else { continue }
+
+            // New proxy entry starting with a hyphen on a line by itself
+            if trimmed == "-" {
+                if !current.isEmpty { proxies.append(current) }
+                current = [:]
+                continue
+            }
 
             // New proxy entry
             if trimmed.hasPrefix("- ") {
@@ -191,6 +198,22 @@ enum SubscriptionFormatParser {
         case "hysteria2", "hy2":
             node["type"] = "hysteria2"
             node["password"] = clash["password"] as? String ?? clash["auth"] as? String ?? ""
+            if let obfsType = clash["obfs"] as? String {
+                node["obfs"] = [
+                    "type": obfsType,
+                    "password": clash["obfs-password"] as? String ?? ""
+                ]
+            }
+            if let up = clash["up"] as? String ?? clash["up_mbps"] as? String {
+                if let upVal = parseMbps(up) { node["up_mbps"] = upVal }
+            } else if let upInt = clash["up"] as? Int ?? clash["up_mbps"] as? Int {
+                node["up_mbps"] = upInt
+            }
+            if let down = clash["down"] as? String ?? clash["down_mbps"] as? String {
+                if let downVal = parseMbps(down) { node["down_mbps"] = downVal }
+            } else if let downInt = clash["down"] as? Int ?? clash["down_mbps"] as? Int {
+                node["down_mbps"] = downInt
+            }
         case "tuic":
             node["type"] = "tuic"
             node["uuid"] = clash["uuid"] as? String ?? ""
@@ -210,11 +233,34 @@ enum SubscriptionFormatParser {
             return false
         }()
         if tls {
-            let sni = clash["sni"] as? String ?? server
-            node["tls"] = ["enabled": true, "server_name": sni]
+            let sni = clash["servername"] as? String ?? clash["sni"] as? String ?? server
+            var tlsConfig: [String: Any] = ["enabled": true, "server_name": sni]
             if (clash["skip-cert-verify"] as? Bool) == true || (clash["insecure"] as? Bool) == true {
-                node["tls"] = (node["tls"] as? [String: Any])?.merging(["insecure": true]) { $1 }
+                tlsConfig["insecure"] = true
             }
+            
+            // uTLS (client-fingerprint)
+            if let fingerprint = clash["client-fingerprint"] as? String ?? clash["client_fingerprint"] as? String ?? clash["fingerprint"] as? String {
+                tlsConfig["utls"] = [
+                    "enabled": true,
+                    "fingerprint": fingerprint
+                ]
+            }
+            
+            // Reality
+            let publicKey = clash["public-key"] as? String ?? clash["public_key"] as? String ?? ""
+            if !publicKey.isEmpty {
+                var realityConfig: [String: Any] = [
+                    "enabled": true,
+                    "public_key": publicKey
+                ]
+                if let shortId = clash["short-id"] as? String ?? clash["short_id"] as? String {
+                    realityConfig["short_id"] = shortId
+                }
+                tlsConfig["reality"] = realityConfig
+            }
+            
+            node["tls"] = tlsConfig
         }
 
         // Network / transport
@@ -223,7 +269,9 @@ enum SubscriptionFormatParser {
         case "ws":
             var transport: [String: Any] = ["type": "ws"]
             transport["path"] = clash["ws-path"] as? String ?? clash["path"] as? String ?? "/"
-            if let host = clash["ws-headers"] as? [String: String], let h = host["Host"] {
+            if let headersStr = clash["headers"] as? String, let hostVal = extractHostFromInlineMap(headersStr) {
+                transport["headers"] = ["Host": hostVal]
+            } else if let host = clash["ws-headers"] as? [String: String], let h = host["Host"] {
                 transport["headers"] = ["Host": h]
             } else if let host = clash["host"] as? String {
                 transport["headers"] = ["Host": host]
@@ -236,7 +284,7 @@ enum SubscriptionFormatParser {
             }
             node["transport"] = transport
         case "grpc":
-            node["transport"] = ["type": "grpc", "service_name": clash["grpc-service"] as? String ?? ""]
+            node["transport"] = ["type": "grpc", "service_name": clash["grpc-service-name"] as? String ?? clash["grpc-service"] as? String ?? ""]
         default: break
         }
 
@@ -248,10 +296,35 @@ enum SubscriptionFormatParser {
     private static func decodeBase64(_ text: String) -> String? {
         var s = text.replacingOccurrences(of: "\n", with: "").replacingOccurrences(of: "\r", with: "")
             .replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
-        let pad = s.count % 4
-        if pad > 0 { s += String(repeating: "=", count: 4 - pad) }
+        let padding = s.count % 4
+        if padding > 0 {
+            s += String(repeating: "=", count: 4 - padding)
+        }
         guard let data = Data(base64Encoded: s) else { return nil }
         return String(data: data, encoding: .utf8)
+    }
+
+    private static func extractHostFromInlineMap(_ text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: CharacterSet(charactersIn: "{} "))
+        let pairs = trimmed.components(separatedBy: ",")
+        for pair in pairs {
+            let kv = pair.components(separatedBy: ":")
+            if kv.count >= 2 {
+                let key = kv[0].trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "\"", with: "").replacingOccurrences(of: "'", with: "")
+                if key.lowercased() == "host" {
+                    return kv[1...].joined(separator: ":").trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "\"", with: "").replacingOccurrences(of: "'", with: "")
+                }
+            }
+        }
+        return nil
+    }
+
+    private static func parseMbps(_ text: String) -> Int? {
+        let cleaned = text.lowercased()
+            .replacingOccurrences(of: "mbps", with: "")
+            .replacingOccurrences(of: "m", with: "")
+            .trimmingCharacters(in: .whitespaces)
+        return Int(cleaned)
     }
 }
 

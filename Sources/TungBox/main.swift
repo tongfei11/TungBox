@@ -86,7 +86,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     let subscriptionURLField = MD3TextField()
     let serviceLabel = NSTextField(labelWithString: "sing-box：检测中")
     let nodeTestURLField = MD3TextField(string: TungBoxConfig.urlTestURL)
-    let tcpAddressField = MD3TextField(string: "www.google.com:443")
     let modeControl = MD3SegmentedControl()
     let nodesModeControl = MD3SegmentedControl()
     let modeStatusLabel = NSTextField(labelWithString: "当前模式：规则")
@@ -1382,21 +1381,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             config["outbounds"] = outbounds
         }
 
-        if var dns = config["dns"] as? [String: Any],
-           var servers = dns["servers"] as? [[String: Any]] {
-            var dnsChanged = false
-            for index in servers.indices {
-                let server = (servers[index]["server"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                if routeExcludeCIDR(for: server) != nil, servers[index]["detour"] == nil {
-                    servers[index]["detour"] = "direct"
-                    dnsChanged = true
-                }
-            }
-            if dnsChanged {
-                dns["servers"] = servers
-                config["dns"] = dns
-            }
-        }
 
         appendLog("[TUN] 已绑定 direct/节点出站到物理接口 \(interface)，避免 direct 出口无路由\n")
         return config
@@ -1659,7 +1643,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             let tag = (outbound["tag"] as? String) ?? type
             let server = outbound["server"].map { "\($0)" } ?? ""
             let port = outbound["server_port"].map { ":\($0)" } ?? ""
-            return NodeInfo(tag: tag, type: type, server: server + port, delay: "未测试", tcp: "未测试")
+            return NodeInfo(tag: tag, type: type, server: server + port, delay: "未测试")
         }
     }
 

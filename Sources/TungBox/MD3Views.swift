@@ -1309,7 +1309,6 @@ final class MD3NodeCellView: NSTableCellView {
     let titleLabel = NSTextField(labelWithString: "")
     let subtitleLabel = NSTextField(labelWithString: "")
     let urlDelayChip = MD3LatencyChip()
-    let tcpDelayChip = MD3LatencyChip()
     
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -1329,13 +1328,10 @@ final class MD3NodeCellView: NSTableCellView {
         subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
         
         urlDelayChip.translatesAutoresizingMaskIntoConstraints = false
-        tcpDelayChip.translatesAutoresizingMaskIntoConstraints = false
-        tcpDelayChip.isHidden = true
         
         addSubview(titleLabel)
         addSubview(subtitleLabel)
         addSubview(urlDelayChip)
-        addSubview(tcpDelayChip)
         
         NSLayoutConstraint.activate([
             titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),

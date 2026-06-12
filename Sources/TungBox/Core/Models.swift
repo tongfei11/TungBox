@@ -21,7 +21,6 @@ struct NodeInfo {
     var type: String
     var server: String
     var delay: String
-    var tcp: String
 }
 
 struct NodeGroupInfo {
