@@ -63,7 +63,8 @@ enum TunServiceManager {
     static let stderrPath = "\(installDirectoryPath)/tun-service.err.log"
     static let legacyStdoutPath = "/tmp/\(label).out.log"
     static let legacyStderrPath = "/tmp/\(label).err.log"
-    static let tunIPv4Address = "198.18.0.1"
+    static let tunInterfaceName = "utun29"
+    static let tunIPv4Address = "198.19.0.1"
     static let legacyTunIPv4Address = "172.19.0.1"
     static let requestHeartbeatTimeout: TimeInterval = 30
     private static let cachedTunProcessPID = LockedValue<(pid: Int32?, checkedAt: Date)?>(nil)
@@ -367,13 +368,9 @@ enum TunServiceManager {
     }
 
     static func networkResidueDescription() -> String? {
-        let interfaceNames = runProcessAndGetOutput("/sbin/ifconfig", args: ["-l"])
-            .split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" })
-            .map(String.init)
-            .filter { $0.hasPrefix("utun") }
-
-        for interface in interfaceNames {
-            let ifconfig = runProcessAndGetOutput("/sbin/ifconfig", args: [interface])
+        let interface = tunInterfaceName
+        let ifconfig = runProcessAndGetOutput("/sbin/ifconfig", args: [interface])
+        if !ifconfig.contains("interface \(interface) does not exist") && !ifconfig.contains("device not found") {
             if ifconfig.contains("inet \(tunIPv4Address)") {
                 return "\(interface) \(tunIPv4Address)"
             }
@@ -619,8 +616,7 @@ enum TunServiceManager {
         }
 
         is_tungbox_tun_interface() {
-          ifconfig_text="$(/sbin/ifconfig "$1" 2>/dev/null || true)"
-          echo "$ifconfig_text" | grep -Eq 'inet (198\\.18\\.0\\.1|172\\.19\\.0\\.1)'
+          [ "$1" = "\(tunInterfaceName)" ]
         }
 
         has_tungbox_tun_interface() {
@@ -731,6 +727,7 @@ enum TunServiceManager {
             PID="$(cat "$PIDFILE" 2>/dev/null || true)"
             stop_pid "$PID" "stale sing-box"
           fi
+          /usr/bin/pkill -KILL -f "$CORE" >/dev/null 2>&1 || true
           clean_routes
           CHILD=""
           rm -f "$PIDFILE"
@@ -741,9 +738,19 @@ enum TunServiceManager {
           CLEANING_UP=1
           trap - EXIT TERM INT HUP QUIT
           shutdown_child
+          /usr/bin/pkill -KILL -f "$CORE" >/dev/null 2>&1 || true
           exit 0
         }
         trap cleanup EXIT TERM INT HUP QUIT
+
+        # Startup cleanup: ensure no orphaned processes or routes survive daemon restart
+        if [ -f "$PIDFILE" ]; then
+          PID="$(cat "$PIDFILE" 2>/dev/null || true)"
+          case "$PID" in ''|*[!0-9]*) ;; *) kill -KILL "$PID" >/dev/null 2>&1 || true ;; esac
+        fi
+        /usr/bin/pkill -KILL -f "$CORE" >/dev/null 2>&1 || true
+        sleep 0.5
+        clean_routes
 
         echo "$(date '+%Y-%m-%d %H:%M:%S') TUN service started" >> "$LOG"
         while true; do
@@ -870,7 +877,7 @@ enum TunServiceManager {
     private static func stopChildCommand() -> String {
         """
         if [ -f \(shellQuote(pidPath)) ]; then PID=$(cat \(shellQuote(pidPath)) 2>/dev/null || true); case "$PID" in ''|*[!0-9]*) ;; *) kill -TERM "$PID" >/dev/null 2>&1 || true; i=0; while kill -0 "$PID" >/dev/null 2>&1 && [ "$i" -lt 4 ]; do sleep 1; i=$((i + 1)); done; if kill -0 "$PID" >/dev/null 2>&1; then kill -KILL "$PID" >/dev/null 2>&1 || true; i=0; while kill -0 "$PID" >/dev/null 2>&1 && [ "$i" -lt 3 ]; do sleep 1; i=$((i + 1)); done; fi ;; esac; fi
-        for ifname in $(/sbin/ifconfig -l 2>/dev/null | tr ' ' '\\n' | grep '^utun'); do if /sbin/ifconfig "$ifname" 2>/dev/null | grep -Eq 'inet (198\\.18\\.0\\.1|172\\.19\\.0\\.1)'; then for net in 1.0.0.0/8 2.0.0.0/7 4.0.0.0/6 8.0.0.0/5 16.0.0.0/4 32.0.0.0/3 64.0.0.0/2 128.0.0.0/1 0.0.0.0/1; do /sbin/route -n delete -net "$net" -ifscope "$ifname" 2>/dev/null || true; /sbin/route -n delete -net "$net" -iface "$ifname" 2>/dev/null || true; done; /sbin/route -n delete -inet6 -net ::/1 2>/dev/null || true; /sbin/route -n delete -inet6 -net 8000::/1 2>/dev/null || true; /sbin/route -n delete -inet6 default -iface "$ifname" 2>/dev/null || true; /sbin/route -n delete -net default -iface "$ifname" 2>/dev/null || true; /sbin/ifconfig "$ifname" down 2>/dev/null || true; fi; done
+        for ifname in $(/sbin/ifconfig -l 2>/dev/null | tr ' ' '\\n' | grep '^utun'); do if [ "$ifname" = "\(tunInterfaceName)" ]; then for net in 1.0.0.0/8 2.0.0.0/7 4.0.0.0/6 8.0.0.0/5 16.0.0.0/4 32.0.0.0/3 64.0.0.0/2 128.0.0.0/1 0.0.0.0/1; do /sbin/route -n delete -net "$net" -ifscope "$ifname" 2>/dev/null || true; /sbin/route -n delete -net "$net" -iface "$ifname" 2>/dev/null || true; done; /sbin/route -n delete -inet6 -net ::/1 2>/dev/null || true; /sbin/route -n delete -inet6 -net 8000::/1 2>/dev/null || true; /sbin/route -n delete -inet6 default -iface "$ifname" 2>/dev/null || true; /sbin/route -n delete -net default -iface "$ifname" 2>/dev/null || true; /sbin/ifconfig "$ifname" down 2>/dev/null || true; fi; done
         /usr/bin/dscacheutil -flushcache >/dev/null 2>&1 || true; /usr/bin/killall -HUP mDNSResponder >/dev/null 2>&1 || true
         """
     }

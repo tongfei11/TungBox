@@ -496,6 +496,9 @@ extension MainWindowController {
                 if apiConnections == nil {
                     self.uploadValueLabel.stringValue = "—"
                     self.downloadValueLabel.stringValue = "—"
+                    self.currentUploadSpeed = 0
+                    self.currentDownloadSpeed = 0
+                    self.refreshTrayIcon()
                 }
             }
         }
@@ -608,6 +611,7 @@ extension MainWindowController {
         } catch {
             isTunEnabled = previous
             UserDefaults.standard.set(isTunEnabled, forKey: "tunEnabled")
+            isSystemProxyEnabled = wasServiceActiveOrRequested ? !isTunEnabled : false
             syncProxyPreferenceControls()
             showError(error)
         }
