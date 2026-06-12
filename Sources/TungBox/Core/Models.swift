@@ -73,7 +73,6 @@ struct CoreRelease {
     var tag: String
     var assetName: String
     var downloadURL: URL
-    var sha256: String
 }
 
 struct AppRelease {
