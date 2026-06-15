@@ -28,7 +28,7 @@ TungBox 是 [sing-box](https://github.com/SagerNet/sing-box) 的 macOS 原生客
 > [!WARNING]
 > 目前 TUN 透明代理功能不可用，仍在调试中。建议当前使用系统代理模式。
 
-> Release 版本 **0.1.4** · 当前编译版本 **0.1.4(0096)**
+> Release 版本 **0.1.4** · 当前编译版本 **0.1.4(0104)**
 
 ## 安装
 
