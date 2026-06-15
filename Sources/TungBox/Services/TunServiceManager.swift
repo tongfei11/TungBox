@@ -57,6 +57,7 @@ enum TunServiceManager {
     static let configPath = "\(installDirectoryPath)/tun-daemon.json"
     static let cachePath = "\(installDirectoryPath)/cache.db"
     static let flagPath = "\(installDirectoryPath)/tun-enabled"
+    static let dnsBackupPath = "\(installDirectoryPath)/tun-dns-backup"
     static let pidPath = "\(installDirectoryPath)/tun-service.pid"
     static let logPath = "\(installDirectoryPath)/tun-service.log"
     static let stdoutPath = "\(installDirectoryPath)/tun-service.out.log"
@@ -258,12 +259,13 @@ enum TunServiceManager {
         let command = [
             "rm -f \(shellQuote(flagPath))",
             stopChildCommand(),
+            restoreDnsCommand(),
             "launchctl disable system/\(label) >/dev/null 2>&1 || true",
             "launchctl bootout system/\(label) >/dev/null 2>&1 || true",
             "pkill -TERM -f \(shellQuote(scriptPath)) >/dev/null 2>&1 || true",
             "sleep 0.3",
             "pkill -KILL -f \(shellQuote(scriptPath)) >/dev/null 2>&1 || true",
-            "rm -f \(shellQuote(plistPath)) \(shellQuote(scriptPath)) \(shellQuote(corePath)) \(shellQuote(configPath)) \(shellQuote(flagPath)) \(shellQuote(pidPath)) \(shellQuote(logPath)) \(shellQuote(stdoutPath)) \(shellQuote(stderrPath)) \(shellQuote(legacyStdoutPath)) \(shellQuote(legacyStderrPath))",
+            "rm -f \(shellQuote(plistPath)) \(shellQuote(scriptPath)) \(shellQuote(corePath)) \(shellQuote(configPath)) \(shellQuote(flagPath)) \(shellQuote(dnsBackupPath)) \(shellQuote(pidPath)) \(shellQuote(logPath)) \(shellQuote(stdoutPath)) \(shellQuote(stderrPath)) \(shellQuote(legacyStdoutPath)) \(shellQuote(legacyStderrPath))",
             "rmdir \(shellQuote(installDirectoryPath)) >/dev/null 2>&1 || true"
         ].joined(separator: "; ")
         let result = runAppleScript(command)
@@ -530,8 +532,10 @@ enum TunServiceManager {
         REQUEST_HEARTBEAT=\(shellQuote(store.tunRequestHeartbeatURL.path))
         PIDFILE=\(shellQuote(pidPath))
         LOG=\(shellQuote(logPath))
+        DNS_BACKUP=\(shellQuote(dnsBackupPath))
+        TUN_DNS_ADDR="198.18.0.2"
         CHILD=""
-        SCRIPT_VERSION="2026-06-tun-safe-stop-v19"
+        SCRIPT_VERSION="2026-06-tun-dns-takeover-v21"
         REQUEST_MAX_AGE=30
         CLEANING_UP=0
 
@@ -654,6 +658,89 @@ enum TunServiceManager {
           fi
         }
 
+        # Map a BSD device (e.g. en5) to its macOS network service name so we can
+        # drive networksetup. Prints the service name, empty if none matched.
+        dns_service_for_device() {
+          dev="$1"
+          [ -z "$dev" ] && return 1
+          /usr/sbin/networksetup -listnetworkserviceorder 2>/dev/null | awk -v dev="$dev" '
+            /^\\([0-9]+\\) / { name=$0; sub(/^\\([0-9]+\\) /, "", name) }
+            index($0, "Device: " dev ")") { print name; exit }
+          '
+        }
+
+        # Force the active physical service to resolve through the TUN DNS
+        # (sing-box answers 198.18.0.2 via hijack-dns with an ipv4_only, un-poisoned
+        # result). Without this, macOS mDNSResponder sends queries bound to the
+        # physical interface, bypassing utun29, and the GFW poisons google/youtube/
+        # facebook (and AAAA -> 2001::1). The original DNS is backed up so it can be
+        # restored on every teardown path. This is the macOS approach used by Surge.
+        apply_tun_dns() {
+          dev="$(active_physical_interface)"
+          svc="$(dns_service_for_device "$dev")"
+          [ -z "$svc" ] && { echo "$(date '+%Y-%m-%d %H:%M:%S') apply_tun_dns: no service for '$dev'" >> "$LOG"; return 0; }
+          cur="$(/usr/sbin/networksetup -getdnsservers "$svc" 2>/dev/null)"
+          case "$cur" in *"$TUN_DNS_ADDR"*) return 0 ;; esac
+          if [ ! -f "$DNS_BACKUP" ]; then
+            printf '%s\\n%s\\n' "$svc" "$cur" > "$DNS_BACKUP"
+            chown root:wheel "$DNS_BACKUP" 2>/dev/null || true
+            chmod 600 "$DNS_BACKUP" 2>/dev/null || true
+          fi
+          /usr/sbin/networksetup -setdnsservers "$svc" "$TUN_DNS_ADDR" >/dev/null 2>&1 || true
+          echo "$(date '+%Y-%m-%d %H:%M:%S') set $svc DNS -> $TUN_DNS_ADDR" >> "$LOG"
+        }
+
+        # Restore whatever DNS the service had before apply_tun_dns. Also scans all
+        # services as a safety net so the TUN DNS can never be left behind (the user
+        # would otherwise lose all name resolution once TUN is off).
+        restore_tun_dns() {
+          if [ -f "$DNS_BACKUP" ]; then
+            svc="$(sed -n '1p' "$DNS_BACKUP" 2>/dev/null)"
+            orig="$(sed -n '2,$p' "$DNS_BACKUP" 2>/dev/null)"
+            if [ -n "$svc" ]; then
+              case "$orig" in
+                ''|*"aren't any"*|*"There aren"*)
+                  /usr/sbin/networksetup -setdnsservers "$svc" Empty >/dev/null 2>&1 || true ;;
+                *)
+                  /usr/sbin/networksetup -setdnsservers "$svc" $orig >/dev/null 2>&1 || true ;;
+              esac
+              echo "$(date '+%Y-%m-%d %H:%M:%S') restored $svc DNS" >> "$LOG"
+            fi
+            rm -f "$DNS_BACKUP"
+          fi
+          # Safety net: clear the TUN DNS from any service that still carries it.
+          /usr/sbin/networksetup -listallnetworkservices 2>/dev/null | tail -n +2 | while IFS= read -r svc; do
+            case "$svc" in \\**) continue ;; esac
+            d="$(/usr/sbin/networksetup -getdnsservers "$svc" 2>/dev/null)"
+            if [ "$d" = "$TUN_DNS_ADDR" ]; then
+              /usr/sbin/networksetup -setdnsservers "$svc" Empty >/dev/null 2>&1 || true
+              echo "$(date '+%Y-%m-%d %H:%M:%S') cleared leftover TUN DNS on $svc" >> "$LOG"
+            fi
+          done
+        }
+
+        flush_dns_after_tun_up() {
+          # Wait for utun29 to appear, point the system resolver at the TUN DNS, then
+          # evict DNS entries cached before TUN became active. GFW-poisoned answers
+          # carry long TTLs, so names looked up before enabling TUN (e.g.
+          # www.google.com -> a wrong IP) keep resolving to the stale poisoned
+          # address; dscacheutil -flushcache alone does not drop the mDNSResponder
+          # unicast cache, so we also signal mDNSResponder (needs root, which we have).
+          # This mirrors what Surge / Clash Verge do right after the tunnel is up.
+          i=0
+          while [ "$i" -lt 20 ]; do
+            if has_tungbox_tun_interface; then
+              break
+            fi
+            sleep 0.25
+            i=$((i + 1))
+          done
+          apply_tun_dns
+          /usr/bin/dscacheutil -flushcache >/dev/null 2>&1 || true
+          /usr/bin/killall -HUP mDNSResponder >/dev/null 2>&1 || true
+          echo "$(date '+%Y-%m-%d %H:%M:%S') flushed DNS cache after TUN up" >> "$LOG"
+        }
+
         sync_requested_config() {
           has_request || return 1
           if ! env ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER=true "$CORE" check -c "$REQUEST_CONFIG" >> "$LOG" 2>&1; then
@@ -671,6 +758,10 @@ enum TunServiceManager {
 
         clean_routes() {
           echo "$(date '+%Y-%m-%d %H:%M:%S') cleaning up TUN routes" >> "$LOG"
+          # Restore the system DNS first: clean_routes runs on every teardown path
+          # (startup, config reload, sing-box exit, daemon shutdown), so centralizing
+          # the restore here guarantees the TUN DNS is never left behind.
+          restore_tun_dns
           cleaned=0
           for ifname in $(/sbin/ifconfig -l 2>/dev/null | tr ' ' '\\n' | grep '^utun'); do
             is_tungbox_tun_interface "$ifname" || continue
@@ -779,6 +870,7 @@ enum TunServiceManager {
             env ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER=true "$CORE" run -c "$CONFIG" >> "$LOG" 2>&1 &
             CHILD=$!
             echo "$CHILD" > "$PIDFILE"
+            flush_dns_after_tun_up
             while kill -0 "$CHILD" >/dev/null 2>&1; do
               if ! has_request; then
                 echo "$(date '+%Y-%m-%d %H:%M:%S') stopping sing-box TUN" >> "$LOG"
@@ -863,8 +955,11 @@ enum TunServiceManager {
             && script.contains("clean_routes")
             && script.contains("wait_for_pid_exit")
             && script.contains("stop_pid")
-            && script.contains("2026-06-tun-safe-stop-v19")
+            && script.contains("2026-06-tun-dns-takeover-v21")
             && script.contains("clean_dns")
+            && script.contains("flush_dns_after_tun_up")
+            && script.contains("apply_tun_dns")
+            && script.contains("restore_tun_dns")
             && script.contains("has_tungbox_dns_residue")
             && script.contains("child_status=\"$?\"")
             && script.contains("trap cleanup EXIT TERM INT HUP QUIT")
@@ -880,6 +975,16 @@ enum TunServiceManager {
         if [ -f \(shellQuote(pidPath)) ]; then PID=$(cat \(shellQuote(pidPath)) 2>/dev/null || true); case "$PID" in ''|*[!0-9]*) ;; *) kill -TERM "$PID" >/dev/null 2>&1 || true; i=0; while kill -0 "$PID" >/dev/null 2>&1 && [ "$i" -lt 4 ]; do sleep 1; i=$((i + 1)); done; if kill -0 "$PID" >/dev/null 2>&1; then kill -KILL "$PID" >/dev/null 2>&1 || true; i=0; while kill -0 "$PID" >/dev/null 2>&1 && [ "$i" -lt 3 ]; do sleep 1; i=$((i + 1)); done; fi ;; esac; fi
         for ifname in $(/sbin/ifconfig -l 2>/dev/null | tr ' ' '\\n' | grep '^utun'); do if [ "$ifname" = "\(tunInterfaceName)" ]; then for net in 1.0.0.0/8 2.0.0.0/7 4.0.0.0/6 8.0.0.0/5 16.0.0.0/4 32.0.0.0/3 64.0.0.0/2 128.0.0.0/1 0.0.0.0/1; do /sbin/route -n delete -net "$net" -ifscope "$ifname" 2>/dev/null || true; /sbin/route -n delete -net "$net" -iface "$ifname" 2>/dev/null || true; done; /sbin/route -n delete -inet6 -net ::/1 2>/dev/null || true; /sbin/route -n delete -inet6 -net 8000::/1 2>/dev/null || true; /sbin/route -n delete -inet6 default -iface "$ifname" 2>/dev/null || true; /sbin/route -n delete -net default -iface "$ifname" 2>/dev/null || true; /sbin/ifconfig "$ifname" down 2>/dev/null || true; fi; done
         /usr/bin/dscacheutil -flushcache >/dev/null 2>&1 || true; /usr/bin/killall -HUP mDNSResponder >/dev/null 2>&1 || true
+        """
+    }
+
+    // Restore the system DNS the daemon may have pointed at the TUN resolver
+    // (198.18.0.2). Prefers the saved backup, then sweeps every service as a
+    // safety net so name resolution can never be left broken after teardown.
+    private static func restoreDnsCommand() -> String {
+        """
+        if [ -f \(shellQuote(dnsBackupPath)) ]; then SVC=$(sed -n '1p' \(shellQuote(dnsBackupPath)) 2>/dev/null); ORIG=$(sed -n '2,$p' \(shellQuote(dnsBackupPath)) 2>/dev/null); if [ -n "$SVC" ]; then case "$ORIG" in ''|*"aren't any"*|*"There aren"*) /usr/sbin/networksetup -setdnsservers "$SVC" Empty >/dev/null 2>&1 || true ;; *) /usr/sbin/networksetup -setdnsservers "$SVC" $ORIG >/dev/null 2>&1 || true ;; esac; fi; rm -f \(shellQuote(dnsBackupPath)); fi
+        /usr/sbin/networksetup -listallnetworkservices 2>/dev/null | tail -n +2 | while IFS= read -r SVC; do case "$SVC" in \\**) continue ;; esac; D=$(/usr/sbin/networksetup -getdnsservers "$SVC" 2>/dev/null); if [ "$D" = "198.18.0.2" ]; then /usr/sbin/networksetup -setdnsservers "$SVC" Empty >/dev/null 2>&1 || true; fi; done
         """
     }
 
