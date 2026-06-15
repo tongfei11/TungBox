@@ -1,26 +1,9 @@
-import CryptoKit
 import Foundation
 
 enum CoreUpdater {
     static let stableLatestURL = URL(string: "https://github.com/SagerNet/sing-box/releases/latest")!
     static let releaseBaseURL = URL(string: "https://github.com/SagerNet/sing-box/releases/download")!
     static let testOldVersion = "1.12.22"
-    static let pinnedLatestVersion = "1.13.12"
-
-    private static let trustedSHA256: [String: [String: String]] = [
-        "1.13.12": [
-            "arm64": "43eef86f0ea4a79c3696974f397a963c46a457ee46d1ffac9aa913944a5fc986",
-            "amd64": "f3275316451bf1983bc059599c69c8ed0232d53a619d15cfd535f95cc9a4477a"
-        ],
-        "1.12.22": [
-            "arm64": "974d924c36af92a9aecab5e630555764aa665fb8210e58a48c01faec5d55de0f",
-            "amd64": "950072cf2f1e0d4aa216116e0b1f9f7542aa953c1487b55516ea9d04bd73bbc6"
-        ],
-        "1.11.10": [
-            "arm64": "577ab24957f3530458042c8087e6817c276b4b03bee55c72fcb0ce3226652a43",
-            "amd64": "ddecca3aa83bfc831e6de120e44fe26924e2eed978538e8c216dabdc838e733d"
-        ]
-    ]
 
     static func latestStableRelease() async throws -> CoreRelease {
         let tag = try await latestStableTag()
@@ -35,8 +18,8 @@ enum CoreUpdater {
 
         let tag = "v\(rawVersion)"
         let arch = platformAssetArch()
-        guard let expectedSHA256 = trustedSHA256[rawVersion]?[arch] else {
-            throw NSError.user("暂不支持安装未校验的 sing-box Core \(rawVersion)（\(arch)）。请等待 TungBox 更新可信摘要后再安装。")
+        guard isCompatibleCoreVersion(rawVersion) else {
+            throw NSError.user("TungBox 当前仅验证支持 sing-box Core 1.12.x 和 1.13.x。\(rawVersion)（\(arch)）暂未确认兼容，请等待 TungBox 官方确认支持后再安装。")
         }
         let assetName = "sing-box-\(rawVersion)-darwin-\(arch).tar.gz"
         let downloadURL = releaseBaseURL
@@ -47,8 +30,7 @@ enum CoreUpdater {
             version: rawVersion,
             tag: tag,
             assetName: assetName,
-            downloadURL: downloadURL,
-            sha256: expectedSHA256
+            downloadURL: downloadURL
         )
     }
 
@@ -60,7 +42,6 @@ enum CoreUpdater {
 
         let archiveURL = tempDirectory.appendingPathComponent(release.assetName)
         let data = try await fetchData(from: release.downloadURL)
-        try verifySHA256(data: data, expected: release.sha256, version: release.version)
         try data.write(to: archiveURL, options: .atomic)
 
         let extractDirectory = tempDirectory.appendingPathComponent("extract", isDirectory: true)
@@ -151,6 +132,18 @@ enum CoreUpdater {
         #endif
     }
 
+    private static func isCompatibleCoreVersion(_ version: String) -> Bool {
+        let coreVersion = version.split(separator: "-", maxSplits: 1).first ?? Substring(version)
+        let components = coreVersion.split(separator: ".")
+        guard components.count >= 3,
+              components[0] == "1",
+              let minor = Int(components[1]),
+              Int(components[2]) != nil else {
+            return false
+        }
+        return minor == 12 || minor == 13
+    }
+
     private static func run(_ binary: String, args: [String]) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: binary)
@@ -178,15 +171,6 @@ enum CoreUpdater {
             return url
         }
         return nil
-    }
-
-    private static func verifySHA256(data: Data, expected: String, version: String) throws {
-        let digest = SHA256.hash(data: data)
-            .map { String(format: "%02x", $0) }
-            .joined()
-        guard digest.lowercased() == expected.lowercased() else {
-            throw NSError.user("sing-box Core \(version) 下载校验失败：SHA256 不匹配。")
-        }
     }
 
     private static func verifyExtractedBinary(at url: URL, expectedVersion: String) throws {

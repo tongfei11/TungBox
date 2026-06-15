@@ -5,6 +5,13 @@ final class Runner: @unchecked Sendable {
     private var outputPipe: Pipe?
     private var elevatedPID: Int32?
     private let store: Store
+    
+    private let testQueue: OperationQueue = {
+        let q = OperationQueue()
+        q.name = "com.tungbox.testQueue"
+        q.maxConcurrentOperationCount = 4
+        return q
+    }()
     var onOutput: ((String) -> Void)?
     var isRunning: Bool {
         if process?.isRunning == true { return true }
@@ -141,6 +148,9 @@ final class Runner: @unchecked Sendable {
         process.currentDirectoryURL = store.baseURL
         process.executableURL = URL(fileURLWithPath: binary)
         process.arguments = ["run", "-c", actualConfig.path]
+        var env = ProcessInfo.processInfo.environment
+        env["ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER"] = "true"
+        process.environment = env
 
         let pipe = Pipe()
         process.standardOutput = pipe
@@ -166,7 +176,7 @@ final class Runner: @unchecked Sendable {
         let actualConfig = preprocessConfig(at: config, allowTun: true)
         let command = [
             "cd \(shellQuote(store.baseURL.path))",
-            "nohup \(shellQuote(binary)) run -c \(shellQuote(actualConfig.path)) >> \(shellQuote(store.logURL.path)) 2>&1 & echo $!"
+            "nohup env ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER=true \(shellQuote(binary)) run -c \(shellQuote(actualConfig.path)) >> \(shellQuote(store.logURL.path)) 2>&1 & echo $!"
         ].joined(separator: "; ")
         let appleScript = "do shell script \"\(appleScriptString(command))\" with administrator privileges"
         let result = runAndWait("/usr/bin/osascript", ["-e", appleScript])
@@ -224,18 +234,29 @@ final class Runner: @unchecked Sendable {
         }
     }
 
-    func urlTest(config: URL, outbound: String, testURL: String) throws -> String {
+    func urlTest(config: URL, outbound: String, testURL: String) async throws -> String {
         guard let binary = findSingBox() else {
             throw NSError.user("找不到 sing-box。请先安装：brew install sing-box")
         }
         let actualConfig = preprocessTestConfig(at: config)
         let start = Date()
-        let result = runAndWait(binary, [
-            "tools", "fetch",
-            "-c", actualConfig.path,
-            "-o", outbound,
-            testURL
-        ], timeoutSeconds: 10)
+        
+        let result: (status: Int32, output: String) = try await withCheckedThrowingContinuation { continuation in
+            testQueue.addOperation { [weak self] in
+                guard let self = self else {
+                    continuation.resume(throwing: NSError.user("Runner has been deallocated"))
+                    return
+                }
+                let res = self.runAndWait(binary, [
+                    "tools", "fetch",
+                    "-c", actualConfig.path,
+                    "-o", outbound,
+                    testURL
+                ], timeoutSeconds: 3)
+                continuation.resume(returning: res)
+            }
+        }
+        
         if result.status != 0 {
             let message = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
             throw NSError.user(message.isEmpty ? "节点延迟测试超时或失败" : message)
@@ -243,24 +264,6 @@ final class Runner: @unchecked Sendable {
         return "\(Int(Date().timeIntervalSince(start) * 1000)) ms"
     }
 
-    func tcpTest(config: URL, outbound: String, address: String) throws -> String {
-        guard let binary = findSingBox() else {
-            throw NSError.user("找不到 sing-box。请先安装：brew install sing-box")
-        }
-        let actualConfig = preprocessTestConfig(at: config)
-        let start = Date()
-        let result = runAndWait(binary, [
-            "tools", "connect",
-            "-c", actualConfig.path,
-            "-o", outbound,
-            address
-        ], timeoutSeconds: 5)
-        if result.status != 0 {
-            let message = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-            throw NSError.user(message.isEmpty ? "TCP 连接测试超时或失败" : message)
-        }
-        return "\(Int(Date().timeIntervalSince(start) * 1000)) ms"
-    }
 
     private func runAndWait(_ binary: String, _ args: [String], timeoutSeconds: UInt32? = nil) -> (status: Int32, output: String) {
         let process = Process()
@@ -274,6 +277,7 @@ final class Runner: @unchecked Sendable {
         for key in proxyKeys {
             env.removeValue(forKey: key)
         }
+        env["ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER"] = "true"
         process.environment = env
 
         let pipe = Pipe()
@@ -324,6 +328,10 @@ final class Runner: @unchecked Sendable {
             return url
         }
         
+        // Auto-fix any compatibility issues (like network: grpc) on the fly
+        let (fixedJson, _) = ConfigCompatibilityChecker.autoFix(config: json)
+        json = fixedJson
+        
         var inbounds = json["inbounds"] as? [[String: Any]] ?? []
         let hasTun = inbounds.contains { ($0["type"] as? String) == "tun" }
         if !hasTun {
@@ -358,34 +366,69 @@ final class Runner: @unchecked Sendable {
             return url
         }
         
+        // Auto-fix any compatibility issues (like network: grpc) on the fly
+        let (fixedJson, _) = ConfigCompatibilityChecker.autoFix(config: json)
+        json = fixedJson
+        
         json.removeValue(forKey: "experimental")
         json.removeValue(forKey: "inbounds")
+        
+        let dnsServerTag = "dns-direct-cn"
         
         // 1. Simplify route: force final to direct, enable auto_detect_interface to bypass virtual TUN interfaces
         var simplifiedRoute: [String: Any] = [
             "final": "direct",
-            "auto_detect_interface": true
+            "auto_detect_interface": true,
+            "default_domain_resolver": dnsServerTag
         ]
-        if let originalRoute = json["route"] as? [String: Any],
-           let resolver = originalRoute["default_domain_resolver"] as? String {
-            simplifiedRoute["default_domain_resolver"] = resolver
-        }
         json["route"] = simplifiedRoute
         
-        // 2. Simplify dns: remove all rules and detour fields, direct DNS resolution for testing
+        // 2. Simplify dns: inject reliable direct public DNS servers and remove all detour fields
+        let fallbackDNSServers: [[String: Any]] = [
+            ["tag": "dns-direct-cn", "type": "udp", "server": "223.5.5.5", "server_port": 53],
+            ["tag": "dns-direct-en", "type": "udp", "server": "8.8.8.8", "server_port": 53]
+        ]
+        
         if var dns = json["dns"] as? [String: Any] {
             dns.removeValue(forKey: "rules")
             dns.removeValue(forKey: "rule_set")
+            var newServers = fallbackDNSServers
             if var servers = dns["servers"] as? [[String: Any]] {
                 for i in servers.indices {
                     servers[i].removeValue(forKey: "detour")
                 }
-                dns["servers"] = servers
-                if let firstTag = servers.first?["tag"] as? String {
-                    dns["final"] = firstTag
+                newServers.append(contentsOf: servers)
+            }
+            dns["servers"] = newServers
+            dns["final"] = dnsServerTag
+            json["dns"] = dns
+        } else {
+            json["dns"] = [
+                "servers": fallbackDNSServers,
+                "final": dnsServerTag,
+                "strategy": "prefer_ipv4"
+            ]
+        }
+        
+        // 3. Filter out virtual/test outbounds to prevent background startup storm during testing,
+        // and set domain_resolver for proxy outbounds.
+        if var outbounds = json["outbounds"] as? [[String: Any]] {
+            let virtualTypes: Set<String> = ["direct", "block", "dns", "selector", "urltest", "url-test", "fallback"]
+            // Filter out selectors, urltests, and fallbacks to prevent background testing storm at startup
+            outbounds = outbounds.filter { outbound in
+                guard let type = outbound["type"] as? String else { return false }
+                let typeLower = type.lowercased()
+                return !["selector", "urltest", "url-test", "fallback"].contains(typeLower)
+            }
+            
+            // Inject domain_resolver to use the direct public DNS for all physical proxy outbounds
+            for i in outbounds.indices {
+                if let type = outbounds[i]["type"] as? String,
+                   !virtualTypes.contains(type.lowercased()) {
+                    outbounds[i]["domain_resolver"] = dnsServerTag
                 }
             }
-            json["dns"] = dns
+            json["outbounds"] = outbounds
         }
         
         let tempURL = url.deletingLastPathComponent().appendingPathComponent("test_" + url.lastPathComponent)

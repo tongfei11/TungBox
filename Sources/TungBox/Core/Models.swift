@@ -21,7 +21,6 @@ struct NodeInfo {
     var type: String
     var server: String
     var delay: String
-    var tcp: String
 }
 
 struct NodeGroupInfo {
@@ -73,7 +72,6 @@ struct CoreRelease {
     var tag: String
     var assetName: String
     var downloadURL: URL
-    var sha256: String
 }
 
 struct AppRelease {

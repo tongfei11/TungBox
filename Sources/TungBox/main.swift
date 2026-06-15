@@ -86,7 +86,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     let subscriptionURLField = MD3TextField()
     let serviceLabel = NSTextField(labelWithString: "sing-box：检测中")
     let nodeTestURLField = MD3TextField(string: TungBoxConfig.urlTestURL)
-    let tcpAddressField = MD3TextField(string: "www.google.com:443")
     let modeControl = MD3SegmentedControl()
     let nodesModeControl = MD3SegmentedControl()
     let modeStatusLabel = NSTextField(labelWithString: "当前模式：规则")
@@ -1643,7 +1642,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             let tag = (outbound["tag"] as? String) ?? type
             let server = outbound["server"].map { "\($0)" } ?? ""
             let port = outbound["server_port"].map { ":\($0)" } ?? ""
-            return NodeInfo(tag: tag, type: type, server: server + port, delay: "未测试", tcp: "未测试")
+            return NodeInfo(tag: tag, type: type, server: server + port, delay: "未测试")
         }
     }
 

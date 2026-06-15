@@ -216,6 +216,7 @@ enum TunServiceManager {
         try plist.write(to: tempPlist, atomically: true, encoding: .utf8)
         let command = [
             "launchctl bootout system/\(label) >/dev/null 2>&1 || true",
+            "for i in 1 2 3 4 5 6 7 8 9 10; do launchctl print system/\(label) >/dev/null 2>&1 || break; sleep 0.5; done",
             "launchctl enable system/\(label) >/dev/null 2>&1 || true",
             "mkdir -p \(shellQuote(installDirectoryPath))",
             "cp \(shellQuote(tempScript.path)) \(shellQuote(scriptPath))",
@@ -277,7 +278,7 @@ enum TunServiceManager {
         }
         let command = [
             "launchctl kickstart -k system/\(label) >/dev/null 2>&1",
-            "launchctl bootout system/\(label) >/dev/null 2>&1 || true; launchctl bootstrap system \(shellQuote(plistPath)); launchctl enable system/\(label)"
+            "launchctl bootout system/\(label) >/dev/null 2>&1 || true; for i in 1 2 3 4 5 6 7 8 9 10; do launchctl print system/\(label) >/dev/null 2>&1 || break; sleep 0.5; done; launchctl bootstrap system \(shellQuote(plistPath)); launchctl enable system/\(label)"
         ].joined(separator: " || ")
         let result = runAppleScript(command)
         if result.status != 0 {
@@ -655,7 +656,7 @@ enum TunServiceManager {
 
         sync_requested_config() {
           has_request || return 1
-          if ! "$CORE" check -c "$REQUEST_CONFIG" >> "$LOG" 2>&1; then
+          if ! env ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER=true "$CORE" check -c "$REQUEST_CONFIG" >> "$LOG" 2>&1; then
             echo "$(date '+%Y-%m-%d %H:%M:%S') requested TUN config check failed" >> "$LOG"
             return 1
           fi
@@ -775,7 +776,7 @@ enum TunServiceManager {
 
           if sync_requested_config && is_safe_root_file "$FLAG" && is_safe_root_file "$CONFIG" && [ -x "$CORE" ]; then
             echo "$(date '+%Y-%m-%d %H:%M:%S') starting sing-box TUN" >> "$LOG"
-            "$CORE" run -c "$CONFIG" >> "$LOG" 2>&1 &
+            env ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER=true "$CORE" run -c "$CONFIG" >> "$LOG" 2>&1 &
             CHILD=$!
             echo "$CHILD" > "$PIDFILE"
             while kill -0 "$CHILD" >/dev/null 2>&1; do

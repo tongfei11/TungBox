@@ -410,10 +410,13 @@ extension MainWindowController {
                             let ms = try await ClashAPI.delay(node: tag, url: finalURL)
                             result = "\(ms) ms"
                         } else {
-                            result = try runner.urlTest(config: config, outbound: tag, testURL: finalURL)
+                            result = try await runner.urlTest(config: config, outbound: tag, testURL: finalURL)
                         }
                     } catch {
                         let msg = error.localizedDescription
+                        await MainActor.run { [weak self] in
+                            self?.appendLog("[节点] 测试 \(tag) 失败原因: \(msg)\n")
+                        }
                         result = msg.contains("超时") ? "超时" : "失败"
                     }
                     
@@ -458,9 +461,13 @@ extension MainWindowController {
                         let ms = try await ClashAPI.delay(node: tag, url: finalURL)
                         result = "\(ms) ms"
                     } else {
-                        result = try runner.urlTest(config: config, outbound: tag, testURL: finalURL)
+                        result = try await runner.urlTest(config: config, outbound: tag, testURL: finalURL)
                     }
                 } catch {
+                    let msg = error.localizedDescription
+                    await MainActor.run { [weak self] in
+                        self?.appendLog("[节点] 测试 \(tag) 失败原因: \(msg)\n")
+                    }
                     result = "失败"
                 }
                 
@@ -510,10 +517,13 @@ extension MainWindowController {
                             let ms = try await ClashAPI.delay(node: tag, url: testURL)
                             result = "\(ms) ms"
                         } else {
-                            result = try runner.urlTest(config: config, outbound: tag, testURL: testURL)
+                            result = try await runner.urlTest(config: config, outbound: tag, testURL: testURL)
                         }
                     } catch {
                         let msg = error.localizedDescription
+                        await MainActor.run { [weak self] in
+                            self?.appendLog("[节点] 测试 \(tag) 失败原因: \(msg)\n")
+                        }
                         result = msg.contains("超时") ? "超时" : "失败"
                     }
                     await MainActor.run { [weak self] in
@@ -535,50 +545,6 @@ extension MainWindowController {
         }
     }
 
-    @objc func testAllNodesTCPClicked() {
-        do {
-            let config = try saveCurrent()
-            refreshNodesFromEditor()
-            guard !nodes.isEmpty else {
-                showError(NSError.user("当前配置没有可测试的节点"))
-                return
-            }
-            let address = tcpAddressField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !address.isEmpty else {
-                showError(NSError.user("请输入 TCP 测试地址"))
-                return
-            }
-            appendLog("[节点] 开始 TCP 测试 \(nodes.count) 个节点\n")
-            for index in nodes.indices {
-                nodes[index].tcp = "测试中"
-            }
-            nodeTable.reloadData()
-
-            let runner = runner
-            let tags = nodes.map(\.tag)
-            Task.detached { [weak self, runner] in
-                for (index, tag) in tags.enumerated() {
-                    let result: String
-                    do {
-                        result = try runner.tcpTest(config: config, outbound: tag, address: address)
-                    } catch {
-                        let msg = error.localizedDescription
-                        result = msg.contains("超时") ? "超时" : "失败"
-                    }
-                    await MainActor.run { [weak self] in
-                        guard let self, self.nodes.indices.contains(index), self.nodes[index].tag == tag else { return }
-                        self.nodes[index].tcp = result
-                        self.nodeTable.reloadData()
-                    }
-                }
-                await MainActor.run { [weak self] in
-                    self?.appendLog("[节点] TCP 测试完成\n")
-                }
-            }
-        } catch {
-            showError(error)
-        }
-    }
 
     @objc func modeChanged() {
         nodesModeControl.selectedSegment = modeControl.selectedSegment
