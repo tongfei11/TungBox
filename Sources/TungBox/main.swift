@@ -1089,7 +1089,22 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     }
 
     func refreshNodesFromEditor() {
-        nodes = parseNodes(from: editor.string)
+        // Re-parsing the editor rebuilds NodeInfo with delay "未测试", which would
+        // wipe latencies already measured this session (e.g. when switching the
+        // selected node from auto to a manual one). Carry the measured delay over
+        // for nodes that are still the same (matched by tag + server).
+        let previousDelays = Dictionary(
+            nodes.map { ("\($0.tag)\u{1}\($0.server)", $0.delay) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var parsed = parseNodes(from: editor.string)
+        for index in parsed.indices {
+            let key = "\(parsed[index].tag)\u{1}\(parsed[index].server)"
+            if let previous = previousDelays[key], previous != "未测试", previous != "测试中" {
+                parsed[index].delay = previous
+            }
+        }
+        nodes = parsed
         nodeGroups = parseNodeGroups(from: editor.string)
         nodeTable.reloadData()
         populateRuleStrategyPopup()
