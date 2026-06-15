@@ -154,21 +154,30 @@ enum TunServiceManager {
     }
 
     static func activeSingBoxPID(store: Store) -> Int32? {
+        let now = Date()
+        // Throttle to ~once per 2s. Several 2s timers and UI refreshes call this; an
+        // unthrottled fallback (pidfile read + full `ps` scan) on every call spikes
+        // CPU whenever the pid isn't immediately found. Cache "not found" (nil) too.
+        if let cached = cachedTunProcessPID.get(), now.timeIntervalSince(cached.checkedAt) < 2.0 {
+            if let pid = cached.pid {
+                if processIsAlive(pid) { return pid }
+                // A previously-live pid just died (e.g. the daemon is reloading
+                // sing-box for a node switch): re-detect once below so the restarted
+                // process is picked up promptly instead of waiting out the window.
+            } else {
+                return nil
+            }
+        }
+        // Fast path: the daemon's pidfile points at a live process.
         if let text = try? String(contentsOfFile: pidPath).trimmingCharacters(in: .whitespacesAndNewlines),
            let pid = Int32(text),
            processIsAlive(pid) {
-            cachedTunProcessPID.set((pid, Date()))
+            cachedTunProcessPID.set((pid, now))
             return pid
         }
-        if let cached = cachedTunProcessPID.get(),
-           Date().timeIntervalSince(cached.checkedAt) < 2.0 {
-            if let pid = cached.pid, !processIsAlive(pid) {
-                return nil
-            }
-            return cached.pid
-        }
+        // Fall back to a process scan (bounded by the throttle above).
         let pid = activeTunProcessPID()
-        cachedTunProcessPID.set((pid, Date()))
+        cachedTunProcessPID.set((pid, now))
         return pid
     }
 
