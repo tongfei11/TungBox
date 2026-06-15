@@ -14,6 +14,8 @@ extension MainWindowController {
 
         nodesModeControl.items = ["直连/绕过代理", "全局代理", "规则判定"]
         nodesModeControl.selectedSegment = 2
+        nodesModeControl.target = self
+        nodesModeControl.action = #selector(nodesModeChanged)
         nodesModeControl.translatesAutoresizingMaskIntoConstraints = false
         nodesModeControl.heightAnchor.constraint(equalToConstant: 36).isActive = true
 
@@ -103,19 +105,45 @@ extension MainWindowController {
             view.removeFromSuperview()
         }
 
+        func showGroupsHint(_ text: String) {
+            let hint = NSTextField(labelWithString: text)
+            hint.textColor = MD3.onSurfaceVariant
+            hint.font = .systemFont(ofSize: 13)
+            hint.translatesAutoresizingMaskIntoConstraints = false
+            nodeGroupsStack.addArrangedSubview(hint)
+            hint.leadingAnchor.constraint(equalTo: nodeGroupsStack.leadingAnchor).isActive = true
+            hint.trailingAnchor.constraint(equalTo: nodeGroupsStack.trailingAnchor).isActive = true
+        }
+
         guard !nodeGroups.isEmpty else {
-            let empty = NSTextField(labelWithString: "当前配置没有代理分组。刷新订阅后会显示 selector / urltest 分组。")
-            empty.textColor = MD3.onSurfaceVariant
-            empty.font = .systemFont(ofSize: 13)
-            empty.translatesAutoresizingMaskIntoConstraints = false
-            nodeGroupsStack.addArrangedSubview(empty)
-            empty.leadingAnchor.constraint(equalTo: nodeGroupsStack.leadingAnchor).isActive = true
-            empty.trailingAnchor.constraint(equalTo: nodeGroupsStack.trailingAnchor).isActive = true
+            showGroupsHint("当前配置没有代理分组。刷新订阅后会显示 selector / urltest 分组。")
+            return
+        }
+
+        // Show only the groups relevant to the current outbound mode:
+        //   Rule   → 节点选择 + 自动选择   Global → 全局 + 自动选择   Direct → none.
+        let modeValue = selectedMode().value.lowercased()
+        if modeValue == "direct" {
+            showGroupsHint("当前模式不使用代理节点（直连 / 绕过代理）。")
+            return
+        }
+        let isAutoGroup: (NodeGroupInfo) -> Bool = {
+            ["urltest", "url-test", "fallback"].contains($0.type.lowercased())
+        }
+        let visibleGroups = nodeGroups.filter { group in
+            if isAutoGroup(group) { return true }
+            if modeValue == "global" { return group.tag == TungBoxConfig.tagGlobal }
+            return group.tag != TungBoxConfig.tagGlobal
+        }
+        guard !visibleGroups.isEmpty else {
+            showGroupsHint(modeValue == "global"
+                ? "全局分组将在启动服务后生成。"
+                : "当前模式暂无可显示的分组。")
             return
         }
 
         let nodeByTag = Dictionary(uniqueKeysWithValues: nodes.map { ($0.tag, $0) })
-        let sortedGroups = nodeGroups.sorted { g1, g2 in
+        let sortedGroups = visibleGroups.sorted { g1, g2 in
             let t1 = g1.type.lowercased()
             let t2 = g2.type.lowercased()
             if t1 == "selector" && t2 != "selector" { return true }
@@ -174,7 +202,11 @@ extension MainWindowController {
         }
 
         let resolved = resolveActiveOutboundForGroup(groupTag: group.tag, proxiesObj: lastProxiesObj)
-        let displayNode = resolved.isAuto ? "\(resolved.name) (自动)" : resolved.name
+        // For auto groups (urltest/fallback) the picked node is already shown with a
+        // selected highlight in the grid below, so omit the redundant "(自动)" suffix
+        // in the header. Selector groups keep it to show they route through auto.
+        let isAutoGroup = ["urltest", "url-test", "fallback"].contains(group.type.lowercased())
+        let displayNode = (resolved.isAuto && !isAutoGroup) ? "\(resolved.name) (自动)" : resolved.name
         let currentLabel = NSTextField(labelWithString: "➜ \(displayNode)")
         currentLabel.font = .systemFont(ofSize: 12, weight: .medium)
         currentLabel.textColor = MD3.onSurfaceVariant
@@ -258,17 +290,17 @@ extension MainWindowController {
         
         if let autoGroup = nodeGroups.first(where: { $0.tag == nodeTag }),
            ["urltest", "url-test", "fallback"].contains(autoGroup.type.lowercased()) {
-            let resolvedNode = autoGroup.current
-            if !resolvedNode.isEmpty {
-                displayName = "\(resolvedNode) (自动)"
-                if let resolvedNodeInfo = nodes.first(where: { $0.tag == resolvedNode }) {
-                    displayDelay = resolvedNodeInfo.delay
-                }
+            // This member is itself an auto group (e.g. 自动选择). Show its group
+            // name, not the currently-resolved node — the resolved node flickers as
+            // urltest re-picks. The home page still surfaces the concrete pick.
+            displayName = nodeTag
+            if let resolvedNodeInfo = nodes.first(where: { $0.tag == autoGroup.current }) {
+                displayDelay = resolvedNodeInfo.delay
             }
         }
         
         tile.nameLabel.stringValue = displayName
-        tile.subLabel.stringValue = "\(displayType) / udp"
+        tile.subLabel.stringValue = nodeSubLabel(displayType: displayType, node: node)
         tile.delayValue = displayDelay
         
         tile.onClick = { [weak self] in
@@ -287,6 +319,20 @@ extension MainWindowController {
         tile.heightAnchor.constraint(equalToConstant: 42).isActive = true
         
         return tile
+    }
+
+    /// Build an accurate node sub-label: protocol · transport/security · UDP|TCP.
+    /// Replaces the old hardcoded "type / udp" that mislabeled every node as udp.
+    func nodeSubLabel(displayType: String, node: NodeInfo?) -> String {
+        guard let node else { return displayType }
+        var parts = [displayType]
+        if !node.transport.isEmpty {
+            parts.append(node.transport)
+        } else if node.tls {
+            parts.append("tls")
+        }
+        parts.append(node.supportsUDP ? "TCP+UDP" : "仅TCP")
+        return parts.joined(separator: " · ")
     }
 
     func specialNodeType(_ tag: String) -> String {

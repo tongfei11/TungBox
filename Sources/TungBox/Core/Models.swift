@@ -21,6 +21,13 @@ struct NodeInfo {
     var type: String
     var server: String
     var delay: String
+    /// Stream transport (ws / grpc / http / quic / httpupgrade), empty for raw TCP.
+    var transport: String = ""
+    /// Whether the outbound carries UDP. Most proxy protocols relay UDP unless
+    /// `network` is restricted to "tcp"; QUIC-based ones (hysteria2/tuic) are UDP.
+    var supportsUDP: Bool = true
+    /// Whether TLS is enabled on the outbound.
+    var tls: Bool = false
 }
 
 struct NodeGroupInfo {
@@ -94,6 +101,7 @@ enum AppUpdateCheckState {
 enum TungBoxConfig {
     static let tagAuto = "自动选择"
     static let tagManual = "节点选择"
+    static let tagGlobal = "全局"
     static let tagDirect = "direct"
     static let tagBlock = "block"
 
