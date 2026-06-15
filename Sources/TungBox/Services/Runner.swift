@@ -376,7 +376,7 @@ final class Runner: @unchecked Sendable {
         let dnsServerTag = "dns-direct-cn"
         
         // 1. Simplify route: force final to direct, enable auto_detect_interface to bypass virtual TUN interfaces
-        var simplifiedRoute: [String: Any] = [
+        let simplifiedRoute: [String: Any] = [
             "final": "direct",
             "auto_detect_interface": true,
             "default_domain_resolver": dnsServerTag
