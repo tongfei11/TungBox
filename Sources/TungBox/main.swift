@@ -1426,7 +1426,10 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
         let virtualTypes: Set<String> = ["selector", "urltest", "url-test", "direct", "block", "dns"]
         let outbounds = config["outbounds"] as? [[String: Any]] ?? []
-        var resolvedHostCount = 0
+        // Collect the proxy-server hostnames that still need DNS resolution. Literal
+        // IPs are excluded immediately; only real hostnames go to the resolver.
+        var hostsToResolve: [String] = []
+        var seenHosts = Set<String>()
         for outbound in outbounds {
             let type = (outbound["type"] as? String ?? "").lowercased()
             guard !virtualTypes.contains(type),
@@ -1438,12 +1441,17 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 add(cidr)
                 continue
             }
-            guard resolvedHostCount < 16 else { continue }
-            let resolved = resolvePublicIPv4Addresses(for: server)
-            if !resolved.isEmpty {
-                resolvedHostCount += 1
+            if seenHosts.insert(server).inserted {
+                hostsToResolve.append(server)
             }
-            for ip in resolved.prefix(4) {
+        }
+        // Resolve concurrently instead of serially: dscacheutil can block up to
+        // ~1.5s per host, so 16 hostnames serially stalled the TUN switch for many
+        // seconds on the main thread. Concurrency caps the wait at ~one lookup.
+        let cappedHosts = Array(hostsToResolve.prefix(16))
+        let resolvedByHost = resolvePublicIPv4Addresses(forHosts: cappedHosts)
+        for host in cappedHosts {
+            for ip in (resolvedByHost[host] ?? []).prefix(4) {
                 if let cidr = routeExcludeCIDR(for: ip) {
                     add(cidr)
                 }
@@ -1496,7 +1504,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         return "\(trimmed)/32"
     }
 
-    func isPublicIPv4Address(_ value: String) -> Bool {
+    nonisolated func isPublicIPv4Address(_ value: String) -> Bool {
         let parts = value.split(separator: ".", omittingEmptySubsequences: false)
         guard parts.count == 4 else { return false }
         let octets = parts.compactMap { Int($0) }
@@ -1525,7 +1533,20 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         }
     }
 
-    func resolvePublicIPv4Addresses(for host: String) -> [String] {
+    /// Resolve several hostnames concurrently. Returns host -> public IPv4 list.
+    /// nonisolated so it can fan out over background threads without blocking the
+    /// main actor (the TUN switch was stalling on serial dscacheutil lookups).
+    nonisolated func resolvePublicIPv4Addresses(forHosts hosts: [String]) -> [String: [String]] {
+        guard !hosts.isEmpty else { return [:] }
+        let box = LockedValue<[String: [String]]>([:])
+        DispatchQueue.concurrentPerform(iterations: hosts.count) { index in
+            let ips = self.resolvePublicIPv4Addresses(for: hosts[index])
+            box.mutate { $0[hosts[index]] = ips }
+        }
+        return box.get()
+    }
+
+    nonisolated func resolvePublicIPv4Addresses(for host: String) -> [String] {
         let output = runProcessAndGetOutput("/usr/bin/dscacheutil", args: ["-q", "host", "-a", "name", host])
         var addresses: [String] = []
         var seen = Set<String>()
