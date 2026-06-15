@@ -901,6 +901,41 @@ extension MainWindowController {
         try TunServiceManager.enable(store: store, configText: preparedConfig)
         startTunRequestHeartbeat()
         wasTunActiveInThisSession = true
+        verifyTunStartupAsync()
+    }
+
+    /// After requesting TUN, confirm in the background that sing-box actually came
+    /// up (process alive + utun29 carrying its address). The root daemon validates
+    /// the config with `sing-box check`, which passes for some configs that then
+    /// FATAL at `run` (e.g. the dns-detour case) — leaving the UI showing "on"
+    /// while nothing works. If the TUN does not come online in time, surface the
+    /// last error from the daemon log instead of failing silently. Runs entirely
+    /// off the main thread, so it adds no switch latency.
+    func verifyTunStartupAsync() {
+        let store = self.store
+        Task.detached { [weak self] in
+            let deadline = Date().addingTimeInterval(8)
+            var online = false
+            while Date() < deadline {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                let stillWanted = await MainActor.run { [weak self] in self?.isTunEnabled ?? false }
+                guard stillWanted else { return }
+                if TunServiceManager.activeSingBoxPID(store: store) != nil,
+                   TunServiceManager.tunInterfaceIsActive() {
+                    online = true
+                    break
+                }
+            }
+            guard !online else { return }
+            let stillWanted = await MainActor.run { [weak self] in self?.isTunEnabled ?? false }
+            guard stillWanted else { return }
+            let reason = TunServiceManager.lastDaemonErrorLine() ?? "未知原因，请查看 TUN 日志"
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.appendLog("[TUN] 启动校验失败：sing-box 未在 8 秒内就绪。原因：\(reason)\n")
+                self.showToast("TUN 启动失败：\(reason)")
+            }
+        }
     }
 
     func startTunRequestHeartbeat() {

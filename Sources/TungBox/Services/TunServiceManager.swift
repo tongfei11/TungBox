@@ -344,6 +344,26 @@ enum TunServiceManager {
         try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: store.tunRequestHeartbeatURL.path)
     }
 
+    /// The most recent FATAL/error line from the daemon log, with ANSI color
+    /// codes stripped, for surfacing a startup failure reason to the UI.
+    static func lastDaemonErrorLine() -> String? {
+        guard let text = recentLogText(maxBytes: 8192) else { return nil }
+        let stripped = text.replacingOccurrences(
+            of: "\u{1B}\\[[0-9;]*m",
+            with: "",
+            options: .regularExpression
+        )
+        let line = stripped
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .last { line in
+                let lower = line.lowercased()
+                return lower.contains("fatal") || lower.contains("error")
+            }
+        guard let line, !line.isEmpty else { return nil }
+        return String(line.prefix(200))
+    }
+
     static func recentLogText(maxBytes: UInt64) -> String? {
         guard FileManager.default.fileExists(atPath: logPath),
               let handle = try? FileHandle(forReadingFrom: logURL) else {
@@ -380,6 +400,13 @@ enum TunServiceManager {
 
     static func hasNetworkResidue() -> Bool {
         networkResidueDescription() != nil
+    }
+
+    /// Whether utun29 is up and carries the TungBox address — used by the async
+    /// startup health check to confirm the TUN actually came online.
+    static func tunInterfaceIsActive() -> Bool {
+        let ifconfig = runProcessAndGetOutput("/sbin/ifconfig", args: [tunInterfaceName])
+        return ifconfig.contains("inet \(tunIPv4Address)")
     }
 
     static func networkResidueDescription() -> String? {
