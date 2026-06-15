@@ -99,10 +99,22 @@ enum TunServiceManager {
         guard launchDaemonIsLoaded() else {
             return .abnormal("服务未加载，请重新安装 TUN 服务")
         }
-        if let pid = activeSingBoxPID(store: store), Darwin.kill(pid, 0) == 0 {
+        if let pid = activeSingBoxPID(store: store), processIsAlive(pid) {
             return .installedRunning
         }
         return .installedIdle
+    }
+
+    /// Whether a process with the given pid currently exists.
+    ///
+    /// In TUN mode sing-box runs as root while the GUI runs as the normal user,
+    /// so `kill(pid, 0)` returns -1 with errno EPERM — the process *exists*, the
+    /// caller just lacks permission to signal it. Only ESRCH means "no such
+    /// process". Treating EPERM as dead made TUN-mode detection flap between the
+    /// real pid and nil, which broke the home dashboard's live stats.
+    static func processIsAlive(_ pid: Int32) -> Bool {
+        if Darwin.kill(pid, 0) == 0 { return true }
+        return errno == EPERM
     }
 
     private static func hasInstalledArtifacts() -> Bool {
@@ -144,13 +156,13 @@ enum TunServiceManager {
     static func activeSingBoxPID(store: Store) -> Int32? {
         if let text = try? String(contentsOfFile: pidPath).trimmingCharacters(in: .whitespacesAndNewlines),
            let pid = Int32(text),
-           Darwin.kill(pid, 0) == 0 {
+           processIsAlive(pid) {
             cachedTunProcessPID.set((pid, Date()))
             return pid
         }
         if let cached = cachedTunProcessPID.get(),
            Date().timeIntervalSince(cached.checkedAt) < 2.0 {
-            if let pid = cached.pid, Darwin.kill(pid, 0) != 0 {
+            if let pid = cached.pid, !processIsAlive(pid) {
                 return nil
             }
             return cached.pid
@@ -171,7 +183,7 @@ enum TunServiceManager {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             guard let first = trimmed.split(separator: " ").first,
                   let pid = Int32(first),
-                  Darwin.kill(pid, 0) == 0 else {
+                  processIsAlive(pid) else {
                 continue
             }
             return pid
