@@ -82,6 +82,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     let ruleSetGeoIPCNURLField = MD3TextField()
     let ruleSetGeolocationNotCNURLField = MD3TextField()
     let statusChip = MD3StatusChip()
+    let tunStatusChip = MD3StatusChip()
     let subscriptionNameField = MD3TextField()
     let subscriptionURLField = MD3TextField()
     let serviceLabel = NSTextField(labelWithString: "sing-box：检测中")
@@ -123,6 +124,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var logBuffer = ""
     
     let serviceSwitch = MD3Switch()
+    let tunSwitch = MD3Switch()
     let homeSystemProxyRadio = MD3RadioButton(radioButtonWithTitle: "系统代理", target: nil, action: nil)
     let homeTunRadio = MD3RadioButton(radioButtonWithTitle: "TUN 模式", target: nil, action: nil)
     let settingsSystemProxyRadio = MD3RadioButton(radioButtonWithTitle: "系统代理", target: nil, action: nil)
@@ -150,6 +152,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var trayImageView: NSImageView?
     var traySpeedLabel: NSTextField?
     var statsTimer: Timer?
+    var runningStatsMissCount = 0
     var lastProxiesObj: [String: Any]? = nil
     var prevConnections: [ConnectionInfo] = []
     var connectionRefreshTime: Date = .distantPast
@@ -318,59 +321,27 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         if UserDefaults.standard.object(forKey: "systemProxyDefaultEnabled") == nil {
             UserDefaults.standard.set(isSystemProxyDefaultEnabled, forKey: "systemProxyDefaultEnabled")
         }
-
+        // TUN was on last session but its service is gone → drop the flag and clean up.
         if isTunEnabled && !TunServiceManager.hasInstalledServiceFiles {
             isTunEnabled = false
             UserDefaults.standard.set(false, forKey: "tunEnabled")
             try? TunServiceManager.disable(store: store)
             appendLog("[TUN] 检测到 TUN 服务不可用，已关闭 TUN 模式。请到 设置 > TUN 设置 重新安装。\n")
-            return
         }
-
-        guard isSystemProxyDefaultEnabled else {
-            isSystemProxyEnabled = false
-            runner.stopStaleUserProcesses()
-            if TunServiceManager.hasEnableRequest(store: store) {
-                try? TunServiceManager.disable(store: store)
-                appendLog("[启动] 默认开启代理服务未启用，已清理残留 TUN 请求。\n")
-            }
-            return
-        }
-
-        let isTunRunning = TunServiceManager.activeSingBoxPID(store: store) != nil
-        if isTunRunning && !isTunEnabled {
-            try? TunServiceManager.disable(store: store)
-            isSystemProxyEnabled = false
-            appendLog("[启动] 当前接管方式为系统代理，已清理残留 TUN 请求。\n")
-            return
-        }
-
-        if isTunRunning && isTunEnabled {
-            isSystemProxyEnabled = true
-        }
+        runner.stopStaleUserProcesses()
     }
 
     func applyStartupProxyPreference() {
-        guard isSystemProxyDefaultEnabled else {
-            isSystemProxyEnabled = false
-            try? TunServiceManager.disable(store: store)
-            syncProxyPreferenceControls()
-            appendLog("[启动] 默认开启代理服务未启用，本次启动不自动打开代理。\n")
-            return
-        }
-
-        isSystemProxyEnabled = true
+        // Restore the last exit state for both independent switches (persisted on
+        // every toggle). reconcileRuntime converges the runtime to match.
+        isSystemProxyEnabled = UserDefaults.standard.bool(forKey: "systemProxyEnabled")
         syncProxyPreferenceControls()
-
-        if isProxyRuntimeRunning() {
-            reconcileSystemProxyForCurrentMode()
-            appendLog("[启动] 检测到代理已在运行，已同步系统代理状态。\n")
-            refreshStatus()
-            return
+        if isSystemProxyEnabled || isTunEnabled {
+            appendLog("[启动] 恢复状态：系统代理=\(isSystemProxyEnabled ? "开" : "关")，TUN=\(isTunEnabled ? "开" : "关")\n")
+        } else {
+            appendLog("[启动] 本次启动不自动开启代理。\n")
         }
-
-        appendLog("[启动] 按设置自动开启代理服务。\n")
-        startService()
+        reconcileRuntime(reason: "启动")
     }
 
     func scheduleStatusRefreshFromOutput() {
@@ -678,44 +649,54 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         }
         window?.contentView?.refreshSubviews()
     }
+    // The "代理服务" entry now means "turn the system proxy on". The runtime is
+    // converged by reconcileRuntime() based on the two independent switches.
     func startService() {
-        guard ensureCoreAvailableForStart() else {
-            markProxyStartupFailed()
+        isSystemProxyEnabled = true
+        UserDefaults.standard.set(true, forKey: "systemProxyEnabled")
+        reconcileRuntime(reason: "启动代理服务")
+    }
+
+    func markProxyStartupFailed() {
+        isProxyServiceTransitioning = false
+        syncProxyPreferenceControls()
+    }
+
+    /// Single source of truth that converges the runtime to the two independent
+    /// switches `isSystemProxyEnabled` and `isTunEnabled` (they can be on together):
+    ///   • TUN on  → run the root daemon (it also serves 7890); stop the user runner.
+    ///   • TUN off → stop the daemon; if system proxy is on, run the user runner on
+    ///               7890, otherwise stop it.
+    ///   • The OS system-proxy setting points at 7890 whenever system proxy is on,
+    ///     regardless of which sing-box currently serves that port.
+    func reconcileRuntime(reason: String, forceRestart: Bool = false) {
+        isProxyServiceTransitioning = false
+        let port = getMixedProxyPort()
+
+        // Nothing requested → tear everything down.
+        if !isSystemProxyEnabled && !isTunEnabled {
+            if runner.isRunning { runner.stop() }
+            disableTunDaemonIfActive()
+            setSystemProxy(enabled: false, port: port)
+            refreshStatus()
             return
         }
-        guard selectedIndex != nil else {
-            showError(NSError.user("没有检测到有效的配置文件，请先创建或导入配置。"))
-            markProxyStartupFailed()
-            return
-        }
-        guard !nodes.isEmpty else {
-            showError(NSError.user("当前配置中没有检测到可用的节点。请先配置节点或更新订阅。"))
+
+        guard ensureCoreAvailableForStart() else { markProxyStartupFailed(); return }
+        guard selectedIndex != nil, !nodes.isEmpty else {
+            showError(NSError.user("没有可用的配置或节点，请先导入订阅。"))
             markProxyStartupFailed()
             return
         }
 
         do {
-            try applyTunPreference(restartIfRunning: false)
-            try ensureRuntimeAPISupport()
+            guard var config = parseConfigObject(from: editor.string) else {
+                throw NSError.user("当前配置不是有效 JSON")
+            }
+            config = setTunEnabled(isTunEnabled, in: config)
+            config = ensureModeSupport(in: config, mode: selectedMode())
+            editor.string = try renderConfig(config)
             let url = try saveCurrent()
-            
-            var currentNode = "默认"
-            if let config = parseConfigObject(from: editor.string),
-               let outbounds = config["outbounds"] as? [[String: Any]],
-               let selector = outbounds.first(where: { $0["tag"] as? String == "节点选择" }),
-               let defNode = selector["default"] as? String {
-                currentNode = defNode
-            } else if let firstNode = nodes.first {
-                currentNode = firstNode.tag
-            }
-
-            appendLog("[TungBox] 正在启动代理服务...\n")
-            appendLog("[TungBox] 当前连接节点: \(currentNode)\n")
-            if let config = parseConfigObject(from: editor.string),
-               readMode(from: config).caseInsensitiveCompare("Direct") == .orderedSame {
-                appendLog("[警告] 当前出站模式为直连/绕过代理，流量不会走代理。请切换到规则判定或全局代理。\n")
-                showToast("当前为直连/绕过代理模式")
-            }
 
             if isTunEnabled {
                 let tunStatus = TunServiceManager.status(store: store)
@@ -725,25 +706,20 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                     syncProxyPreferenceControls()
                     throw NSError.user("TUN 服务不可用：\(tunStatus.displayText)。请到 设置 > TUN 设置处理。")
                 }
-                runner.stop()
+                if runner.isRunning { runner.stop() }   // daemon owns 7890
                 try enableTunServiceSafely(configText: editor.string)
-                appendLog("[TUN] 已交给 TUN 服务启动 sing-box\n")
-                isProxyServiceTransitioning = false
-                // TUN daemon needs a moment to start sing-box; delay status refresh
-                // so the switch doesn't flip off before the daemon picks up the flag
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                    self?.refreshStatus()
+                appendLog("[TungBox] TUN 已启用（\(reason)）\n")
+            } else {
+                disableTunDaemonIfActive()
+                // forceRestart: a config change (mode / node) needs the already-running
+                // user instance to restart so the new config takes effect.
+                if forceRestart && runner.isRunning { runner.stop() }
+                if !runner.isRunning {
+                    try startNormalProxy(config: url, port: port, reason: reason)
                 }
-                scheduleTunHealthCheck()
-                scheduleConnectionsRefreshAfterStart()
-                return
             }
-            try stopTunBeforeStartingNormalProxy(timeout: 8)
-            let port = getMixedProxyPort()
-            try startNormalProxy(config: url, port: port, reason: "启动代理服务")
-            isProxyServiceTransitioning = false
-            setSystemProxy(enabled: isSystemProxyEnabled && !isTunEnabled, port: port)
-            
+
+            setSystemProxy(enabled: isSystemProxyEnabled, port: port)
             refreshStatus()
             scheduleConnectionsRefreshAfterStart()
         } catch {
@@ -752,16 +728,30 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         }
     }
 
-    func markProxyStartupFailed() {
-        isSystemProxyEnabled = false
-        isProxyServiceTransitioning = false
+    /// Stop the TUN daemon's sing-box if it is (or might be) active, and reclaim the
+    /// network state in the background. Safe to call when TUN is already off.
+    func disableTunDaemonIfActive() {
+        let active = wasTunActiveInThisSession
+            || TunServiceManager.status(store: store).isRunning
+            || TunServiceManager.hasRequestFiles(store: store)
+            || TunServiceManager.hasNetworkResidue()
+        guard active else { return }
         stopTunRequestHeartbeat()
         try? TunServiceManager.disable(store: store)
-        _ = TunServiceManager.waitUntilStopped(store: store, timeout: 3)
-        wasTunActiveInThisSession = false
-        wasProxyActiveInThisSession = false
-        serviceSwitch.isOn = false
-        syncProxyPreferenceControls()
+        appendLog("[TungBox] TUN 标记已关闭\n")
+        let storeCopy = self.store
+        Task.detached { [weak self] in
+            let ok = TunServiceManager.waitUntilStopped(store: storeCopy, timeout: 8)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                if !ok {
+                    let residue = TunServiceManager.networkResidueDescription() ?? "未知残留"
+                    self.appendLog("[警告] TUN 未确认回收：\(residue)。请到设置重新安装 TUN 服务。\n")
+                }
+                self.wasTunActiveInThisSession = false
+                self.refreshStatus()
+            }
+        }
     }
 
     func stopTunBeforeStartingNormalProxy(timeout: TimeInterval) throws {
@@ -784,12 +774,42 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     func startNormalProxy(config: URL, port: Int, reason: String) throws {
         appendLog("[TungBox] 正在检查普通代理配置...\n")
         _ = try runner.check(config: config)
+        // Reap orphaned user-owned sing-box instances (from a previous run or a
+        // desynced state) that still hold the mixed/clash ports and the cache.db
+        // file lock. Without this, the fresh instance fails with
+        // "initialize cache-file: timeout" or a port-in-use bind error and 7890
+        // never comes up. Then wait for both ports to actually free, then start.
+        let clashPort = 9090
+        runner.reapStrayUserProcesses()
+        _ = waitForLocalTCPPortFree(port, timeout: 4.0)
+        _ = waitForLocalTCPPortFree(clashPort, timeout: 4.0)
         try runner.start(config: config, elevated: false)
-        guard waitForLocalTCPPort(port, timeout: 3.0) else {
+        if waitForLocalTCPPort(port, timeout: 6.0) {
+            appendLog("[TungBox] \(reason)完成，本地代理端口 \(port) 已监听\n")
+            return
+        }
+        appendLog("[TungBox] 端口 \(port) 未在首次启动内监听，重试一次...\n")
+        runner.stop()
+        runner.reapStrayUserProcesses()
+        _ = waitForLocalTCPPortFree(port, timeout: 4.0)
+        _ = waitForLocalTCPPortFree(clashPort, timeout: 4.0)
+        try runner.start(config: config, elevated: false)
+        guard waitForLocalTCPPort(port, timeout: 6.0) else {
             runner.stop()
             throw NSError.user("普通代理启动失败：本地端口 \(port) 未开始监听，系统代理没有切换到空端口。请查看日志中的 sing-box 退出原因。")
         }
-        appendLog("[TungBox] \(reason)完成，本地代理端口 \(port) 已监听\n")
+        appendLog("[TungBox] \(reason)完成（重试后），本地代理端口 \(port) 已监听\n")
+    }
+
+    func waitForLocalTCPPortFree(_ port: Int, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if !canConnectLocalTCPPort(port) {
+                return true
+            }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        return !canConnectLocalTCPPort(port)
     }
 
     func waitForLocalTCPPort(_ port: Int, timeout: TimeInterval) -> Bool {
@@ -862,8 +882,12 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                     directOK ? nil : "国内站点不可达",
                     proxyOK ? nil : "代理站点不可达"
                 ].compactMap { $0 }.joined(separator: "，")
-                self.appendLog("[TUN] 连通性检查异常：\(failed)，已保留 TUN 现场用于诊断\n")
-                self.showToast("TUN 连通性异常，已保留现场")
+                // Diagnostic only: this HTTP probe can fail transiently right after
+                // start (DNS cache still settling, node not yet selected) even when
+                // the TUN is healthy, so keep it in the log without alarming the user
+                // with a toast. Hard startup failures are surfaced by
+                // verifyTunStartupAsync (process + interface check) instead.
+                self.appendLog("[TUN] 连通性检查未通过：\(failed)（可能为启动初期的瞬时结果，仅记录用于诊断）\n")
             }
         }
     }
@@ -1152,13 +1176,18 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                         self.appendLog("[节点] \(groupTag) 已选择: \(nodeTag)\n")
                         self.refreshNodesFromEditor()
                         if self.isProxyRuntimeRunning() && !switchedByAPI {
-                            self.runner.stop()
                             if self.isTunEnabled {
-                                try self.enableTunServiceSafely(configText: self.editor.string)
+                                // TUN is already running; hot-reload the config in
+                                // place. A full restart here re-runs start-time
+                                // checks that can throw and tear the live TUN down
+                                // (the reported "switching node killed the proxy").
+                                self.reloadTunConfigInPlace(configText: self.editor.string)
+                                self.appendLog("[节点] 已按新节点热重载 TUN\n")
                             } else {
+                                self.runner.stop()
                                 try self.startNormalProxy(config: url, port: self.getMixedProxyPort(), reason: "节点切换后重启")
+                                self.appendLog("[节点] 服务已按新节点重启\n")
                             }
-                            self.appendLog("[节点] 服务已按新节点重启\n")
                             self.refreshStatus()
                         } else {
                             self.refreshStatus()
@@ -1678,7 +1707,15 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             let tag = (outbound["tag"] as? String) ?? type
             let server = outbound["server"].map { "\($0)" } ?? ""
             let port = outbound["server_port"].map { ":\($0)" } ?? ""
-            return NodeInfo(tag: tag, type: type, server: server + port, delay: "未测试")
+            let transport = (outbound["transport"] as? [String: Any])?["type"] as? String ?? ""
+            let network = (outbound["network"] as? String)?.lowercased() ?? ""
+            // QUIC-based protocols are inherently UDP; others relay UDP unless the
+            // outbound restricts `network` to tcp only.
+            let quicTypes = Set(["hysteria", "hysteria2", "tuic"])
+            let supportsUDP = quicTypes.contains(type.lowercased()) || network != "tcp"
+            let tls = (outbound["tls"] as? [String: Any])?["enabled"] as? Bool ?? false
+            return NodeInfo(tag: tag, type: type, server: server + port, delay: "未测试",
+                            transport: transport, supportsUDP: supportsUDP, tls: tls)
         }
     }
 
@@ -1957,16 +1994,10 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         let output = try runner.check(config: url)
         appendLog("[mode] 已切换到 \(mode.displayName)：\(output)\n")
         refreshModeFromEditor()
+        refreshNodeGroupsView()   // re-filter shown groups for the new mode
 
         if isProxyRuntimeRunning() {
-            runner.stop()
-            if isTunEnabled {
-                try enableTunServiceSafely(configText: editor.string)
-            } else {
-                try startNormalProxy(config: url, port: getMixedProxyPort(), reason: "模式切换后重启")
-            }
-            appendLog("[mode] sing-box 已按新模式重启\n")
-            refreshStatus()
+            reconcileRuntime(reason: "模式切换", forceRestart: true)
         }
     }
 
@@ -2020,9 +2051,15 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         if !outbounds.contains(where: { ($0["tag"] as? String) == "direct" }) {
             outbounds.append(["type": "direct", "tag": "direct"])
         }
+        outbounds = ensureGlobalSelector(in: outbounds)
         config["outbounds"] = outbounds
 
         let proxyTag = preferredProxyTag(from: outbounds)
+        // Global clash mode routes through the dedicated 全局 selector (manual node
+        // pick) when present; otherwise fall back to the main proxy group.
+        let globalTag = outbounds.contains { ($0["tag"] as? String) == TungBoxConfig.tagGlobal }
+            ? TungBoxConfig.tagGlobal
+            : proxyTag
         var route = config["route"] as? [String: Any] ?? [:]
         var rules = route["rules"] as? [[String: Any]] ?? []
         rules.removeAll { isManagedRuntimeRule($0) }
@@ -2030,7 +2067,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             ["action": "sniff"],
             ["protocol": "dns", "action": "hijack-dns"],
             ["clash_mode": "direct", "outbound": "direct"],
-            ["clash_mode": "global", "outbound": proxyTag]
+            ["clash_mode": "global", "outbound": globalTag]
         ] + rules
         route["rules"] = rules
         // sing-box 1.12+: outbound dials that chain to domain-based routing require a
@@ -2057,6 +2094,45 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         }
         guard let clashMode = (rule["clash_mode"] as? String)?.lowercased() else { return false }
         return clashMode == "direct" || clashMode == "global"
+    }
+
+    /// Ensure a dedicated 全局 (Global) selector exists for clash global mode.
+    /// Members are [自动选择] + all subscription nodes, defaulting to 自动选择, so the
+    /// user can either ride auto-select or manually pin a node for global mode. Kept
+    /// in sync (members refreshed) so newly added nodes show up; never reorders the
+    /// existing groups, so `preferredProxyTag` still resolves to 节点选择.
+    func ensureGlobalSelector(in outbounds: [[String: Any]]) -> [[String: Any]] {
+        let virtualTypes: Set<String> = ["selector", "urltest", "url-test", "fallback", "direct", "block", "dns"]
+        let nodeTags = outbounds.compactMap { outbound -> String? in
+            let type = (outbound["type"] as? String ?? "").lowercased()
+            guard !virtualTypes.contains(type), let tag = outbound["tag"] as? String else { return nil }
+            return tag
+        }
+        guard !nodeTags.isEmpty else { return outbounds }
+
+        let hasAuto = outbounds.contains { ($0["tag"] as? String) == TungBoxConfig.tagAuto }
+        let members = (hasAuto ? [TungBoxConfig.tagAuto] : []) + nodeTags
+        let defaultMember = hasAuto ? TungBoxConfig.tagAuto : (nodeTags.first ?? "")
+
+        var outbounds = outbounds
+        if let index = outbounds.firstIndex(where: { ($0["tag"] as? String) == TungBoxConfig.tagGlobal }) {
+            // Refresh members but preserve the user's current manual pick.
+            outbounds[index]["outbounds"] = members
+            if let current = outbounds[index]["default"] as? String, members.contains(current) {
+                outbounds[index]["default"] = current
+            } else {
+                outbounds[index]["default"] = defaultMember
+            }
+        } else {
+            outbounds.append([
+                "type": "selector",
+                "tag": TungBoxConfig.tagGlobal,
+                "outbounds": members,
+                "default": defaultMember,
+                "interrupt_exist_connections": true
+            ])
+        }
+        return outbounds
     }
 
     func preferredProxyTag(from outbounds: [[String: Any]]) -> String {
@@ -2203,7 +2279,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     func refreshStatus() {
         let isRunning = isProxyRuntimeRunning()
         let isActiveOrRequested = isProxyServiceActiveOrRequested()
-        statusChip.isActive = isActiveOrRequested
+        statusChip.isActive = isSystemProxyEnabled       // 系统代理卡片
+        tunStatusChip.isActive = isTunEnabled            // TUN 卡片
         syncProxyPreferenceControls()
         refreshTrayIcon()
         refreshHomeFeatureStatus()
@@ -2241,8 +2318,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
     func startStatsTimer() {
         statsTimer?.invalidate()
-        totalUploadBytes = 0
-        totalDownloadBytes = 0
+        runningStatsMissCount = 0
         updateTrafficLabels()
         statsTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
@@ -2257,8 +2333,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         updateConnectionsCard(value: "0", detail: "服务未运行")
         uploadValueLabel.stringValue = "0 B/s"
         downloadValueLabel.stringValue = "0 B/s"
-        trafficStatsValueLabel.stringValue = "0 B"
-        trafficStatsDetailLabel.stringValue = "上传: 0 B   下载: 0 B"
+        // 流量统计是按天累计的历史值（代理流量），停止/切换时不应清零——显示累计值。
+        updateTrafficLabels()
     }
 
     

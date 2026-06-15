@@ -250,28 +250,15 @@ extension MainWindowController {
     }
 
     @objc func toggleProxyServiceFromTray() {
-        if !isProxyServiceActiveOrRequested() {
-            isSystemProxyEnabled = true
-            isProxyServiceTransitioning = true
-            syncProxyPreferenceControls()
-            refreshTrayIcon()
-            appendLog("[托盘] 正在启动代理服务\n")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-                guard let self else { return }
-                self.startService()
-                self.appendLog("[托盘] 启动代理服务\n")
-            }
-        } else {
-            isSystemProxyEnabled = false
-            isProxyServiceTransitioning = false
-            syncProxyPreferenceControls()
-            refreshTrayIcon()
-            appendLog("[托盘] 正在关闭代理服务\n")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-                guard let self else { return }
-                self.stopService()
-                self.appendLog("[托盘] 已关闭代理服务\n")
-            }
+        // Independent system-proxy toggle (does not touch TUN).
+        isSystemProxyEnabled.toggle()
+        UserDefaults.standard.set(isSystemProxyEnabled, forKey: "systemProxyEnabled")
+        if isSystemProxyEnabled { isProxyServiceTransitioning = true }
+        syncProxyPreferenceControls()
+        refreshTrayIcon()
+        appendLog("[托盘] 系统代理已\(isSystemProxyEnabled ? "开启" : "关闭")\n")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.reconcileRuntime(reason: "托盘系统代理")
         }
     }
 

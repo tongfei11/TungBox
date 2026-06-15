@@ -120,22 +120,6 @@ extension MainWindowController {
 
         let openFolderButton = settingsButton(title: "打开配置目录", action: #selector(openFolderClicked), style: .outlined)
 
-        settingsSystemProxyCheckbox.title = "默认开启代理服务"
-        settingsSystemProxyCheckbox.target = self
-        settingsSystemProxyCheckbox.action = #selector(settingsSystemProxyChanged(_:))
-        settingsSystemProxyCheckbox.state = isSystemProxyDefaultEnabled ? .on : .off
-
-        configureCaptureRadio(settingsSystemProxyRadio, tag: 0, action: #selector(settingsCaptureModeChanged(_:)))
-        configureCaptureRadio(settingsTunRadio, tag: 1, action: #selector(settingsCaptureModeChanged(_:)))
-        settingsSystemProxyRadio.state = isTunEnabled ? .off : .on
-        settingsTunRadio.state = isTunEnabled ? .on : .off
-        let defaultCaptureLabel = settingsLabel("默认接管方式")
-        let defaultCaptureStack = NSStackView(views: [settingsSystemProxyRadio, settingsTunRadio])
-        defaultCaptureStack.orientation = .vertical
-        defaultCaptureStack.spacing = 6
-        defaultCaptureStack.alignment = .leading
-        defaultCaptureStack.translatesAutoresizingMaskIntoConstraints = false
-
         settingsLaunchAtLoginCheckbox.title = "开机自启动"
         settingsLaunchAtLoginCheckbox.target = self
         settingsLaunchAtLoginCheckbox.action = #selector(settingsLaunchAtLoginChanged(_:))
@@ -147,7 +131,7 @@ extension MainWindowController {
         settingsStartSilentlyCheckbox.state = UserDefaults.standard.bool(forKey: "startSilently") ? .on : .off
 
 
-        let proxyHint = NSTextField(labelWithString: "代理服务开启后会按接管方式启动；系统代理和 TUN 模式互斥。")
+        let proxyHint = NSTextField(labelWithString: "系统代理与 TUN 模式是两个独立开关，可同时开启。开机自启动时会自动恢复上次退出前的开关状态。")
         proxyHint.textColor = MD3.onSurfaceVariant
         proxyHint.font = .systemFont(ofSize: 13)
         proxyHint.lineBreakMode = .byWordWrapping
@@ -181,9 +165,6 @@ extension MainWindowController {
 
         return settingsPageStack([
             settingsPanel(title: "代理启动配置", views: [
-                settingsSystemProxyCheckbox,
-                defaultCaptureLabel,
-                defaultCaptureStack,
                 proxyHint
             ]),
             settingsPanel(title: "软件启动配置", views: [
@@ -758,9 +739,7 @@ extension MainWindowController {
             completion: { [weak self] in
                 guard let self else { return }
                 if shouldRestoreTun {
-                    try self.applyTunPreference(restartIfRunning: false)
-                    try self.enableTunServiceSafely(configText: self.editor.string)
-                    self.scheduleTunHealthCheck()
+                    self.reconcileRuntime(reason: "重装后恢复 TUN")
                 }
                 self.checkSingBoxInstall(showAlert: false)
                 self.syncProxyPreferenceControls()
@@ -769,15 +748,8 @@ extension MainWindowController {
     }
 
     @objc func reloadTunServiceClicked() {
-        do {
-            if isTunEnabled {
-                try applyTunPreference(restartIfRunning: false)
-                try enableTunServiceSafely(configText: editor.string)
-            }
-        } catch {
-            tunServiceLogLabel.stringValue = "最近状态：重载失败\n\(error.localizedDescription)"
-            showError(error)
-            return
+        if isTunEnabled {
+            reconcileRuntime(reason: "重载 TUN")
         }
 
         runTunServiceOperation(
@@ -852,12 +824,9 @@ extension MainWindowController {
     }
 
     func syncProxyPreferenceControls() {
-        serviceSwitch.isOn = isProxyServiceActiveOrRequested()
-        homeSystemProxyRadio.state = isTunEnabled ? .off : .on
-        homeTunRadio.state = isTunEnabled ? .on : .off
-        settingsSystemProxyCheckbox.state = isSystemProxyDefaultEnabled ? .on : .off
-        settingsSystemProxyRadio.state = isTunEnabled ? .off : .on
-        settingsTunRadio.state = isTunEnabled ? .on : .off
+        // Two independent switches (system proxy + TUN, can both be on).
+        serviceSwitch.isOn = isSystemProxyEnabled
+        tunSwitch.isOn = isTunEnabled
         settingsLaunchAtLoginCheckbox.state = isLaunchAtLoginEnabled ? .on : .off
         settingsStartSilentlyCheckbox.state = UserDefaults.standard.bool(forKey: "startSilently") ? .on : .off
         if trayIconStylePopup.numberOfItems > TrayIconStyle.current.rawValue {
@@ -892,7 +861,9 @@ extension MainWindowController {
     func enableTunServiceSafely(configText: String) throws {
         try ensureTunRouteIsSafeToStart()
         let preparedConfig = try preparedTunConfigText(from: configText)
-        setSystemProxy(enabled: false, port: getMixedProxyPort())
+        // Note: the OS system-proxy setting is managed independently by
+        // reconcileRuntime() now (system proxy and TUN can be enabled together), so
+        // enabling TUN must not force the system proxy off here.
 
         // 调试：保存 tun-request 副本
         let debugRequestPath = NSHomeDirectory() + "/Library/Application Support/TungBox/tun-request-debug.json"
@@ -902,6 +873,32 @@ extension MainWindowController {
         startTunRequestHeartbeat()
         wasTunActiveInThisSession = true
         verifyTunStartupAsync()
+    }
+
+    /// Reload the TUN config in place while it is already running (e.g. a node
+    /// switch where the clash API hot-switch failed). Rewrites the request config
+    /// so the daemon hot-reloads, but deliberately skips the start-time route
+    /// safety check (the TUN is already up and safe) and never reverts UI state or
+    /// rethrows, so a transient failure can't tear the running TUN down.
+    func reloadTunConfigInPlace(configText: String) {
+        do {
+            let prepared = try preparedTunConfigText(from: configText)
+            try prepared.write(to: store.tunRequestConfigURL, atomically: true, encoding: .utf8)
+            if !FileManager.default.fileExists(atPath: store.tunRequestFlagURL.path) {
+                FileManager.default.createFile(atPath: store.tunRequestFlagURL.path, contents: Data())
+            }
+            TunServiceManager.refreshRequestHeartbeat(store: store)
+            startTunRequestHeartbeat()
+            appendLog("[节点] 已请求 TUN 热重载新节点配置\n")
+            // The daemon restarts sing-box for the reload, which restores the
+            // cached selection and can override the new default; re-assert it once
+            // the reloaded process should be up.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+                self?.reconcileSelectorSelectionsToConfig()
+            }
+        } catch {
+            appendLog("[节点] TUN 配置热重载失败（保持当前运行不变）：\(error.localizedDescription)\n")
+        }
     }
 
     /// After requesting TUN, confirm in the background that sing-box actually came
@@ -926,7 +923,15 @@ extension MainWindowController {
                     break
                 }
             }
-            guard !online else { return }
+            if online {
+                // sing-box restores the last selector selection from cache.db,
+                // which can override the config's `default` (e.g. a manual node
+                // reverting to auto after switching into TUN). Re-assert the
+                // config's selection via the clash API so manual stays manual and
+                // auto stays auto.
+                await MainActor.run { [weak self] in self?.reconcileSelectorSelectionsToConfig() }
+                return
+            }
             let stillWanted = await MainActor.run { [weak self] in self?.isTunEnabled ?? false }
             guard stillWanted else { return }
             let reason = TunServiceManager.lastDaemonErrorLine() ?? "未知原因，请查看 TUN 日志"
@@ -934,6 +939,28 @@ extension MainWindowController {
                 guard let self else { return }
                 self.appendLog("[TUN] 启动校验失败：sing-box 未在 8 秒内就绪。原因：\(reason)\n")
                 self.showToast("TUN 启动失败：\(reason)")
+            }
+        }
+    }
+
+    /// Re-assert each selector group's configured `default` selection via the clash
+    /// API. sing-box's cache_file remembers the previously selected outbound and
+    /// restores it on (re)start, which otherwise overrides the user's last explicit
+    /// choice when sing-box is restarted (e.g. switching capture mode into TUN).
+    func reconcileSelectorSelectionsToConfig() {
+        guard let config = parseConfigObject(from: editor.string),
+              let outbounds = config["outbounds"] as? [[String: Any]] else { return }
+        var targets: [(group: String, node: String)] = []
+        for outbound in outbounds {
+            guard (outbound["type"] as? String)?.lowercased() == "selector",
+                  let tag = outbound["tag"] as? String,
+                  let def = (outbound["default"] as? String), !def.isEmpty else { continue }
+            targets.append((tag, def))
+        }
+        guard !targets.isEmpty else { return }
+        Task {
+            for target in targets {
+                try? await ClashAPI.selectProxy(group: target.group, node: target.node)
             }
         }
     }
