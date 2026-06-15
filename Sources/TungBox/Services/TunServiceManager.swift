@@ -57,6 +57,7 @@ enum TunServiceManager {
     static let configPath = "\(installDirectoryPath)/tun-daemon.json"
     static let cachePath = "\(installDirectoryPath)/cache.db"
     static let flagPath = "\(installDirectoryPath)/tun-enabled"
+    static let dnsBackupPath = "\(installDirectoryPath)/tun-dns-backup"
     static let pidPath = "\(installDirectoryPath)/tun-service.pid"
     static let logPath = "\(installDirectoryPath)/tun-service.log"
     static let stdoutPath = "\(installDirectoryPath)/tun-service.out.log"
@@ -98,10 +99,22 @@ enum TunServiceManager {
         guard launchDaemonIsLoaded() else {
             return .abnormal("服务未加载，请重新安装 TUN 服务")
         }
-        if let pid = activeSingBoxPID(store: store), Darwin.kill(pid, 0) == 0 {
+        if let pid = activeSingBoxPID(store: store), processIsAlive(pid) {
             return .installedRunning
         }
         return .installedIdle
+    }
+
+    /// Whether a process with the given pid currently exists.
+    ///
+    /// In TUN mode sing-box runs as root while the GUI runs as the normal user,
+    /// so `kill(pid, 0)` returns -1 with errno EPERM — the process *exists*, the
+    /// caller just lacks permission to signal it. Only ESRCH means "no such
+    /// process". Treating EPERM as dead made TUN-mode detection flap between the
+    /// real pid and nil, which broke the home dashboard's live stats.
+    static func processIsAlive(_ pid: Int32) -> Bool {
+        if Darwin.kill(pid, 0) == 0 { return true }
+        return errno == EPERM
     }
 
     private static func hasInstalledArtifacts() -> Bool {
@@ -141,21 +154,30 @@ enum TunServiceManager {
     }
 
     static func activeSingBoxPID(store: Store) -> Int32? {
-        if let text = try? String(contentsOfFile: pidPath).trimmingCharacters(in: .whitespacesAndNewlines),
-           let pid = Int32(text),
-           Darwin.kill(pid, 0) == 0 {
-            cachedTunProcessPID.set((pid, Date()))
-            return pid
-        }
-        if let cached = cachedTunProcessPID.get(),
-           Date().timeIntervalSince(cached.checkedAt) < 2.0 {
-            if let pid = cached.pid, Darwin.kill(pid, 0) != 0 {
+        let now = Date()
+        // Throttle to ~once per 2s. Several 2s timers and UI refreshes call this; an
+        // unthrottled fallback (pidfile read + full `ps` scan) on every call spikes
+        // CPU whenever the pid isn't immediately found. Cache "not found" (nil) too.
+        if let cached = cachedTunProcessPID.get(), now.timeIntervalSince(cached.checkedAt) < 2.0 {
+            if let pid = cached.pid {
+                if processIsAlive(pid) { return pid }
+                // A previously-live pid just died (e.g. the daemon is reloading
+                // sing-box for a node switch): re-detect once below so the restarted
+                // process is picked up promptly instead of waiting out the window.
+            } else {
                 return nil
             }
-            return cached.pid
         }
+        // Fast path: the daemon's pidfile points at a live process.
+        if let text = try? String(contentsOfFile: pidPath).trimmingCharacters(in: .whitespacesAndNewlines),
+           let pid = Int32(text),
+           processIsAlive(pid) {
+            cachedTunProcessPID.set((pid, now))
+            return pid
+        }
+        // Fall back to a process scan (bounded by the throttle above).
         let pid = activeTunProcessPID()
-        cachedTunProcessPID.set((pid, Date()))
+        cachedTunProcessPID.set((pid, now))
         return pid
     }
 
@@ -170,7 +192,7 @@ enum TunServiceManager {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             guard let first = trimmed.split(separator: " ").first,
                   let pid = Int32(first),
-                  Darwin.kill(pid, 0) == 0 else {
+                  processIsAlive(pid) else {
                 continue
             }
             return pid
@@ -246,6 +268,9 @@ enum TunServiceManager {
         if result.status != 0 {
             throw NSError.user(result.output.isEmpty ? "安装 TUN 服务失败" : result.output)
         }
+        guard waitUntilServiceUsable(store: store, timeout: 3) else {
+            throw NSError.user("TUN 服务已写入，但 launchd 尚未确认可用。请稍等几秒后重试。")
+        }
     }
 
     static func uninstall(store: Store) throws {
@@ -255,12 +280,13 @@ enum TunServiceManager {
         let command = [
             "rm -f \(shellQuote(flagPath))",
             stopChildCommand(),
+            restoreDnsCommand(),
             "launchctl disable system/\(label) >/dev/null 2>&1 || true",
             "launchctl bootout system/\(label) >/dev/null 2>&1 || true",
             "pkill -TERM -f \(shellQuote(scriptPath)) >/dev/null 2>&1 || true",
             "sleep 0.3",
             "pkill -KILL -f \(shellQuote(scriptPath)) >/dev/null 2>&1 || true",
-            "rm -f \(shellQuote(plistPath)) \(shellQuote(scriptPath)) \(shellQuote(corePath)) \(shellQuote(configPath)) \(shellQuote(flagPath)) \(shellQuote(pidPath)) \(shellQuote(logPath)) \(shellQuote(stdoutPath)) \(shellQuote(stderrPath)) \(shellQuote(legacyStdoutPath)) \(shellQuote(legacyStderrPath))",
+            "rm -f \(shellQuote(plistPath)) \(shellQuote(scriptPath)) \(shellQuote(corePath)) \(shellQuote(configPath)) \(shellQuote(flagPath)) \(shellQuote(dnsBackupPath)) \(shellQuote(pidPath)) \(shellQuote(logPath)) \(shellQuote(stdoutPath)) \(shellQuote(stderrPath)) \(shellQuote(legacyStdoutPath)) \(shellQuote(legacyStderrPath))",
             "rmdir \(shellQuote(installDirectoryPath)) >/dev/null 2>&1 || true"
         ].joined(separator: "; ")
         let result = runAppleScript(command)
@@ -281,6 +307,20 @@ enum TunServiceManager {
         if result.status != 0 {
             throw NSError.user(result.output.isEmpty ? "重载 TUN 服务失败" : result.output)
         }
+        guard waitUntilServiceUsable(store: store, timeout: 3) else {
+            throw NSError.user("TUN 服务已重载，但 launchd 尚未确认可用。请稍等几秒后重试。")
+        }
+    }
+
+    static func waitUntilServiceUsable(store: Store, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if status(store: store).isUsable {
+                return true
+            }
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        return status(store: store).isUsable
     }
 
     static func enable(store: Store, configText: String) throws {
@@ -311,6 +351,26 @@ enum TunServiceManager {
             FileManager.default.createFile(atPath: store.tunRequestHeartbeatURL.path, contents: Data())
         }
         try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: store.tunRequestHeartbeatURL.path)
+    }
+
+    /// The most recent FATAL/error line from the daemon log, with ANSI color
+    /// codes stripped, for surfacing a startup failure reason to the UI.
+    static func lastDaemonErrorLine() -> String? {
+        guard let text = recentLogText(maxBytes: 8192) else { return nil }
+        let stripped = text.replacingOccurrences(
+            of: "\u{1B}\\[[0-9;]*m",
+            with: "",
+            options: .regularExpression
+        )
+        let line = stripped
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .last { line in
+                let lower = line.lowercased()
+                return lower.contains("fatal") || lower.contains("error")
+            }
+        guard let line, !line.isEmpty else { return nil }
+        return String(line.prefix(200))
     }
 
     static func recentLogText(maxBytes: UInt64) -> String? {
@@ -351,6 +411,13 @@ enum TunServiceManager {
         networkResidueDescription() != nil
     }
 
+    /// Whether utun29 is up and carries the TungBox address — used by the async
+    /// startup health check to confirm the TUN actually came online.
+    static func tunInterfaceIsActive() -> Bool {
+        let ifconfig = runProcessAndGetOutput("/sbin/ifconfig", args: [tunInterfaceName])
+        return ifconfig.contains("inet \(tunIPv4Address)")
+    }
+
     static func networkResidueDescription() -> String? {
         let interface = tunInterfaceName
         let ifconfig = runProcessAndGetOutput("/sbin/ifconfig", args: [interface])
@@ -369,6 +436,13 @@ enum TunServiceManager {
         }
         if routes.contains(legacyTunIPv4Address) {
             return "路由表仍包含 \(legacyTunIPv4Address)"
+        }
+        let dns = runProcessAndGetOutput("/usr/sbin/scutil", args: ["--dns"])
+        if dns.contains(" : 198.18.0.2") {
+            return "DNS 解析器仍包含 198.18.0.2"
+        }
+        if dns.contains(" : 172.19.0.2") {
+            return "DNS 解析器仍包含 172.19.0.2"
         }
         return nil
     }
@@ -506,9 +580,12 @@ enum TunServiceManager {
         REQUEST_HEARTBEAT=\(shellQuote(store.tunRequestHeartbeatURL.path))
         PIDFILE=\(shellQuote(pidPath))
         LOG=\(shellQuote(logPath))
+        DNS_BACKUP=\(shellQuote(dnsBackupPath))
+        TUN_DNS_ADDR="198.18.0.2"
         CHILD=""
-        SCRIPT_VERSION="2026-06-tun-safe-stop-v17"
+        SCRIPT_VERSION="2026-06-tun-dns-takeover-v21"
         REQUEST_MAX_AGE=30
+        CLEANING_UP=0
 
         is_safe_root_file() {
           path="$1"
@@ -604,6 +681,114 @@ enum TunServiceManager {
           return 1
         }
 
+        has_tungbox_dns_residue() {
+          /usr/sbin/scutil --dns 2>/dev/null | grep -Eq 'nameserver\\[[0-9]+\\] : (198\\.18\\.0\\.2|172\\.19\\.0\\.2)'
+        }
+
+        clean_dns() {
+          i=0
+          while [ "$i" -lt 10 ]; do
+            /usr/bin/dscacheutil -flushcache >/dev/null 2>&1 || true
+            /usr/bin/killall -HUP mDNSResponder >/dev/null 2>&1 || true
+            if ! has_tungbox_dns_residue; then
+              echo "$(date '+%Y-%m-%d %H:%M:%S') TUN DNS cleanup verified" >> "$LOG"
+              return 0
+            fi
+            sleep 0.5
+            i=$((i + 1))
+          done
+          if has_tungbox_dns_residue; then
+            echo "$(date '+%Y-%m-%d %H:%M:%S') TUN DNS resolver still present after cleanup: 198.18.0.2/172.19.0.2" >> "$LOG"
+            return 1
+          else
+            echo "$(date '+%Y-%m-%d %H:%M:%S') TUN DNS cleanup verified" >> "$LOG"
+            return 0
+          fi
+        }
+
+        # Map a BSD device (e.g. en5) to its macOS network service name so we can
+        # drive networksetup. Prints the service name, empty if none matched.
+        dns_service_for_device() {
+          dev="$1"
+          [ -z "$dev" ] && return 1
+          /usr/sbin/networksetup -listnetworkserviceorder 2>/dev/null | awk -v dev="$dev" '
+            /^\\([0-9]+\\) / { name=$0; sub(/^\\([0-9]+\\) /, "", name) }
+            index($0, "Device: " dev ")") { print name; exit }
+          '
+        }
+
+        # Force the active physical service to resolve through the TUN DNS
+        # (sing-box answers 198.18.0.2 via hijack-dns with an ipv4_only, un-poisoned
+        # result). Without this, macOS mDNSResponder sends queries bound to the
+        # physical interface, bypassing utun29, and the GFW poisons google/youtube/
+        # facebook (and AAAA -> 2001::1). The original DNS is backed up so it can be
+        # restored on every teardown path. This is the macOS approach used by Surge.
+        apply_tun_dns() {
+          dev="$(active_physical_interface)"
+          svc="$(dns_service_for_device "$dev")"
+          [ -z "$svc" ] && { echo "$(date '+%Y-%m-%d %H:%M:%S') apply_tun_dns: no service for '$dev'" >> "$LOG"; return 0; }
+          cur="$(/usr/sbin/networksetup -getdnsservers "$svc" 2>/dev/null)"
+          case "$cur" in *"$TUN_DNS_ADDR"*) return 0 ;; esac
+          if [ ! -f "$DNS_BACKUP" ]; then
+            printf '%s\\n%s\\n' "$svc" "$cur" > "$DNS_BACKUP"
+            chown root:wheel "$DNS_BACKUP" 2>/dev/null || true
+            chmod 600 "$DNS_BACKUP" 2>/dev/null || true
+          fi
+          /usr/sbin/networksetup -setdnsservers "$svc" "$TUN_DNS_ADDR" >/dev/null 2>&1 || true
+          echo "$(date '+%Y-%m-%d %H:%M:%S') set $svc DNS -> $TUN_DNS_ADDR" >> "$LOG"
+        }
+
+        # Restore whatever DNS the service had before apply_tun_dns. Also scans all
+        # services as a safety net so the TUN DNS can never be left behind (the user
+        # would otherwise lose all name resolution once TUN is off).
+        restore_tun_dns() {
+          if [ -f "$DNS_BACKUP" ]; then
+            svc="$(sed -n '1p' "$DNS_BACKUP" 2>/dev/null)"
+            orig="$(sed -n '2,$p' "$DNS_BACKUP" 2>/dev/null)"
+            if [ -n "$svc" ]; then
+              case "$orig" in
+                ''|*"aren't any"*|*"There aren"*)
+                  /usr/sbin/networksetup -setdnsservers "$svc" Empty >/dev/null 2>&1 || true ;;
+                *)
+                  /usr/sbin/networksetup -setdnsservers "$svc" $orig >/dev/null 2>&1 || true ;;
+              esac
+              echo "$(date '+%Y-%m-%d %H:%M:%S') restored $svc DNS" >> "$LOG"
+            fi
+            rm -f "$DNS_BACKUP"
+          fi
+          # Safety net: clear the TUN DNS from any service that still carries it.
+          /usr/sbin/networksetup -listallnetworkservices 2>/dev/null | tail -n +2 | while IFS= read -r svc; do
+            case "$svc" in \\**) continue ;; esac
+            d="$(/usr/sbin/networksetup -getdnsservers "$svc" 2>/dev/null)"
+            if [ "$d" = "$TUN_DNS_ADDR" ]; then
+              /usr/sbin/networksetup -setdnsservers "$svc" Empty >/dev/null 2>&1 || true
+              echo "$(date '+%Y-%m-%d %H:%M:%S') cleared leftover TUN DNS on $svc" >> "$LOG"
+            fi
+          done
+        }
+
+        flush_dns_after_tun_up() {
+          # Wait for utun29 to appear, point the system resolver at the TUN DNS, then
+          # evict DNS entries cached before TUN became active. GFW-poisoned answers
+          # carry long TTLs, so names looked up before enabling TUN (e.g.
+          # www.google.com -> a wrong IP) keep resolving to the stale poisoned
+          # address; dscacheutil -flushcache alone does not drop the mDNSResponder
+          # unicast cache, so we also signal mDNSResponder (needs root, which we have).
+          # This mirrors what Surge / Clash Verge do right after the tunnel is up.
+          i=0
+          while [ "$i" -lt 20 ]; do
+            if has_tungbox_tun_interface; then
+              break
+            fi
+            sleep 0.25
+            i=$((i + 1))
+          done
+          apply_tun_dns
+          /usr/bin/dscacheutil -flushcache >/dev/null 2>&1 || true
+          /usr/bin/killall -HUP mDNSResponder >/dev/null 2>&1 || true
+          echo "$(date '+%Y-%m-%d %H:%M:%S') flushed DNS cache after TUN up" >> "$LOG"
+        }
+
         sync_requested_config() {
           has_request || return 1
           if ! env ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER=true "$CORE" check -c "$REQUEST_CONFIG" >> "$LOG" 2>&1; then
@@ -621,6 +806,10 @@ enum TunServiceManager {
 
         clean_routes() {
           echo "$(date '+%Y-%m-%d %H:%M:%S') cleaning up TUN routes" >> "$LOG"
+          # Restore the system DNS first: clean_routes runs on every teardown path
+          # (startup, config reload, sing-box exit, daemon shutdown), so centralizing
+          # the restore here guarantees the TUN DNS is never left behind.
+          restore_tun_dns
           cleaned=0
           for ifname in $(/sbin/ifconfig -l 2>/dev/null | tr ' ' '\\n' | grep '^utun'); do
             is_tungbox_tun_interface "$ifname" || continue
@@ -636,13 +825,11 @@ enum TunServiceManager {
             /sbin/ifconfig "$ifname" down 2>/dev/null || true
           done
 
-          [ "$cleaned" -eq 1 ] || {
+          if [ "$cleaned" -ne 1 ]; then
             echo "$(date '+%Y-%m-%d %H:%M:%S') route cleanup skipped: no TungBox TUN interface" >> "$LOG"
-            return 0
-          }
+          fi
 
-          /usr/bin/dscacheutil -flushcache >/dev/null 2>&1 || true
-          /usr/bin/killall -HUP mDNSResponder >/dev/null 2>&1 || true
+          clean_dns || true
           echo "$(date '+%Y-%m-%d %H:%M:%S') route cleanup done" >> "$LOG"
         }
 
@@ -687,11 +874,14 @@ enum TunServiceManager {
         }
 
         cleanup() {
+          [ "$CLEANING_UP" = "1" ] && exit 0
+          CLEANING_UP=1
+          trap - EXIT TERM INT HUP QUIT
           shutdown_child
           /usr/bin/pkill -KILL -f "$CORE" >/dev/null 2>&1 || true
           exit 0
         }
-        trap cleanup TERM INT
+        trap cleanup EXIT TERM INT HUP QUIT
 
         # Startup cleanup: ensure no orphaned processes or routes survive daemon restart
         if [ -f "$PIDFILE" ]; then
@@ -709,7 +899,7 @@ enum TunServiceManager {
               echo "$(date '+%Y-%m-%d %H:%M:%S') removing stale TUN request" >> "$LOG"
               rm -f "$REQUEST_FLAG" "$REQUEST_CONFIG" "$REQUEST_HEARTBEAT"
             fi
-            if [ -f "$FLAG" ] || [ -f "$PIDFILE" ] || has_tungbox_tun_interface; then
+            if [ -f "$FLAG" ] || [ -f "$PIDFILE" ] || has_tungbox_tun_interface || has_tungbox_dns_residue; then
               shutdown_child
             fi
             rm -f "$FLAG"
@@ -728,6 +918,7 @@ enum TunServiceManager {
             env ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER=true "$CORE" run -c "$CONFIG" >> "$LOG" 2>&1 &
             CHILD=$!
             echo "$CHILD" > "$PIDFILE"
+            flush_dns_after_tun_up
             while kill -0 "$CHILD" >/dev/null 2>&1; do
               if ! has_request; then
                 echo "$(date '+%Y-%m-%d %H:%M:%S') stopping sing-box TUN" >> "$LOG"
@@ -747,6 +938,7 @@ enum TunServiceManager {
             if [ -n "$CHILD" ]; then
               wait "$CHILD" >/dev/null 2>&1
               child_status="$?"
+              clean_routes
               if [ "$child_status" -ne 0 ] && has_request; then
                 echo "$(date '+%Y-%m-%d %H:%M:%S') sing-box TUN exited with status $child_status, disabling current request" >> "$LOG"
                 rm -f "$FLAG" "$PIDFILE" "$REQUEST_FLAG" "$REQUEST_CONFIG" "$REQUEST_HEARTBEAT"
@@ -811,7 +1003,14 @@ enum TunServiceManager {
             && script.contains("clean_routes")
             && script.contains("wait_for_pid_exit")
             && script.contains("stop_pid")
-            && script.contains("2026-06-tun-safe-stop-v17")
+            && script.contains("2026-06-tun-dns-takeover-v21")
+            && script.contains("clean_dns")
+            && script.contains("flush_dns_after_tun_up")
+            && script.contains("apply_tun_dns")
+            && script.contains("restore_tun_dns")
+            && script.contains("has_tungbox_dns_residue")
+            && script.contains("child_status=\"$?\"")
+            && script.contains("trap cleanup EXIT TERM INT HUP QUIT")
             && script.contains("1.0.0.0/8 2.0.0.0/7")
             && script.contains("ifconfig \"$ifname\" down")
             && !script.contains("networksetup -renewdhcp")
@@ -824,6 +1023,16 @@ enum TunServiceManager {
         if [ -f \(shellQuote(pidPath)) ]; then PID=$(cat \(shellQuote(pidPath)) 2>/dev/null || true); case "$PID" in ''|*[!0-9]*) ;; *) kill -TERM "$PID" >/dev/null 2>&1 || true; i=0; while kill -0 "$PID" >/dev/null 2>&1 && [ "$i" -lt 4 ]; do sleep 1; i=$((i + 1)); done; if kill -0 "$PID" >/dev/null 2>&1; then kill -KILL "$PID" >/dev/null 2>&1 || true; i=0; while kill -0 "$PID" >/dev/null 2>&1 && [ "$i" -lt 3 ]; do sleep 1; i=$((i + 1)); done; fi ;; esac; fi
         for ifname in $(/sbin/ifconfig -l 2>/dev/null | tr ' ' '\\n' | grep '^utun'); do if [ "$ifname" = "\(tunInterfaceName)" ]; then for net in 1.0.0.0/8 2.0.0.0/7 4.0.0.0/6 8.0.0.0/5 16.0.0.0/4 32.0.0.0/3 64.0.0.0/2 128.0.0.0/1 0.0.0.0/1; do /sbin/route -n delete -net "$net" -ifscope "$ifname" 2>/dev/null || true; /sbin/route -n delete -net "$net" -iface "$ifname" 2>/dev/null || true; done; /sbin/route -n delete -inet6 -net ::/1 2>/dev/null || true; /sbin/route -n delete -inet6 -net 8000::/1 2>/dev/null || true; /sbin/route -n delete -inet6 default -iface "$ifname" 2>/dev/null || true; /sbin/route -n delete -net default -iface "$ifname" 2>/dev/null || true; /sbin/ifconfig "$ifname" down 2>/dev/null || true; fi; done
         /usr/bin/dscacheutil -flushcache >/dev/null 2>&1 || true; /usr/bin/killall -HUP mDNSResponder >/dev/null 2>&1 || true
+        """
+    }
+
+    // Restore the system DNS the daemon may have pointed at the TUN resolver
+    // (198.18.0.2). Prefers the saved backup, then sweeps every service as a
+    // safety net so name resolution can never be left broken after teardown.
+    private static func restoreDnsCommand() -> String {
+        """
+        if [ -f \(shellQuote(dnsBackupPath)) ]; then SVC=$(sed -n '1p' \(shellQuote(dnsBackupPath)) 2>/dev/null); ORIG=$(sed -n '2,$p' \(shellQuote(dnsBackupPath)) 2>/dev/null); if [ -n "$SVC" ]; then case "$ORIG" in ''|*"aren't any"*|*"There aren"*) /usr/sbin/networksetup -setdnsservers "$SVC" Empty >/dev/null 2>&1 || true ;; *) /usr/sbin/networksetup -setdnsservers "$SVC" $ORIG >/dev/null 2>&1 || true ;; esac; fi; rm -f \(shellQuote(dnsBackupPath)); fi
+        /usr/sbin/networksetup -listallnetworkservices 2>/dev/null | tail -n +2 | while IFS= read -r SVC; do case "$SVC" in \\**) continue ;; esac; D=$(/usr/sbin/networksetup -getdnsservers "$SVC" 2>/dev/null); if [ "$D" = "198.18.0.2" ]; then /usr/sbin/networksetup -setdnsservers "$SVC" Empty >/dev/null 2>&1 || true; fi; done
         """
     }
 

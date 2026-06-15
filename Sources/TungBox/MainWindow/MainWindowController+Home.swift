@@ -30,50 +30,44 @@ extension MainWindowController {
         statusChip.heightAnchor.constraint(equalToConstant: 32).isActive = true
         statusChip.widthAnchor.constraint(equalToConstant: 96).isActive = true
 
+        tunStatusChip.translatesAutoresizingMaskIntoConstraints = false
+        tunStatusChip.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        tunStatusChip.widthAnchor.constraint(equalToConstant: 96).isActive = true
+
         serviceSwitch.target = self
         serviceSwitch.action = #selector(switchToggled(_:))
 
-        let captureLabel = NSTextField(labelWithString: "接管方式")
-        captureLabel.font = .systemFont(ofSize: 13, weight: .bold)
-        captureLabel.textColor = MD3.onSurfaceVariant
-        captureLabel.translatesAutoresizingMaskIntoConstraints = false
-        registerThemeObserver { [weak captureLabel] in
-            captureLabel?.textColor = MD3.onSurfaceVariant
+        // 系统代理卡片（紧凑：状态 chip + 开关）
+        let systemProxySpacer = NSView()
+        systemProxySpacer.translatesAutoresizingMaskIntoConstraints = false
+        let systemProxyRow = NSStackView(views: [statusChip, systemProxySpacer, serviceSwitch])
+        systemProxyRow.orientation = .horizontal
+        systemProxyRow.distribution = .fill
+        systemProxyRow.alignment = .centerY
+        systemProxyRow.translatesAutoresizingMaskIntoConstraints = false
+        let serviceCard = homeCard(title: "系统代理", views: [systemProxyRow])
+
+        // TUN 卡片（紧凑：启用 TUN + 开关，可与系统代理同时开启）
+        tunSwitch.target = self
+        tunSwitch.action = #selector(tunSwitchToggled(_:))
+        tunSwitch.isOn = isTunEnabled
+        tunSwitch.translatesAutoresizingMaskIntoConstraints = false
+        let tunLabel = NSTextField(labelWithString: "启用 TUN")
+        tunLabel.font = .systemFont(ofSize: 14, weight: .bold)
+        tunLabel.textColor = MD3.onSurface
+        registerThemeObserver { [weak tunLabel] in
+            tunLabel?.textColor = MD3.onSurface
         }
+        let tunSpacer = NSView()
+        tunSpacer.translatesAutoresizingMaskIntoConstraints = false
+        let tunControlRow = NSStackView(views: [tunLabel, tunSpacer, tunSwitch])
+        tunControlRow.orientation = .horizontal
+        tunControlRow.distribution = .fill
+        tunControlRow.alignment = .centerY
+        tunControlRow.translatesAutoresizingMaskIntoConstraints = false
+        let tunCard = homeCard(title: "TUN 模式", views: [tunControlRow])
 
-        configureCaptureRadio(homeSystemProxyRadio, tag: 0, action: #selector(homeCaptureModeChanged(_:)))
-        configureCaptureRadio(homeTunRadio, tag: 1, action: #selector(homeCaptureModeChanged(_:)))
-        homeSystemProxyRadio.state = isTunEnabled ? .off : .on
-        homeTunRadio.state = isTunEnabled ? .on : .off
-
-        let systemProxyOption = makeOptionWithHint(radio: homeSystemProxyRadio, hint: "设置系统 HTTP/Socks5 代理，接管常规软件流量")
-        let tunOption = makeOptionWithHint(radio: homeTunRadio, hint: "创建虚拟网卡接管全局 IP 流量，支持终端和游戏")
-
-        let captureOptionsStack = NSStackView(views: [systemProxyOption, tunOption])
-        captureOptionsStack.orientation = .vertical
-        captureOptionsStack.spacing = 8
-        captureOptionsStack.alignment = .leading
-        captureOptionsStack.translatesAutoresizingMaskIntoConstraints = false
-        
-        systemProxyOption.leadingAnchor.constraint(equalTo: captureOptionsStack.leadingAnchor).isActive = true
-        systemProxyOption.trailingAnchor.constraint(equalTo: captureOptionsStack.trailingAnchor).isActive = true
-        tunOption.leadingAnchor.constraint(equalTo: captureOptionsStack.leadingAnchor).isActive = true
-        tunOption.trailingAnchor.constraint(equalTo: captureOptionsStack.trailingAnchor).isActive = true
-
-        captureLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-        captureOptionsStack.setContentHuggingPriority(.defaultLow, for: .horizontal)
-
-        let captureRow = NSStackView(views: [captureLabel, captureOptionsStack])
-        captureRow.orientation = .horizontal
-        captureRow.spacing = 16
-        captureRow.alignment = .top
-        captureRow.translatesAutoresizingMaskIntoConstraints = false
-        
-        captureOptionsStack.trailingAnchor.constraint(equalTo: captureRow.trailingAnchor).isActive = true
-
-        let serviceCard = homeCard(title: "代理服务", titleInlineView: statusChip, titleAccessoryView: serviceSwitch, views: [captureRow])
-
-        modeControl.items = ["直连/绕过代理", "全局代理", "规则判定"]
+        modeControl.items = ["直接连接", "全局代理", "规则判定"]
         modeControl.target = self
         modeControl.action = #selector(modeChanged)
         modeControl.selectedSegment = 2
@@ -189,6 +183,7 @@ extension MainWindowController {
         container.translatesAutoresizingMaskIntoConstraints = false
         
         container.addSubview(serviceCard)
+        container.addSubview(tunCard)
         container.addSubview(outboundCard)
         container.addSubview(nodeLatencyCard)
         container.addSubview(uploadCard)
@@ -198,51 +193,56 @@ extension MainWindowController {
 
         NSLayoutConstraint.activate([
             // --- Width Constraints ---
-            uploadCard.widthAnchor.constraint(equalTo: serviceCard.widthAnchor, multiplier: 0.5, constant: -8),
-            downloadCard.widthAnchor.constraint(equalTo: uploadCard.widthAnchor),
-            
-            // Span 2 cards width: 2 * size-1 width + 16 (gap)
-            serviceCard.widthAnchor.constraint(equalTo: outboundCard.widthAnchor),
+            tunCard.widthAnchor.constraint(equalTo: serviceCard.widthAnchor),
+            uploadCard.widthAnchor.constraint(equalTo: serviceCard.widthAnchor),
+            downloadCard.widthAnchor.constraint(equalTo: serviceCard.widthAnchor),
+
+            // 出站模式跨 2 个卡片宽：2 * 单卡宽 + 16(间距)
+            outboundCard.widthAnchor.constraint(equalTo: serviceCard.widthAnchor, multiplier: 2.0, constant: 16),
             nodeLatencyCard.widthAnchor.constraint(equalTo: outboundCard.widthAnchor),
             activeConnectionsCard.widthAnchor.constraint(equalTo: outboundCard.widthAnchor),
             trafficStatsCard.widthAnchor.constraint(equalTo: outboundCard.widthAnchor),
-            
+
             // --- Height Constraints ---
-            serviceCard.heightAnchor.constraint(equalToConstant: 180),
+            serviceCard.heightAnchor.constraint(equalToConstant: 142),
+            tunCard.heightAnchor.constraint(equalTo: serviceCard.heightAnchor),
             outboundCard.heightAnchor.constraint(equalTo: serviceCard.heightAnchor),
             nodeLatencyCard.heightAnchor.constraint(equalTo: serviceCard.heightAnchor),
             uploadCard.heightAnchor.constraint(equalTo: serviceCard.heightAnchor),
             downloadCard.heightAnchor.constraint(equalTo: serviceCard.heightAnchor),
             activeConnectionsCard.heightAnchor.constraint(equalTo: serviceCard.heightAnchor),
             trafficStatsCard.heightAnchor.constraint(equalTo: serviceCard.heightAnchor),
-            
-            // --- Row 1 Layout (top) ---
+
+            // --- Row 1: 系统代理 | TUN | 出站模式 ---
             serviceCard.topAnchor.constraint(equalTo: container.topAnchor),
             serviceCard.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            
+
+            tunCard.topAnchor.constraint(equalTo: container.topAnchor),
+            tunCard.leadingAnchor.constraint(equalTo: serviceCard.trailingAnchor, constant: 16),
+
             outboundCard.topAnchor.constraint(equalTo: container.topAnchor),
-            outboundCard.leadingAnchor.constraint(equalTo: serviceCard.trailingAnchor, constant: 16),
+            outboundCard.leadingAnchor.constraint(equalTo: tunCard.trailingAnchor, constant: 16),
             outboundCard.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            
-            // --- Row 2 Layout (middle) ---
+
+            // --- Row 2: 节点 | 上传 | 下载 ---
             nodeLatencyCard.topAnchor.constraint(equalTo: serviceCard.bottomAnchor, constant: 16),
             nodeLatencyCard.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            
+
             uploadCard.topAnchor.constraint(equalTo: serviceCard.bottomAnchor, constant: 16),
             uploadCard.leadingAnchor.constraint(equalTo: nodeLatencyCard.trailingAnchor, constant: 16),
-            
+
             downloadCard.topAnchor.constraint(equalTo: serviceCard.bottomAnchor, constant: 16),
             downloadCard.leadingAnchor.constraint(equalTo: uploadCard.trailingAnchor, constant: 16),
             downloadCard.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            
-            // --- Row 3 Layout (bottom) ---
+
+            // --- Row 3: 活动连接数 | 流量统计 ---
             activeConnectionsCard.topAnchor.constraint(equalTo: nodeLatencyCard.bottomAnchor, constant: 16),
             activeConnectionsCard.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            
+
             trafficStatsCard.topAnchor.constraint(equalTo: nodeLatencyCard.bottomAnchor, constant: 16),
             trafficStatsCard.leadingAnchor.constraint(equalTo: activeConnectionsCard.trailingAnchor, constant: 16),
             trafficStatsCard.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            
+
             // Bottom constraint to calculate container height
             container.bottomAnchor.constraint(equalTo: activeConnectionsCard.bottomAnchor)
         ])
@@ -436,10 +436,17 @@ extension MainWindowController {
 
     func updateRunningStats() {
         guard isProxyRuntimeRunning(), let pid = currentProxyPID() else {
-            stopStatsTimer()
+            // Tolerate transient unavailability (e.g. the daemon hot-reloading
+            // sing-box for a node switch) so a single blip doesn't permanently
+            // kill the stats panel. Only stop after several consecutive misses.
+            runningStatsMissCount += 1
+            if runningStatsMissCount >= 3 {
+                stopStatsTimer()
+            }
             return
         }
-        
+        runningStatsMissCount = 0
+
         Task {
             let apiConnections = try? await ClashAPI.connections()
             let proxiesObj = (try? await ClashAPI.proxies())
@@ -540,45 +547,31 @@ extension MainWindowController {
         return String(format: "%.1f %@", value, units[index])
     }
 
+    // System-proxy switch — independent of TUN; both can be on together.
     @objc func switchToggled(_ sender: MD3Switch) {
-        if sender.isOn {
-            isSystemProxyEnabled = true
-            isProxyServiceTransitioning = true
-            syncProxyPreferenceControls()
-            startService()
-        } else {
-            isSystemProxyEnabled = false
-            isProxyServiceTransitioning = false
-            syncProxyPreferenceControls()
-            stopService()
-        }
+        isSystemProxyEnabled = sender.isOn
+        UserDefaults.standard.set(isSystemProxyEnabled, forKey: "systemProxyEnabled")
+        if sender.isOn { isProxyServiceTransitioning = true }
+        syncProxyPreferenceControls()
+        reconcileRuntime(reason: sender.isOn ? "开启系统代理" : "关闭系统代理")
     }
 
-    @objc func homeCaptureModeChanged(_ sender: MD3RadioButton) {
-        setCaptureMode(tunEnabled: sender.tag == 1, source: "首页")
+    // TUN switch — independent of system proxy.
+    @objc func tunSwitchToggled(_ sender: MD3Switch) {
+        setCaptureMode(tunEnabled: sender.isOn, source: "首页")
     }
 
-    func configureCaptureRadio(_ radio: MD3RadioButton, tag: Int, action: Selector) {
-        radio.tag = tag
-        radio.target = self
-        radio.action = action
-    }
-
+    /// Toggle the TUN switch (shared by the home switch, tray, and settings). System
+    /// proxy state is untouched; reconcileRuntime() converges the runtime.
     func setCaptureMode(tunEnabled: Bool, source: String) {
-        let previous = isTunEnabled
-        let wasServiceActiveOrRequested = isProxyServiceActiveOrRequested()
-        guard previous != tunEnabled else {
-            syncProxyPreferenceControls()
-            return
-        }
-        let tunStatus = TunServiceManager.status(store: store)
-        if tunEnabled, !tunStatus.isUsable {
-            syncProxyPreferenceControls()
-            showToast("请先安装 TUN 服务")
-            showError(NSError.user("TUN 服务不可用：\(tunStatus.displayText)。请到 设置 > TUN 设置处理。"))
-            return
-        }
         if tunEnabled {
+            let tunStatus = TunServiceManager.status(store: store)
+            guard tunStatus.isUsable else {
+                syncProxyPreferenceControls()
+                showToast("请先安装 TUN 服务")
+                showError(NSError.user("TUN 服务不可用：\(tunStatus.displayText)。请到 设置 > TUN 设置处理。"))
+                return
+            }
             do {
                 try ensureTunRouteIsSafeToStart()
             } catch {
@@ -588,34 +581,12 @@ extension MainWindowController {
                 return
             }
         }
-
         isTunEnabled = tunEnabled
         UserDefaults.standard.set(isTunEnabled, forKey: "tunEnabled")
+        if tunEnabled { isProxyServiceTransitioning = true }
         syncProxyPreferenceControls()
-        do {
-            if wasServiceActiveOrRequested {
-                isSystemProxyEnabled = !tunEnabled
-                try applyTunPreference(restartIfRunning: true)
-                reconcileSystemProxyForCurrentMode()
-                if tunEnabled {
-                    appendLog("[TUN] 已交给 TUN 服务启动 sing-box\n")
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                        self?.refreshStatus()
-                    }
-                    scheduleTunHealthCheck()
-                }
-            } else {
-                try applyTunPreference(restartIfRunning: false)
-            }
-            appendLog("[\(source)] 接管方式已切换为 \(isTunEnabled ? "TUN 模式" : "系统代理")\n")
-        } catch {
-            isTunEnabled = previous
-            UserDefaults.standard.set(isTunEnabled, forKey: "tunEnabled")
-            isSystemProxyEnabled = wasServiceActiveOrRequested ? !isTunEnabled : false
-            syncProxyPreferenceControls()
-            showError(error)
-        }
-        refreshStatus()
+        appendLog("[\(source)] TUN 模式已\(tunEnabled ? "开启" : "关闭")\n")
+        reconcileRuntime(reason: tunEnabled ? "开启 TUN" : "关闭 TUN")
     }
 
     @objc func saveClicked() {
@@ -625,6 +596,12 @@ extension MainWindowController {
         } catch {
             showError(error)
         }
+    }
+
+    func configureCaptureRadio(_ radio: MD3RadioButton, tag: Int, action: Selector) {
+        radio.tag = tag
+        radio.target = self
+        radio.action = action
     }
 
     private func makeOptionWithHint(radio: MD3RadioButton, hint: String) -> NSStackView {

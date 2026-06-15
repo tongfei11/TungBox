@@ -77,6 +77,13 @@ build_core() {
     return 0
   fi
 
+  local patched_core="$ROOT_DIR/.build/patched-core/sing-box"
+  if [[ -x "$patched_core" ]]; then
+    echo "Using local patched sing-box Core: $patched_core" >&2
+    printf '%s\n' "$patched_core"
+    return 0
+  fi
+
   if ! command -v go >/dev/null 2>&1; then
     echo "Missing Go toolchain. Install Go or set TUNGBOX_CORE_PATH to a pre-built core." >&2
     return 1

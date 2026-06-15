@@ -19,6 +19,12 @@ final class LockedValue<Value>: @unchecked Sendable {
         defer { lock.unlock() }
         return value
     }
+
+    func mutate(_ body: (inout Value) -> Void) {
+        lock.lock()
+        defer { lock.unlock() }
+        body(&value)
+    }
 }
 
 final class Store: @unchecked Sendable {

@@ -2179,7 +2179,13 @@ final class MD3NodeTileView: NSView, MD3Themeable {
     }
     
     private func updateStyle() {
-        if !isInteractive {
+        if isSelected && !isInteractive {
+            // Current auto-pick inside a urltest group: mark it as selected but
+            // with a softer container tint so it reads as "locked, not clickable".
+            layer?.backgroundColor = MD3.primaryContainer.cgColor
+            nameLabel.textColor = MD3.onPrimaryContainer
+            subLabel.textColor = MD3.onPrimaryContainer.withAlphaComponent(0.7)
+        } else if !isInteractive {
             layer?.backgroundColor = MD3.surfaceContainerLow.cgColor
             nameLabel.textColor = MD3.onSurfaceVariant.withAlphaComponent(0.6)
             subLabel.textColor = MD3.onSurfaceVariant.withAlphaComponent(0.4)
