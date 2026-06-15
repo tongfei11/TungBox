@@ -193,6 +193,18 @@ final class Runner: @unchecked Sendable {
         }
     }
 
+    /// Kill orphaned user-owned sing-box processes left over from a previous run
+    /// (or a desynced state) that still hold the proxy port and the cache.db file
+    /// lock — otherwise a freshly started instance fails with
+    /// "initialize cache-file: timeout" / port already in use. Matches only our own
+    /// core binary and runs as the user, so it can never touch the root TUN daemon
+    /// (which runs a different binary path and is owned by root).
+    func reapStrayUserProcesses() {
+        let binary = store.coreBinaryURL.path
+        guard !binary.isEmpty else { return }
+        _ = runAndWait("/usr/bin/pkill", ["-9", "-f", binary])
+    }
+
     func stop() {
         if let process, process.isRunning {
             process.terminate()
