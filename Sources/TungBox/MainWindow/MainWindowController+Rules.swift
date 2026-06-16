@@ -148,14 +148,105 @@ extension MainWindowController {
         refreshRulesFromEditor()
     }
 
+    /// Per-rule-type field label, input placeholder, and whether it's a process rule
+    /// (which offers the running-app picker).
+    func ruleTypeMeta(_ type: String) -> (label: String, placeholder: String, isProcess: Bool) {
+        switch type {
+        case "DOMAIN": return ("域名（完整匹配）", "example.com", false)
+        case "DOMAIN-SUFFIX": return ("域名后缀", "example.com", false)
+        case "DOMAIN-KEYWORD": return ("域名关键字", "google", false)
+        case "DOMAIN-WILDCARD": return ("通配域名", "*.example.com", false)
+        case "DOMAIN-REGEX": return ("域名正则", "^.*\\.example\\.com$", false)
+        case "RULE-SET": return ("规则集标签", "geosite-cn", false)
+        case "IP-CIDR": return ("IPv4 段（CIDR）", "192.168.0.0/16", false)
+        case "IP-CIDR6": return ("IPv6 段（CIDR）", "2001:db8::/32", false)
+        case "GEOIP": return ("国家/地区码", "cn", false)
+        case "IP-ASN": return ("AS 号", "13335", false)
+        case "SRC-IP": return ("来源 IP 段（CIDR）", "192.168.1.0/24", false)
+        case "PROCESS-NAME": return ("进程名（可从运行中的应用选择）", "WeChat", true)
+        case "URL-REGEX": return ("URL 正则（按域名正则近似匹配）", "^.*\\.example\\.com$", false)
+        case "IN-PORT": return ("入站端口（1-65535）", "7890", false)
+        case "DEST-PORT": return ("目标端口（1-65535）", "443", false)
+        case "PROTOCOL": return ("协议", "tls", false)
+        case "NETWORK": return ("网络（tcp / udp）", "tcp", false)
+        default: return ("规则值", "example.com", false)
+        }
+    }
+
+    /// Friendly pre-save validation per rule type (the final config is still checked
+    /// by sing-box, but this catches obvious mistakes with a clear message).
+    func validateRuleValue(type: String, value: String) throws {
+        let v = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !v.isEmpty else { throw NSError.user("请输入规则值") }
+        switch type {
+        case "IN-PORT", "DEST-PORT":
+            guard let p = Int(v), (1...65535).contains(p) else {
+                throw NSError.user("端口需为 1-65535 之间的数字")
+            }
+        case "IP-ASN":
+            guard Int(v) != nil else { throw NSError.user("AS 号需为数字，例如 13335") }
+        case "IP-CIDR", "IP-CIDR6", "SRC-IP":
+            guard v.contains("/") else {
+                throw NSError.user("请使用 CIDR 写法，例如 192.168.0.0/16（单个 IP 用 /32 或 /128）")
+            }
+        case "GEOIP":
+            guard v.range(of: "^[A-Za-z][A-Za-z-]*$", options: .regularExpression) != nil else {
+                throw NSError.user("国家/地区码示例：cn、us、hk")
+            }
+        case "NETWORK":
+            guard ["tcp", "udp"].contains(v.lowercased()) else {
+                throw NSError.user("网络只能填 tcp 或 udp")
+            }
+        default:
+            break
+        }
+    }
+
+    @objc func customRuleTypeChanged() {
+        let type = customRuleTypePopup.titleOfSelectedItem ?? "DOMAIN"
+        let meta = ruleTypeMeta(type)
+        customRuleValueLabel?.stringValue = meta.label
+        customRuleValueField.placeholderString = meta.placeholder
+        customRuleAppPickerButton?.isHidden = !meta.isProcess
+    }
+
+    @objc func pickRunningAppForRule(_ sender: NSButton) {
+        let menu = NSMenu()
+        let apps = NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular }
+            .compactMap { app -> (name: String, process: String)? in
+                guard let process = app.executableURL?.lastPathComponent else { return nil }
+                return (app.localizedName ?? process, process)
+            }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        if apps.isEmpty {
+            menu.addItem(withTitle: "没有检测到运行中的应用", action: nil, keyEquivalent: "")
+        }
+        for app in apps {
+            let item = NSMenuItem(title: "\(app.name)  ·  \(app.process)", action: #selector(runningAppPicked(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = app.process
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 4), in: sender)
+    }
+
+    @objc func runningAppPicked(_ sender: NSMenuItem) {
+        guard let process = sender.representedObject as? String else { return }
+        customRuleValueField.stringValue = process
+    }
+
     @objc func showAddCustomRuleDialog() {
         populateRuleTypePopup()
         populateRuleStrategyPopup()
         customRuleValueField.stringValue = ""
         customRuleNoteField.stringValue = ""
+        customRuleTypePopup.target = self
+        customRuleTypePopup.action = #selector(customRuleTypeChanged)
 
         let typeLabel = settingsLabel("规则类型")
         let valueLabel = settingsLabel("域名")
+        customRuleValueLabel = valueLabel
         let strategyLabel = settingsLabel("使用策略")
         let noteLabel = settingsLabel("备注")
 
@@ -171,6 +262,24 @@ extension MainWindowController {
         customRuleValueField.placeholderString = "example.com"
         customRuleValueField.translatesAutoresizingMaskIntoConstraints = false
         customRuleValueField.heightAnchor.constraint(equalToConstant: 36).isActive = true
+
+        // 仅 PROCESS-NAME 类型显示：从运行中的应用选择进程名
+        let appPickerButton = MD3Button()
+        appPickerButton.title = "从运行中的应用选择…"
+        appPickerButton.style = .outlined
+        appPickerButton.target = self
+        appPickerButton.action = #selector(pickRunningAppForRule(_:))
+        appPickerButton.translatesAutoresizingMaskIntoConstraints = false
+        appPickerButton.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        customRuleAppPickerButton = appPickerButton
+        let valueStack = NSStackView(views: [customRuleValueField, appPickerButton])
+        valueStack.orientation = .vertical
+        valueStack.spacing = 8
+        valueStack.alignment = .leading
+        valueStack.translatesAutoresizingMaskIntoConstraints = false
+        customRuleValueField.leadingAnchor.constraint(equalTo: valueStack.leadingAnchor).isActive = true
+        customRuleValueField.trailingAnchor.constraint(equalTo: valueStack.trailingAnchor).isActive = true
+
         customRuleNoteField.placeholderString = "可选"
         customRuleNoteField.translatesAutoresizingMaskIntoConstraints = false
         customRuleNoteField.heightAnchor.constraint(equalToConstant: 36).isActive = true
@@ -220,7 +329,7 @@ extension MainWindowController {
         
         let sec1 = sectionHeadingLabel("规则")
         let f1 = fieldStack(typeLabel, customRuleTypePopup)
-        let f2 = fieldStack(valueLabel, customRuleValueField)
+        let f2 = fieldStack(valueLabel, valueStack)
         let div1 = dividerLine()
         
         let sec2 = sectionHeadingLabel("动作")
@@ -285,7 +394,8 @@ extension MainWindowController {
         )
         
         dialog.window?.initialFirstResponder = customRuleValueField
-        
+        customRuleTypeChanged()   // sync label / placeholder / app-picker to current type
+
         dialog.onConfirm = { [weak self, weak dialog] in
             self?.addCustomRuleFromDialog()
             dialog?.dismiss()
@@ -299,14 +409,12 @@ extension MainWindowController {
     private func addCustomRuleFromDialog() {
         do {
             let value = customRuleValueField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !value.isEmpty else {
-                throw NSError.user("请输入规则值")
-            }
+            let type = customRuleTypePopup.titleOfSelectedItem ?? "DOMAIN"
+            try validateRuleValue(type: type, value: value)
             guard let subscription = currentSubscription() else {
                 throw NSError.user("请先选择一个订阅。自定义规则会按订阅单独保存。")
             }
 
-            let type = customRuleTypePopup.titleOfSelectedItem ?? "DOMAIN"
             let strategy = customRuleStrategyPopup.titleOfSelectedItem ?? "Proxy"
             let note = customRuleNoteField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             let previous = editor.string
@@ -403,6 +511,7 @@ extension MainWindowController {
         customRuleStrategyPopup.selectItem(withTitle: rule.strategy)
         customRuleValueField.stringValue = rule.value
         customRuleNoteField.stringValue = rule.note
+        customRuleTypeChanged()   // refresh label / placeholder / app-picker for the edited type
 
         editingRuleID = rule.id
     }

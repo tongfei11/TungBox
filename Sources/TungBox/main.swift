@@ -77,6 +77,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     let customRuleStrategyPopup = MD3PopUpButton()
     let customRuleValueField = MD3TextField()
     let customRuleNoteField = MD3TextField()
+    weak var customRuleValueLabel: NSTextField?
+    weak var customRuleAppPickerButton: NSButton?
     let ruleSetPrivateURLField = MD3TextField()
     let ruleSetCNURLField = MD3TextField()
     let ruleSetGeoIPCNURLField = MD3TextField()
@@ -503,7 +505,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         let sections = [
             ["DOMAIN", "DOMAIN-SUFFIX", "DOMAIN-KEYWORD", "DOMAIN-WILDCARD", "DOMAIN-REGEX", "RULE-SET"],
             ["IP-CIDR", "IP-CIDR6", "GEOIP", "IP-ASN", "SRC-IP"],
-            ["PROCESS-NAME", "USER-AGENT", "URL-REGEX"],
+            ["PROCESS-NAME", "URL-REGEX"],
             ["IN-PORT", "DEST-PORT", "PROTOCOL", "NETWORK"]
         ]
         for (index, section) in sections.enumerated() {
