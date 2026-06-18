@@ -567,9 +567,14 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             button.translatesAutoresizingMaskIntoConstraints = false
             let container = NSView()
             container.addSubview(button)
+            // Fill the whole cell so the entire 启用 column is the click target —
+            // MD3Checkbox toggles on any click within its bounds and consumes the
+            // event, so this avoids the tiny-hit-area / row-selection conflict.
             NSLayoutConstraint.activate([
-                button.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-                button.centerYAnchor.constraint(equalTo: container.centerYAnchor)
+                button.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+                button.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                button.topAnchor.constraint(equalTo: container.topAnchor),
+                button.bottomAnchor.constraint(equalTo: container.bottomAnchor)
             ])
             return container
         }
