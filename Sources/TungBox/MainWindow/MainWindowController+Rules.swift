@@ -211,6 +211,8 @@ extension MainWindowController {
     }
 
     @objc func pickRunningAppForRule(_ sender: NSButton) {
+        // Only meaningful for PROCESS-NAME; ignore for any other type.
+        guard customRuleTypePopup.titleOfSelectedItem == "PROCESS-NAME" else { return }
         let menu = NSMenu()
         let apps = NSWorkspace.shared.runningApplications
             .filter { $0.activationPolicy == .regular }
