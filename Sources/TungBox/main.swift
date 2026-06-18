@@ -556,8 +556,11 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             let button = MD3Checkbox(checkboxWithTitle: "", target: nil, action: nil)
             button.state = rule.enabled ? .on : .off
             button.isEnabled = rule.customRuleID != nil
-            if rule.customRuleID != nil {
-                button.tag = ruleRows.firstIndex(where: { $0.customRuleID == rule.customRuleID }) ?? -1
+            if let ruleID = rule.customRuleID {
+                // tag must index into `customRules` (toggleRuleEnabled uses customRules[tag]),
+                // NOT into the display rows which also contain section headers and
+                // subscription rules — otherwise the toggle silently no-ops.
+                button.tag = customRules.firstIndex(where: { $0.id == ruleID }) ?? -1
                 button.target = self
                 button.action = #selector(toggleRuleEnabled(_:))
             }
