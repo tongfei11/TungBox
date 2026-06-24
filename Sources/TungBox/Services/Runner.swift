@@ -207,7 +207,18 @@ final class Runner: @unchecked Sendable {
 
     func stop() {
         if let process, process.isRunning {
-            process.terminate()
+            let pid = process.processIdentifier
+            process.terminate()  // SIGTERM
+            // Wait for the process to ACTUALLY exit so its listener (7890/9090) is
+            // released before we return. Without this the dying instance lingers and
+            // a quick TUN<->proxy switch races it for the port (bind: address already
+            // in use, which SO_REUSEADDR can't get past for a live listener). SIGKILL
+            // if it doesn't go quickly — sing-box state lives in cache.db, no graceful
+            // drain is needed just to switch modes.
+            if !waitForProcessExit(process, timeout: 0.6) {
+                Darwin.kill(pid, SIGKILL)
+                _ = waitForProcessExit(process, timeout: 1.5)
+            }
             self.process = nil
             outputPipe?.fileHandleForReading.readabilityHandler = nil
             outputPipe = nil
@@ -218,6 +229,14 @@ final class Runner: @unchecked Sendable {
             _ = runAndWait("/usr/bin/osascript", ["-e", appleScript])
         }
         elevatedPID = nil
+    }
+
+    private func waitForProcessExit(_ process: Process, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        return !process.isRunning
     }
 
     func stopStaleUserProcesses() {
@@ -334,38 +353,64 @@ final class Runner: @unchecked Sendable {
         if getuid() == 0 || allowTun {
             return url
         }
-        
+
         guard let data = try? Data(contentsOf: url),
               var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return url
         }
-        
+
         // Auto-fix any compatibility issues (like network: grpc) on the fly
         let (fixedJson, _) = ConfigCompatibilityChecker.autoFix(config: json)
         json = fixedJson
-        
+
+        var changed = false
+        var convertedTun = false
+
+        // The user (non-root) instance must NEVER use the daemon's root-owned
+        // cache.db (/Library/Application Support/TungBox/cache.db) — it can only read
+        // it, so sing-box FATALs with "initialize cache-file: permission denied" and
+        // 7890 never comes up. Drop that path so sing-box falls back to a writable
+        // cache in its own working directory. (A stale TUN config can carry this path
+        // into the user runner during a fast switch; sanitize defensively.)
+        if var experimental = json["experimental"] as? [String: Any],
+           var cacheFile = experimental["cache_file"] as? [String: Any],
+           (cacheFile["path"] as? String) == TunServiceManager.cachePath {
+            cacheFile.removeValue(forKey: "path")
+            experimental["cache_file"] = cacheFile
+            json["experimental"] = experimental
+            changed = true
+        }
+
+        // Strip any TUN inbound — TUN requires root; the user instance serves a local
+        // mixed proxy instead. Keep an existing local inbound if present.
         var inbounds = json["inbounds"] as? [[String: Any]] ?? []
-        let hasTun = inbounds.contains { ($0["type"] as? String) == "tun" }
-        if !hasTun {
+        if inbounds.contains(where: { ($0["type"] as? String) == "tun" }) {
+            inbounds = inbounds.filter { ($0["type"] as? String) != "tun" }
+            let localTypes: Set<String> = ["mixed", "socks", "http"]
+            if !inbounds.contains(where: { localTypes.contains(($0["type"] as? String) ?? "") }) {
+                inbounds.append([
+                    "type": "mixed",
+                    "tag": "mixed-in",
+                    "listen": "127.0.0.1",
+                    "listen_port": 7890
+                ])
+            }
+            json["inbounds"] = inbounds
+            changed = true
+            convertedTun = true
+        }
+
+        if !changed {
             return url
         }
-        
-        inbounds = inbounds.filter { ($0["type"] as? String) != "tun" }
-        if inbounds.isEmpty {
-            inbounds.append([
-                "type": "mixed",
-                "tag": "mixed-in",
-                "listen": "127.0.0.1",
-                "listen_port": 7890
-            ])
-        }
-        json["inbounds"] = inbounds
-        
+
         let tempURL = url.deletingLastPathComponent().appendingPathComponent("run_" + url.lastPathComponent)
         if let outData = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys]) {
             try? outData.write(to: tempURL)
-            DispatchQueue.main.async { [weak self] in
-                self?.onOutput?("[TungBox] 检测到当前运行非管理员权限，已自动将配置中的 TUN 模式转换为本地混合代理模式运行。\n")
+            if convertedTun {
+                DispatchQueue.main.async { [weak self] in
+                    self?.onOutput?("[TungBox] 检测到当前运行非管理员权限，已自动将配置中的 TUN 模式转换为本地混合代理模式运行。\n")
+                }
             }
             return tempURL
         }

@@ -28,11 +28,13 @@ extension MainWindowController {
 
         statusChip.translatesAutoresizingMaskIntoConstraints = false
         statusChip.heightAnchor.constraint(equalToConstant: 32).isActive = true
-        statusChip.widthAnchor.constraint(equalToConstant: 96).isActive = true
+        // Size to content (with a sensible minimum) so transition labels like
+        // "启动中" / "关闭中" are never clipped.
+        statusChip.widthAnchor.constraint(greaterThanOrEqualToConstant: 96).isActive = true
 
         tunStatusChip.translatesAutoresizingMaskIntoConstraints = false
         tunStatusChip.heightAnchor.constraint(equalToConstant: 32).isActive = true
-        tunStatusChip.widthAnchor.constraint(equalToConstant: 96).isActive = true
+        tunStatusChip.widthAnchor.constraint(greaterThanOrEqualToConstant: 96).isActive = true
 
         serviceSwitch.target = self
         serviceSwitch.action = #selector(switchToggled(_:))
@@ -167,7 +169,7 @@ extension MainWindowController {
         registerThemeObserver { [weak self] in
             guard let self = self else { return }
             self.currentNodeNameLabel.textColor = MD3.primary
-            self.currentNodeDelayLabel.textColor = MD3.success
+            self.currentNodeDelayLabel.textColor = MD3.latencyTextColor(self.currentNodeDelayLabel.stringValue)
             self.trafficStatsValueLabel.textColor = MD3.primary
             self.trafficStatsDetailLabel.textColor = MD3.onSurfaceVariant
             self.uploadValueLabel.textColor = MD3.primary
@@ -496,7 +498,8 @@ extension MainWindowController {
                 self.currentNodeNameLabel.stringValue = formattedNode
                 let activeDelay = self.nodes.first(where: { $0.tag == activeNodeInfo.name })?.delay ?? "—"
                 self.currentNodeDelayLabel.stringValue = activeDelay == "未测试" ? "—" : activeDelay
-                
+                self.currentNodeDelayLabel.textColor = MD3.latencyTextColor(self.currentNodeDelayLabel.stringValue)
+
                 // 1. Update connections card
                 self.updateConnectionsCard(value: "\(connectionCount)", detail: "内存占用: \(rssValue)")
                 
@@ -551,8 +554,9 @@ extension MainWindowController {
     @objc func switchToggled(_ sender: MD3Switch) {
         isSystemProxyEnabled = sender.isOn
         UserDefaults.standard.set(isSystemProxyEnabled, forKey: "systemProxyEnabled")
-        if sender.isOn { isProxyServiceTransitioning = true }
+        beginFeatureTransition(systemProxy: sender.isOn ? .starting : .stopping)
         syncProxyPreferenceControls()
+        refreshStatus()   // show 启动中/关闭中 + spinner right away
         reconcileRuntime(reason: sender.isOn ? "开启系统代理" : "关闭系统代理")
     }
 
@@ -583,8 +587,9 @@ extension MainWindowController {
         }
         isTunEnabled = tunEnabled
         UserDefaults.standard.set(isTunEnabled, forKey: "tunEnabled")
-        if tunEnabled { isProxyServiceTransitioning = true }
+        beginFeatureTransition(tun: tunEnabled ? .starting : .stopping)
         syncProxyPreferenceControls()
+        refreshStatus()   // show 启动中/关闭中 + spinner right away
         appendLog("[\(source)] TUN 模式已\(tunEnabled ? "开启" : "关闭")\n")
         reconcileRuntime(reason: tunEnabled ? "开启 TUN" : "关闭 TUN")
     }

@@ -134,12 +134,15 @@ enum TunServiceManager {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
         process.arguments = ["print", "system/\(label)"]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
+        // `launchctl print` emits a LOT of output. If we attach a Pipe and don't
+        // drain it, launchctl blocks once the 64KB pipe buffer fills — we then time
+        // out and wrongly report "not loaded" (the flaky "需要装两次" symptom).
+        // We only need the exit status, so discard the output to /dev/null entirely.
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
         do {
             try process.run()
-            let deadline = Date().addingTimeInterval(1.5)
+            let deadline = Date().addingTimeInterval(3.0)
             while process.isRunning && Date() < deadline {
                 Thread.sleep(forTimeInterval: 0.05)
             }
@@ -153,7 +156,10 @@ enum TunServiceManager {
         }
     }
 
-    static func activeSingBoxPID(store: Store) -> Int32? {
+    /// - Parameter allowScan: when false, never run the (blocking, up to ~2s) `ps`
+    ///   fallback — return the throttled cache or the fast pidfile read only. UI
+    ///   refreshes pass `false` so toggling a switch never freezes the main thread.
+    static func activeSingBoxPID(store: Store, allowScan: Bool = true) -> Int32? {
         let now = Date()
         // Throttle to ~once per 2s. Several 2s timers and UI refreshes call this; an
         // unthrottled fallback (pidfile read + full `ps` scan) on every call spikes
@@ -175,6 +181,8 @@ enum TunServiceManager {
             cachedTunProcessPID.set((pid, now))
             return pid
         }
+        // The `ps` scan can block ~2s; skip it on the UI path.
+        guard allowScan else { return nil }
         // Fall back to a process scan (bounded by the throttle above).
         let pid = activeTunProcessPID()
         cachedTunProcessPID.set((pid, now))
@@ -237,8 +245,11 @@ enum TunServiceManager {
         let tempPlist = FileManager.default.temporaryDirectory.appendingPathComponent("\(label).plist")
         try plist.write(to: tempPlist, atomically: true, encoding: .utf8)
         let command = [
+            // Tear down any existing instance and WAIT for launchd to fully unload it.
+            // bootout is async; bootstrapping again before the old job is gone fails
+            // with an I/O error — that race is why reinstall used to need a 2nd try.
             "launchctl bootout system/\(label) >/dev/null 2>&1 || true",
-            "for i in 1 2 3 4 5 6 7 8 9 10; do launchctl print system/\(label) >/dev/null 2>&1 || break; sleep 0.5; done",
+            "for i in $(seq 1 40); do launchctl print system/\(label) >/dev/null 2>&1 || break; launchctl bootout system/\(label) >/dev/null 2>&1 || true; sleep 0.25; done",
             "launchctl enable system/\(label) >/dev/null 2>&1 || true",
             "mkdir -p \(shellQuote(installDirectoryPath))",
             "cp \(shellQuote(tempScript.path)) \(shellQuote(scriptPath))",
@@ -256,21 +267,30 @@ enum TunServiceManager {
             "chmod 644 \(shellQuote(logPath)) \(shellQuote(stdoutPath)) \(shellQuote(stderrPath))",
             "chmod 644 \(shellQuote(plistPath))",
             "xattr -c \(shellQuote(scriptPath)) \(shellQuote(corePath)) \(shellQuote(plistPath)) >/dev/null 2>&1 || true",
-            "launchctl bootstrap system \(shellQuote(plistPath))",
-            "launchctl enable system/\(label)",
+            // Retry bootstrap until the service is actually LOADED. We decide via
+            // `launchctl print` (is it in the domain?), NOT bootstrap's exit code —
+            // bootstrap can exit non-zero while the job actually loaded, and an
+            // earlier version then booted it back out and gave up, leaving the
+            // service missing (the "重装后未加载/需要装两次" symptom).
+            "for i in $(seq 1 12); do launchctl bootstrap system \(shellQuote(plistPath)) >/dev/null 2>&1; if launchctl print system/\(label) >/dev/null 2>&1; then break; fi; launchctl bootout system/\(label) >/dev/null 2>&1 || true; sleep 0.5; done",
+            "launchctl enable system/\(label) >/dev/null 2>&1 || true",
             "launchctl kickstart -k system/\(label) >/dev/null 2>&1 || true",
-            "launchctl print system/\(label) >/dev/null"
+            "for i in $(seq 1 20); do launchctl print system/\(label) >/dev/null 2>&1 && break; sleep 0.3; done"
         ]
         let commandText = command.joined(separator: "\n")
         let result = runAppleScript(commandText)
         try? FileManager.default.removeItem(at: tempScript)
         try? FileManager.default.removeItem(at: tempPlist)
+        // Authoritative success check is whether the service is actually usable —
+        // not the AppleScript exit status, which can be non-zero from a transient
+        // `launchctl print` race even when bootstrap succeeded.
+        if waitUntilServiceUsable(store: store, timeout: 6) {
+            return
+        }
         if result.status != 0 {
             throw NSError.user(result.output.isEmpty ? "安装 TUN 服务失败" : result.output)
         }
-        guard waitUntilServiceUsable(store: store, timeout: 3) else {
-            throw NSError.user("TUN 服务已写入，但 launchd 尚未确认可用。请稍等几秒后重试。")
-        }
+        throw NSError.user("TUN 服务已写入，但 launchd 尚未确认可用。请稍等几秒后重试。")
     }
 
     static func uninstall(store: Store) throws {
@@ -437,12 +457,15 @@ enum TunServiceManager {
         if routes.contains(legacyTunIPv4Address) {
             return "路由表仍包含 \(legacyTunIPv4Address)"
         }
-        let dns = runProcessAndGetOutput("/usr/sbin/scutil", args: ["--dns"])
-        if dns.contains(" : 198.18.0.2") {
-            return "DNS 解析器仍包含 198.18.0.2"
-        }
-        if dns.contains(" : 172.19.0.2") {
-            return "DNS 解析器仍包含 172.19.0.2"
+        // DNS residue counts as ours ONLY when our daemon left a DNS backup behind
+        // — i.e. it took over the system resolver via apply_tun_dns and has not
+        // restored it yet. We deliberately do NOT scan `scutil --dns` for
+        // 198.18.0.2: that fake-ip address is shared with other proxy tools
+        // (Surge/Clash/…), and matching it unconditionally made TungBox treat
+        // resolvers it does not own as residue — which kept waitUntilStopped()
+        // pinned for its whole timeout and triggered needless DNS cleanups.
+        if FileManager.default.fileExists(atPath: dnsBackupPath) {
+            return "DNS 备份未恢复（\(dnsBackupPath)）"
         }
         return nil
     }
@@ -583,7 +606,7 @@ enum TunServiceManager {
         DNS_BACKUP=\(shellQuote(dnsBackupPath))
         TUN_DNS_ADDR="198.18.0.2"
         CHILD=""
-        SCRIPT_VERSION="2026-06-tun-dns-takeover-v21"
+        SCRIPT_VERSION="2026-06-tun-dns-takeover-v23"
         REQUEST_MAX_AGE=30
         CLEANING_UP=0
 
@@ -681,29 +704,25 @@ enum TunServiceManager {
           return 1
         }
 
+        # DNS residue is ours ONLY when we left a backup behind: apply_tun_dns records
+        # the service + its original resolver before taking over, so the backup's
+        # existence is proof of ownership. We never match a bare 198.18.0.2 in
+        # scutil --dns here — that fake-ip address is shared with other proxy tools,
+        # and matching it made this daemon spin clean_dns against resolvers it does
+        # not own even when no utun29 was present.
         has_tungbox_dns_residue() {
-          /usr/sbin/scutil --dns 2>/dev/null | grep -Eq 'nameserver\\[[0-9]+\\] : (198\\.18\\.0\\.2|172\\.19\\.0\\.2)'
+          [ -f "$DNS_BACKUP" ]
         }
 
         clean_dns() {
-          i=0
-          while [ "$i" -lt 10 ]; do
-            /usr/bin/dscacheutil -flushcache >/dev/null 2>&1 || true
-            /usr/bin/killall -HUP mDNSResponder >/dev/null 2>&1 || true
-            if ! has_tungbox_dns_residue; then
-              echo "$(date '+%Y-%m-%d %H:%M:%S') TUN DNS cleanup verified" >> "$LOG"
-              return 0
-            fi
-            sleep 0.5
-            i=$((i + 1))
-          done
-          if has_tungbox_dns_residue; then
-            echo "$(date '+%Y-%m-%d %H:%M:%S') TUN DNS resolver still present after cleanup: 198.18.0.2/172.19.0.2" >> "$LOG"
-            return 1
-          else
-            echo "$(date '+%Y-%m-%d %H:%M:%S') TUN DNS cleanup verified" >> "$LOG"
-            return 0
-          fi
+          # restore_tun_dns has already put the real resolver back; here we only
+          # evict entries cached while the TUN DNS was active. Poisoned answers
+          # carry long TTLs and dscacheutil alone won't drop mDNSResponder's unicast
+          # cache, so we signal it too. One pass — no verify loop (the old loop
+          # checked for 198.18.0.2 in scutil and could burn ~5s on foreign DNS).
+          /usr/bin/dscacheutil -flushcache >/dev/null 2>&1 || true
+          /usr/bin/killall -HUP mDNSResponder >/dev/null 2>&1 || true
+          echo "$(date '+%Y-%m-%d %H:%M:%S') TUN DNS cache flushed" >> "$LOG"
         }
 
         # Map a BSD device (e.g. en5) to its macOS network service name so we can
@@ -756,15 +775,12 @@ enum TunServiceManager {
             fi
             rm -f "$DNS_BACKUP"
           fi
-          # Safety net: clear the TUN DNS from any service that still carries it.
-          /usr/sbin/networksetup -listallnetworkservices 2>/dev/null | tail -n +2 | while IFS= read -r svc; do
-            case "$svc" in \\**) continue ;; esac
-            d="$(/usr/sbin/networksetup -getdnsservers "$svc" 2>/dev/null)"
-            if [ "$d" = "$TUN_DNS_ADDR" ]; then
-              /usr/sbin/networksetup -setdnsservers "$svc" Empty >/dev/null 2>&1 || true
-              echo "$(date '+%Y-%m-%d %H:%M:%S') cleared leftover TUN DNS on $svc" >> "$LOG"
-            fi
-          done
+          # Backup-driven restore only: the backup names the exact service we
+          # changed, so we never touch a resolver we did not set. The old "clear
+          # any service whose DNS == 198.18.0.2" safety sweep was removed on
+          # purpose — that fake-ip address is shared with other proxy tools, so the
+          # sweep could wipe another proxy's DNS. apply_tun_dns also no-ops when
+          # 198.18.0.2 is already present, so we never back up DNS we don't own.
         }
 
         flush_dns_after_tun_up() {
@@ -836,10 +852,14 @@ enum TunServiceManager {
         wait_for_pid_exit() {
           pid="$1"
           limit="$2"
-          i=0
-          while kill -0 "$pid" >/dev/null 2>&1 && [ "$i" -lt "$limit" ]; do
-            sleep 1
-            i=$((i + 1))
+          # Poll every 0.1s (not 1s) up to "limit" seconds so we return the instant
+          # the child exits and free its port fast — the TUN→system-proxy handoff
+          # waits on exactly this.
+          ticks=0
+          max=$((limit * 10))
+          while kill -0 "$pid" >/dev/null 2>&1 && [ "$ticks" -lt "$max" ]; do
+            sleep 0.1
+            ticks=$((ticks + 1))
           done
           ! kill -0 "$pid" >/dev/null 2>&1
         }
@@ -849,8 +869,10 @@ enum TunServiceManager {
           label="$2"
           case "$pid" in ''|*[!0-9]*) return 0 ;; esac
           kill -0 "$pid" >/dev/null 2>&1 || return 0
+          # Brief TERM grace, then SIGKILL — sing-box keeps its state in cache.db, so
+          # we don't need a long graceful drain just to switch modes.
           kill -TERM "$pid" >/dev/null 2>&1 || true
-          if ! wait_for_pid_exit "$pid" 4; then
+          if ! wait_for_pid_exit "$pid" 2; then
             echo "$(date '+%Y-%m-%d %H:%M:%S') $label not exiting, force killing" >> "$LOG"
             kill -KILL "$pid" >/dev/null 2>&1 || true
             if ! wait_for_pid_exit "$pid" 3; then
@@ -1003,7 +1025,7 @@ enum TunServiceManager {
             && script.contains("clean_routes")
             && script.contains("wait_for_pid_exit")
             && script.contains("stop_pid")
-            && script.contains("2026-06-tun-dns-takeover-v21")
+            && script.contains("2026-06-tun-dns-takeover-v23")
             && script.contains("clean_dns")
             && script.contains("flush_dns_after_tun_up")
             && script.contains("apply_tun_dns")
@@ -1026,13 +1048,14 @@ enum TunServiceManager {
         """
     }
 
-    // Restore the system DNS the daemon may have pointed at the TUN resolver
-    // (198.18.0.2). Prefers the saved backup, then sweeps every service as a
-    // safety net so name resolution can never be left broken after teardown.
+    // Restore the system DNS our daemon may have pointed at the TUN resolver
+    // (198.18.0.2). Backup-driven only: the backup names the exact service we
+    // changed, so uninstall never touches another proxy tool's resolver. (The old
+    // blind "clear any service whose DNS == 198.18.0.2" sweep was dropped — that
+    // fake-ip address is shared with Surge/Clash/etc.)
     private static func restoreDnsCommand() -> String {
         """
         if [ -f \(shellQuote(dnsBackupPath)) ]; then SVC=$(sed -n '1p' \(shellQuote(dnsBackupPath)) 2>/dev/null); ORIG=$(sed -n '2,$p' \(shellQuote(dnsBackupPath)) 2>/dev/null); if [ -n "$SVC" ]; then case "$ORIG" in ''|*"aren't any"*|*"There aren"*) /usr/sbin/networksetup -setdnsservers "$SVC" Empty >/dev/null 2>&1 || true ;; *) /usr/sbin/networksetup -setdnsservers "$SVC" $ORIG >/dev/null 2>&1 || true ;; esac; fi; rm -f \(shellQuote(dnsBackupPath)); fi
-        /usr/sbin/networksetup -listallnetworkservices 2>/dev/null | tail -n +2 | while IFS= read -r SVC; do case "$SVC" in \\**) continue ;; esac; D=$(/usr/sbin/networksetup -getdnsservers "$SVC" 2>/dev/null); if [ "$D" = "198.18.0.2" ]; then /usr/sbin/networksetup -setdnsservers "$SVC" Empty >/dev/null 2>&1 || true; fi; done
         """
     }
 
@@ -1061,21 +1084,35 @@ enum TunServiceManager {
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
+        // Drain the read end on a background thread so a >64KB child never blocks on
+        // a full pipe buffer. CRUCIAL: close OUR copy of the write end right after
+        // run() — otherwise readDataToEndOfFile never reaches EOF (the live Pipe
+        // still holds a write fd), the reader hangs, and we return "" for every
+        // command. The child keeps its own dup of the write fd, so it still works.
+        let readHandle = pipe.fileHandleForReading
+        let writeHandle = pipe.fileHandleForWriting
+        let collected = LockedValue<Data>(Data())
+        let done = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            collected.set(readHandle.readDataToEndOfFile())
+            done.signal()
+        }
         do {
             try process.run()
-            let deadline = Date().addingTimeInterval(1.5)
-            while process.isRunning && Date() < deadline {
-                Thread.sleep(forTimeInterval: 0.05)
-            }
-            if process.isRunning {
-                process.terminate()
-                return ""
-            }
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            return String(data: data, encoding: .utf8) ?? ""
         } catch {
+            try? writeHandle.close()
             return ""
         }
+        try? writeHandle.close()
+        let deadline = Date().addingTimeInterval(2.0)
+        while process.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if process.isRunning {
+            process.terminate()
+        }
+        _ = done.wait(timeout: .now() + 1.5)
+        return String(data: collected.get(), encoding: .utf8) ?? ""
     }
 
     private static func shellQuote(_ value: String) -> String {

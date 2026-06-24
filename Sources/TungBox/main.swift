@@ -103,7 +103,19 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var isSystemProxyEnabled = false
     var isTunEnabled = UserDefaults.standard.object(forKey: "tunEnabled") as? Bool ?? false
     var isProxyServiceTransitioning = false
+    /// Per-feature transition direction — drives the "启动中 / 关闭中" status chip and
+    /// the loading spinner next to each switch while a runtime change is in flight.
+    enum FeatureTransition { case none, starting, stopping }
+    var systemProxyTransition: FeatureTransition = .none
+    var tunTransition: FeatureTransition = .none
     var systemProxyOperationID = 0
+    // Runtime convergence runs its blocking work (TUN daemon teardown waits, port
+    // waits, user sing-box start) on this serial queue so the main thread (and the
+    // UI) never freezes. `runtimeTransitionID` is bumped on every reconcile so a
+    // stale background transition can detect it has been superseded and skip its
+    // final UI refresh.
+    let runtimeQueue = DispatchQueue(label: "com.tungbox.runtime")
+    var runtimeTransitionID = 0
     var isLaunchAtLoginEnabled: Bool {
         if #available(macOS 13.0, *) {
             return SMAppService.mainApp.status == .enabled
@@ -333,15 +345,27 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
     func applyStartupProxyPreference() {
         // Restore the last exit state for both independent switches (persisted on
-        // every toggle). reconcileRuntime converges the runtime to match.
+        // every toggle). reconcileRuntime converges the runtime to match, doing all
+        // blocking work off the main thread — so the console window / tray icon are
+        // already painted and the (slow) TUN bring-up happens in the background.
         isSystemProxyEnabled = UserDefaults.standard.bool(forKey: "systemProxyEnabled")
-        syncProxyPreferenceControls()
         if isSystemProxyEnabled || isTunEnabled {
+            // Show the "启动中" state + spinner up front so the home cards reflect the
+            // pending bring-up immediately rather than flashing "未连接" first.
+            beginFeatureTransition(
+                systemProxy: isSystemProxyEnabled ? .starting : FeatureTransition.none,
+                tun: isTunEnabled ? .starting : FeatureTransition.none
+            )
             appendLog("[启动] 恢复状态：系统代理=\(isSystemProxyEnabled ? "开" : "关")，TUN=\(isTunEnabled ? "开" : "关")\n")
         } else {
             appendLog("[启动] 本次启动不自动开启代理。\n")
         }
-        reconcileRuntime(reason: "启动")
+        syncProxyPreferenceControls()
+        refreshStatus()
+        // Defer convergence by one run-loop cycle so the window/tray paint first.
+        DispatchQueue.main.async { [weak self] in
+            self?.reconcileRuntime(reason: "启动")
+        }
     }
 
     func scheduleStatusRefreshFromOutput() {
@@ -658,8 +682,23 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     }
 
     func markProxyStartupFailed() {
-        isProxyServiceTransitioning = false
+        clearFeatureTransitions()
         syncProxyPreferenceControls()
+    }
+
+    /// Mark a feature as transitioning (drives the chip text + spinner). Pass nil to
+    /// leave a feature's current transition untouched.
+    func beginFeatureTransition(systemProxy: FeatureTransition? = nil, tun: FeatureTransition? = nil) {
+        if let systemProxy { systemProxyTransition = systemProxy }
+        if let tun { tunTransition = tun }
+        isProxyServiceTransitioning = systemProxyTransition != .none || tunTransition != .none
+    }
+
+    /// Clear all transition indicators (chips fall back to their on/off state).
+    func clearFeatureTransitions() {
+        systemProxyTransition = .none
+        tunTransition = .none
+        isProxyServiceTransitioning = false
     }
 
     /// Single source of truth that converges the runtime to the two independent
@@ -669,87 +708,173 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     ///               7890, otherwise stop it.
     ///   • The OS system-proxy setting points at 7890 whenever system proxy is on,
     ///     regardless of which sing-box currently serves that port.
+    /// Converges the runtime to the two INDEPENDENT switches. The TUN daemon (root,
+    /// utun29 + clash 9091) and the user proxy (user, 7890 + clash 9090) are now
+    /// separate processes that never share a port — so each switch only ever
+    /// starts/stops its own thing, and toggling TUN never disturbs the user proxy
+    /// (no hand-off, no race, no "关闭TUN把代理也关了").
     func reconcileRuntime(reason: String, forceRestart: Bool = false) {
-        isProxyServiceTransitioning = false
         let port = getMixedProxyPort()
-
-        // Nothing requested → tear everything down.
-        if !isSystemProxyEnabled && !isTunEnabled {
-            if runner.isRunning { runner.stop() }
-            disableTunDaemonIfActive()
-            setSystemProxy(enabled: false, port: port)
-            refreshStatus()
-            return
+        runtimeTransitionID += 1
+        let token = runtimeTransitionID
+        let wantSystemProxy = isSystemProxyEnabled
+        let wantTun = isTunEnabled
+        let runnerRef = runner
+        let storeCopy = store
+        let log: @Sendable (String) -> Void = { [weak self] text in
+            Task { @MainActor [weak self] in self?.appendLog(text) }
         }
 
-        guard ensureCoreAvailableForStart() else { markProxyStartupFailed(); return }
-        guard selectedIndex != nil, !nodes.isEmpty else {
-            showError(NSError.user("没有可用的配置或节点，请先导入订阅。"))
-            markProxyStartupFailed()
-            return
-        }
-
-        do {
-            guard var config = parseConfigObject(from: editor.string) else {
-                throw NSError.user("当前配置不是有效 JSON")
+        // Build the configs on the main thread (touches the editor). The user proxy
+        // config is a plain NON-TUN local proxy (7890); the TUN daemon config is
+        // derived from it inside enableTunServiceSafely (utun29, no 7890/9090).
+        var userProxyURL: URL? = nil
+        var userConfigText: String? = nil
+        if wantSystemProxy || wantTun {
+            guard ensureCoreAvailableForStart() else { markProxyStartupFailed(); return }
+            guard selectedIndex != nil, !nodes.isEmpty else {
+                showError(NSError.user("没有可用的配置或节点，请先导入订阅。"))
+                markProxyStartupFailed()
+                return
             }
-            config = setTunEnabled(isTunEnabled, in: config)
-            config = ensureModeSupport(in: config, mode: selectedMode())
-            editor.string = try renderConfig(config)
-            let url = try saveCurrent()
+            do {
+                guard var config = parseConfigObject(from: editor.string) else {
+                    throw NSError.user("当前配置不是有效 JSON")
+                }
+                config = setTunEnabled(false, in: config)   // user proxy is never TUN
+                config = ensureModeSupport(in: config, mode: selectedMode())
+                editor.string = try renderConfig(config)
+                userProxyURL = try saveCurrent()
+                userConfigText = editor.string
+            } catch {
+                showError(error)
+                markProxyStartupFailed()
+                return
+            }
+        }
 
-            if isTunEnabled {
-                let tunStatus = TunServiceManager.status(store: store)
-                guard tunStatus.isUsable else {
-                    isTunEnabled = false
+        if wantSystemProxy { wasProxyActiveInThisSession = true }
+        appendLog("[TungBox] 正在切换运行状态（\(reason)）...\n")
+        Task { @MainActor [weak self] in
+            guard let self, token == self.runtimeTransitionID else { return }
+
+            // ===== 1) Converge the TUN daemon (utun29) — independent of the proxy =====
+            if wantTun {
+                do {
+                    let status = try await self.runSerializedOffMain { TunServiceManager.status(store: storeCopy) }
+                    guard token == self.runtimeTransitionID else { return }
+                    guard status.isUsable else {
+                        throw NSError.user("TUN 服务不可用：\(status.displayText)。请到 设置 > TUN 设置处理。")
+                    }
+                    try self.enableTunServiceSafely(configText: userConfigText!)
+                    self.appendLog("[TungBox] TUN 已启用（\(reason)）\n")
+                } catch {
+                    guard token == self.runtimeTransitionID else { return }
+                    self.appendLog("[TungBox] TUN 启用失败（\(reason)）：\(error.localizedDescription)\n")
+                    self.isTunEnabled = false
                     UserDefaults.standard.set(false, forKey: "tunEnabled")
-                    syncProxyPreferenceControls()
-                    throw NSError.user("TUN 服务不可用：\(tunStatus.displayText)。请到 设置 > TUN 设置处理。")
+                    self.tunTransition = .none
+                    self.syncProxyPreferenceControls()
+                    self.showError(error)
                 }
-                if runner.isRunning { runner.stop() }   // daemon owns 7890
-                try enableTunServiceSafely(configText: editor.string)
-                appendLog("[TungBox] TUN 已启用（\(reason)）\n")
             } else {
-                disableTunDaemonIfActive()
-                // forceRestart: a config change (mode / node) needs the already-running
-                // user instance to restart so the new config takes effect.
-                if forceRestart && runner.isRunning { runner.stop() }
-                if !runner.isRunning {
-                    try startNormalProxy(config: url, port: port, reason: reason)
+                // Closing TUN is INSTANT: just drop the request file. The daemon
+                // reclaims utun29 and restores the system DNS on its own in the
+                // background. We do NOT block the UI on that, and we NEVER touch the
+                // user proxy — so the proxy keeps running and the switch feels
+                // immediate, exactly like a competitor's transparent-proxy toggle.
+                self.stopTunRequestHeartbeat()
+                try? TunServiceManager.disable(store: storeCopy)
+                self.wasTunActiveInThisSession = false
+                self.appendLog("[TungBox] TUN 已关闭（守护进程后台回收 utun29 与 DNS）\n")
+                let bgStore = storeCopy
+                Task.detached { _ = TunServiceManager.waitUntilStopped(store: bgStore, timeout: 8) }
+            }
+            guard token == self.runtimeTransitionID else { return }
+
+            // ===== 2) Converge the user proxy (7890) — independent of TUN =====
+            if wantSystemProxy {
+                do {
+                    if forceRestart {
+                        try await self.runSerializedOffMain { if runnerRef.isRunning { runnerRef.stop() } }
+                    }
+                    if !runnerRef.isRunning, let url = userProxyURL {
+                        try await self.runSerializedOffMain {
+                            try self.startNormalProxyBlocking(runner: runnerRef, config: url, port: port, reason: reason, log: log)
+                        }
+                    }
+                    guard token == self.runtimeTransitionID else { return }
+                    try await self.runSerializedOffMain { self.applySystemProxyBlocking(enabled: true, port: port) }
+                } catch {
+                    guard token == self.runtimeTransitionID else { return }
+                    self.appendLog("[TungBox] 系统代理启动失败（\(reason)）：\(error.localizedDescription)\n")
+                    self.isSystemProxyEnabled = false
+                    UserDefaults.standard.set(false, forKey: "systemProxyEnabled")
+                    self.systemProxyTransition = .none
+                    try? await self.runSerializedOffMain { self.applySystemProxyBlocking(enabled: false, port: port) }
+                    self.syncProxyPreferenceControls()
+                    self.showError(error)
+                }
+            } else {
+                try await self.runSerializedOffMain {
+                    if runnerRef.isRunning { runnerRef.stop() }
+                    self.applySystemProxyBlocking(enabled: false, port: port)
                 }
             }
 
-            setSystemProxy(enabled: isSystemProxyEnabled, port: port)
-            refreshStatus()
-            scheduleConnectionsRefreshAfterStart()
-        } catch {
-            showError(error)
-            markProxyStartupFailed()
+            guard token == self.runtimeTransitionID else { return }
+            self.clearFeatureTransitions()
+            self.refreshStatus()
+            self.scheduleConnectionsRefreshAfterStart()
         }
     }
 
-    /// Stop the TUN daemon's sing-box if it is (or might be) active, and reclaim the
-    /// network state in the background. Safe to call when TUN is already off.
-    func disableTunDaemonIfActive() {
-        let active = wasTunActiveInThisSession
+    /// Run blocking runtime work on the serial `runtimeQueue` (off the main thread)
+    /// and await the result without blocking the main actor. Serializing here means
+    /// two rapid toggles can never manipulate the runner/ports concurrently.
+    @discardableResult
+    private func runSerializedOffMain<T: Sendable>(_ work: @escaping @Sendable () throws -> T) async throws -> T {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<T, Error>) in
+            runtimeQueue.async {
+                do { cont.resume(returning: try work()) }
+                catch { cont.resume(throwing: error) }
+            }
+        }
+    }
+
+    /// Drop the TUN request flag and block until the root sing-box has released its
+    /// port + interface, so a follow-on user proxy can safely bind 7890. No-op when
+    /// TUN is not active. `nonisolated` — MUST run off the main thread (it sleeps).
+    nonisolated func tearDownTunDaemonBlocking(store: Store, wasTunActive: Bool, log: @Sendable (String) -> Void) {
+        let active = wasTunActive
             || TunServiceManager.status(store: store).isRunning
             || TunServiceManager.hasRequestFiles(store: store)
             || TunServiceManager.hasNetworkResidue()
         guard active else { return }
-        stopTunRequestHeartbeat()
         try? TunServiceManager.disable(store: store)
-        appendLog("[TungBox] TUN 标记已关闭\n")
-        let storeCopy = self.store
-        Task.detached { [weak self] in
-            let ok = TunServiceManager.waitUntilStopped(store: storeCopy, timeout: 8)
-            await MainActor.run { [weak self] in
-                guard let self else { return }
-                if !ok {
-                    let residue = TunServiceManager.networkResidueDescription() ?? "未知残留"
-                    self.appendLog("[警告] TUN 未确认回收：\(residue)。请到设置重新安装 TUN 服务。\n")
-                }
-                self.wasTunActiveInThisSession = false
-                self.refreshStatus()
+        log("[TungBox] TUN 标记已关闭，等待守护进程回收端口...\n")
+        if TunServiceManager.waitUntilStopped(store: store, timeout: 8) {
+            log("[TungBox] TUN 已确认回收\n")
+        } else {
+            let residue = TunServiceManager.networkResidueDescription() ?? "未知残留"
+            log("[警告] TUN 未确认回收：\(residue)。请到设置重新安装 TUN 服务。\n")
+        }
+    }
+
+    /// Apply the OS system-proxy setting for every active service, off the main
+    /// thread (networksetup spawns a subprocess per call). `nonisolated`.
+    nonisolated func applySystemProxyBlocking(enabled: Bool, port: Int) {
+        let services = getActiveNetworkServices()
+        for service in services {
+            if enabled {
+                _ = runCommand("/usr/sbin/networksetup", args: ["-setwebproxy", service, "127.0.0.1", "\(port)"])
+                _ = runCommand("/usr/sbin/networksetup", args: ["-setsecurewebproxy", service, "127.0.0.1", "\(port)"])
+                _ = runCommand("/usr/sbin/networksetup", args: ["-setsocksfirewallproxy", service, "127.0.0.1", "\(port)"])
+                _ = runCommand("/usr/sbin/networksetup", args: ["-setwebproxystate", service, "on"])
+                _ = runCommand("/usr/sbin/networksetup", args: ["-setsecurewebproxystate", service, "on"])
+                _ = runCommand("/usr/sbin/networksetup", args: ["-setsocksfirewallproxystate", service, "on"])
+            } else {
+                disableSystemProxyIfOwned(service: service, port: port)
             }
         }
     }
@@ -771,37 +896,64 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         wasTunActiveInThisSession = false
     }
 
+    /// Main-thread convenience wrapper around `startNormalProxyBlocking` (used by
+    /// legacy callers). Runs the blocking port waits on the calling thread.
     func startNormalProxy(config: URL, port: Int, reason: String) throws {
-        appendLog("[TungBox] 正在检查普通代理配置...\n")
+        try startNormalProxyBlocking(runner: runner, config: config, port: port, reason: reason) { [weak self] text in
+            Task { @MainActor [weak self] in self?.appendLog(text) }
+        }
+    }
+
+    /// Start the user sing-box on `port`, off the main thread.
+    ///
+    /// During a TUN→system-proxy handoff the mixed (7890) and clash (9090) ports are
+    /// still owned by the TUN daemon's *root* sing-box, which keeps listening for a
+    /// few seconds after we drop the request while it drains. `reapStrayUserProcesses`
+    /// only kills *user*-owned strays — it cannot touch the root daemon — and the
+    /// daemon-PID check in `waitUntilStopped` is throttled and can report "gone" a
+    /// beat too early. So the real, authoritative gate is the ports themselves:
+    /// block until BOTH are actually free before binding, otherwise sing-box FATALs
+    /// with "address already in use" and 7890 never comes up. `nonisolated` so it can
+    /// run inside the serial runtime queue.
+    nonisolated func startNormalProxyBlocking(runner: Runner, config: URL, port: Int, reason: String, log: @Sendable (String) -> Void) throws {
+        log("[TungBox] 正在检查普通代理配置...\n")
         _ = try runner.check(config: config)
-        // Reap orphaned user-owned sing-box instances (from a previous run or a
-        // desynced state) that still hold the mixed/clash ports and the cache.db
-        // file lock. Without this, the fresh instance fails with
-        // "initialize cache-file: timeout" or a port-in-use bind error and 7890
-        // never comes up. Then wait for both ports to actually free, then start.
         let clashPort = 9090
+        // Clear our own strays, then give the ports a SHORT chance to free. We do NOT
+        // hard-fail on the bind probe anymore — sing-box binds with SO_REUSEADDR and
+        // is the real authority on whether the port is usable; the probe was vetoing
+        // startup even when the port was actually bindable. If it doesn't clear fast,
+        // SIGKILL any sing-box still holding it and just proceed to start.
         runner.reapStrayUserProcesses()
-        _ = waitForLocalTCPPortFree(port, timeout: 4.0)
-        _ = waitForLocalTCPPortFree(clashPort, timeout: 4.0)
+        // Proactively SIGKILL any sing-box still holding 7890/9090 in ANY state
+        // (e.g. bound-but-not-listening after a FATAL/mid-exit — the real cause of
+        // the EADDRINUSE we kept hitting). Then a short settle wait.
+        killSingBoxHoldersOfPorts([port, clashPort])
+        if !waitForLocalTCPPortsFree([port, clashPort], timeout: 3.0) {
+            runner.reapStrayUserProcesses()
+            killSingBoxHoldersOfPorts([port, clashPort])
+            _ = waitForLocalTCPPortsFree([port, clashPort], timeout: 2.0)
+            log("[TungBox] 端口探测：\(portHoldersDescription([port, clashPort]))\n")
+        }
         try runner.start(config: config, elevated: false)
         if waitForLocalTCPPort(port, timeout: 6.0) {
-            appendLog("[TungBox] \(reason)完成，本地代理端口 \(port) 已监听\n")
+            log("[TungBox] \(reason)完成，本地代理端口 \(port) 已监听\n")
             return
         }
-        appendLog("[TungBox] 端口 \(port) 未在首次启动内监听，重试一次...\n")
+        log("[TungBox] 端口 \(port) 未在首次启动内监听，重试一次...\n")
         runner.stop()
         runner.reapStrayUserProcesses()
-        _ = waitForLocalTCPPortFree(port, timeout: 4.0)
-        _ = waitForLocalTCPPortFree(clashPort, timeout: 4.0)
+        killSingBoxHoldersOfPorts([port, clashPort])
+        _ = waitForLocalTCPPortsFree([port, clashPort], timeout: 3.0)
         try runner.start(config: config, elevated: false)
         guard waitForLocalTCPPort(port, timeout: 6.0) else {
             runner.stop()
-            throw NSError.user("普通代理启动失败：本地端口 \(port) 未开始监听，系统代理没有切换到空端口。请查看日志中的 sing-box 退出原因。")
+            throw NSError.user("普通代理启动失败：本地端口 \(port) 未开始监听。请查看日志中的 sing-box 退出原因。端口探测：\(portHoldersDescription([port, clashPort]))")
         }
-        appendLog("[TungBox] \(reason)完成（重试后），本地代理端口 \(port) 已监听\n")
+        log("[TungBox] \(reason)完成（重试后），本地代理端口 \(port) 已监听\n")
     }
 
-    func waitForLocalTCPPortFree(_ port: Int, timeout: TimeInterval) -> Bool {
+    nonisolated func waitForLocalTCPPortFree(_ port: Int, timeout: TimeInterval) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             if !canConnectLocalTCPPort(port) {
@@ -812,7 +964,126 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         return !canConnectLocalTCPPort(port)
     }
 
-    func waitForLocalTCPPort(_ port: Int, timeout: TimeInterval) -> Bool {
+    /// Wait until every port in `ports` can actually be BOUND. Authoritative gate
+    /// for the TUN→system-proxy handoff. A connect test is NOT enough: while the
+    /// TUN daemon's sing-box drains on shutdown it closes its listener (so connect
+    /// is already refused — port looks "free") yet the process still holds the bound
+    /// socket until it fully exits a couple seconds later, so a fresh `bind` fails
+    /// with "address already in use". Only an explicit bind test reflects what
+    /// sing-box's own bind will see.
+    nonisolated func waitForLocalTCPPortsFree(_ ports: [Int], timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if ports.allSatisfy({ canBindLocalTCPPort($0) }) {
+                return true
+            }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        return ports.allSatisfy { canBindLocalTCPPort($0) }
+    }
+
+    /// Whether 127.0.0.1:`port` can be bound right now by sing-box.
+    ///
+    /// MUST mirror sing-box's own bind options or the gate is wrong. sing-box is Go,
+    /// and Go's net listener sets SO_REUSEADDR — so it can bind a port whose old
+    /// connections are still in TIME_WAIT. Testing WITHOUT SO_REUSEADDR (as an
+    /// earlier version did) made this fail with EADDRINUSE for the full ~15s
+    /// TIME_WAIT window after the TUN daemon's sing-box (which had served live
+    /// connections on 7890) exited — even though sing-box could have bound
+    /// immediately. That stalled and then failed every TUN→system-proxy handoff.
+    /// Verified: a plain bind fails errno 48 in TIME_WAIT; with SO_REUSEADDR it
+    /// succeeds the instant the listener is gone.
+    nonisolated func canBindLocalTCPPort(_ port: Int) -> Bool {
+        let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { return false }
+        defer { Darwin.close(fd) }
+
+        var reuse: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
+
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = in_port_t(UInt16(port).bigEndian)
+        addr.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+
+        return withUnsafePointer(to: &addr) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                Darwin.bind(fd, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0
+            }
+        }
+    }
+
+    /// Diagnostic: actually attempt the bind and report the exact failure (errno +
+    /// strerror), so we can tell EADDRINUSE (something holds it) from EMFILE (we ran
+    /// out of file descriptors) from anything else — instead of guessing.
+    nonisolated func bindFailureReason(_ port: Int) -> String {
+        let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+        if fd < 0 {
+            let e = errno
+            return "\(port): socket() 失败 errno=\(e)(\(String(cString: strerror(e))))"
+        }
+        defer { Darwin.close(fd) }
+        var reuse: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = in_port_t(UInt16(port).bigEndian)
+        addr.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+        let rc = withUnsafePointer(to: &addr) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                Darwin.bind(fd, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        if rc == 0 { return "\(port): 可 bind" }
+        let e = errno
+        return "\(port): bind 失败 errno=\(e)(\(String(cString: strerror(e))))"
+    }
+
+    /// SIGKILL any *sing-box* process currently LISTENING on the given local ports.
+    /// This is the decisive way to reclaim 7890/9090 from a lingering instance — our
+    /// own user sing-box that was SIGTERM'd and is still draining keeps the listener
+    /// open, and SO_REUSEADDR can't bind past a live listener. We only kill processes
+    /// whose command line contains "sing-box" so we never touch an unrelated app.
+    nonisolated func killSingBoxHoldersOfPorts(_ ports: [Int]) {
+        for port in ports {
+            // NO `-sTCP:LISTEN` filter: a sing-box that bound the port but FATAL'd
+            // before listen() (or is mid-exit) still HOLDS the bound socket and
+            // causes EADDRINUSE, yet shows no LISTEN state. Match any TCP socket on
+            // the port; we only kill processes whose command is sing-box.
+            let pidList = runCommand("/usr/sbin/lsof", args: ["-nP", "-iTCP:\(port)", "-t"], timeoutSeconds: 2)
+            for token in pidList.split(whereSeparator: { $0 == "\n" || $0 == " " || $0 == "\t" }) {
+                guard let pid = Int32(token) else { continue }
+                let cmd = runCommand("/bin/ps", args: ["-p", "\(pid)", "-o", "command="], timeoutSeconds: 2)
+                guard cmd.contains("sing-box") else { continue }
+                Darwin.kill(pid, SIGKILL)
+            }
+        }
+    }
+
+    /// Human-readable description of who holds the given ports + the precise bind
+    /// failure (errno) + our own open-fd count, so a failure is fully self-diagnosing.
+    nonisolated func portHoldersDescription(_ ports: [Int]) -> String {
+        var holders: [String] = []
+        for port in ports {
+            let out = runCommand("/usr/sbin/lsof", args: ["-nP", "-iTCP:\(port)"], timeoutSeconds: 2)
+            for line in out.split(separator: "\n").dropFirst().prefix(3) {
+                let cols = line.split(separator: " ", omittingEmptySubsequences: true)
+                if cols.count >= 3 {
+                    holders.append("\(port):\(cols[0])(pid \(cols[1]),uid \(cols[2]))")
+                }
+            }
+        }
+        let reasons = ports.map { bindFailureReason($0) }.joined(separator: ", ")
+        // Our own open file-descriptor count — to catch fd exhaustion (EMFILE).
+        let myFD = runCommand("/usr/sbin/lsof", args: ["-p", "\(getpid())"], timeoutSeconds: 2)
+            .split(separator: "\n").count
+        let who = holders.isEmpty ? "无监听者" : holders.joined(separator: "; ")
+        return "\(who)；bind 探测=[\(reasons)]；本进程fd=\(myFD)"
+    }
+
+    nonisolated func waitForLocalTCPPort(_ port: Int, timeout: TimeInterval) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             if canConnectLocalTCPPort(port) {
@@ -823,7 +1094,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         return false
     }
 
-    func canConnectLocalTCPPort(_ port: Int) -> Bool {
+    nonisolated func canConnectLocalTCPPort(_ port: Int) -> Bool {
         let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
         guard fd >= 0 else { return false }
         defer { Darwin.close(fd) }
@@ -952,7 +1223,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         return true
     }
 
-    func stopService(clearSystemProxySynchronously: Bool = false) {
+    func stopService(clearSystemProxySynchronously: Bool = false, isTerminating: Bool = false) {
         let shouldDisableTun = wasTunActiveInThisSession && (
             isTunEnabled
             || TunServiceManager.status(store: store).isRunning
@@ -967,7 +1238,14 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             stopTunRequestHeartbeat()
             try? TunServiceManager.disable(store: store)
             appendLog("[TungBox] TUN 标记已关闭\n")
-            if clearSystemProxySynchronously {
+            if isTerminating {
+                // App is quitting: removing the request files is all we owe the
+                // persistent root daemon — it reclaims utun29 and restores the
+                // system DNS on its own within ~1s. Never block the main thread
+                // (and the app's exit) waiting for that reclaim to finish.
+                appendLog("[TungBox] 退出：已交由后台守护进程回收 TUN\n")
+                wasTunActiveInThisSession = false
+            } else if clearSystemProxySynchronously {
                 let timeout: TimeInterval = 8
                 if TunServiceManager.waitUntilStopped(store: store, timeout: timeout) {
                     appendLog("[TungBox] TUN 已确认回收\n")
@@ -1019,9 +1297,13 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         wasProxyActiveInThisSession = false
 
         isSystemProxyEnabled = false
-        isProxyServiceTransitioning = false
+        clearFeatureTransitions()
 
-        refreshStatus()
+        // No UI refresh on the exit path — the app is tearing down and a status
+        // sweep here only adds work (and timers) to a process that is going away.
+        if !isTerminating {
+            refreshStatus()
+        }
     }
 
     func setSystemProxySync(enabled: Bool, port: Int) {
@@ -1253,7 +1535,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         let modeValue = readMode(from: config)
         config = setTunEnabled(true, in: config)
         config = ensureModeSupport(in: config, mode: Mode(value: modeValue, displayName: modeDisplayName(modeValue)))
-        config = keepLoopbackLocalProxyInboundForTunRuntime(in: config)
+        config = stripLocalListenersForTunDaemon(in: config)
         config = applyTunAutomaticEgressRouting(in: config)
         config = applyTunPhysicalEgressBinding(in: config)
         config = applyTunRuntimeRouteExclusions(in: config)
@@ -1302,42 +1584,34 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         }
     }
 
-    func keepLoopbackLocalProxyInboundForTunRuntime(in config: [String: Any]) -> [String: Any] {
+    /// The TUN daemon and the user proxy are now fully independent processes. The
+    /// daemon must NOT bind the user proxy's ports (7890 mixed + 9090 clash) — that
+    /// shared-port design forced a fragile hand-off on every TUN toggle. Here we
+    /// strip ALL local proxy inbounds from the daemon config (it only needs the TUN
+    /// inbound + utun29) and move its clash_api to a dedicated port so it never
+    /// collides with the user runner's 9090.
+    func stripLocalListenersForTunDaemon(in config: [String: Any]) -> [String: Any] {
         var config = config
+
         var inbounds = config["inbounds"] as? [[String: Any]] ?? []
         let localTypes: Set<String> = ["mixed", "http", "socks"]
-        var keptLoopbackProxy = false
-        var droppedExternalProxy = false
-
-        inbounds = inbounds.compactMap { inbound in
-            guard let type = (inbound["type"] as? String)?.lowercased(),
-                  localTypes.contains(type) else {
-                return inbound
-            }
-
-            var inbound = inbound
-            let listen = (inbound["listen"] as? String)?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .lowercased()
-            if listen == nil || listen?.isEmpty == true {
-                inbound["listen"] = "127.0.0.1"
-                keptLoopbackProxy = true
-                return inbound
-            }
-            if let listen, ["127.0.0.1", "localhost", "::1"].contains(listen) {
-                keptLoopbackProxy = true
-                return inbound
-            }
-
-            droppedExternalProxy = true
-            return nil
+        let before = inbounds.count
+        inbounds = inbounds.filter { inbound in
+            guard let type = (inbound["type"] as? String)?.lowercased() else { return true }
+            return !localTypes.contains(type)
         }
         config["inbounds"] = inbounds
-        if keptLoopbackProxy {
-            appendLog("[TUN] 调试：保留本地回环代理入口用于对照测试\n")
+        if inbounds.count < before {
+            appendLog("[TUN] 守护进程不绑定本地代理端口（7890 由用户代理独占）\n")
         }
-        if droppedExternalProxy {
-            appendLog("[TUN] 已移除非回环本地代理入口，避免 root TUN 服务暴露端口\n")
+
+        // Keep clash_api (the clash_mode route rules depend on it) but on a dedicated
+        // port so it never collides with the user runner's 9090.
+        if var experimental = config["experimental"] as? [String: Any],
+           var clashAPI = experimental["clash_api"] as? [String: Any] {
+            clashAPI["external_controller"] = "127.0.0.1:\(TungBoxConfig.tunDaemonClashPort)"
+            experimental["clash_api"] = clashAPI
+            config["experimental"] = experimental
         }
         return config
     }
@@ -2276,11 +2550,27 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         refreshSubscriptionEmptyState()
     }
 
+    /// Drive a status chip (label + built-in spinner) from a feature's transition.
+    private func applyChipState(chip: MD3StatusChip, transition: FeatureTransition, isOn: Bool) {
+        switch transition {
+        case .starting:
+            chip.transitioningText = "启动中"
+            chip.status = .transitioning
+        case .stopping:
+            chip.transitioningText = "关闭中"
+            chip.status = .transitioning
+        case .none:
+            chip.status = isOn ? .active : .inactive
+        }
+    }
+
     func refreshStatus() {
         let isRunning = isProxyRuntimeRunning()
         let isActiveOrRequested = isProxyServiceActiveOrRequested()
-        statusChip.isActive = isSystemProxyEnabled       // 系统代理卡片
-        tunStatusChip.isActive = isTunEnabled            // TUN 卡片
+        // 系统代理卡片：过渡中显示 启动中/关闭中（内置转圈），否则显示运行态。
+        applyChipState(chip: statusChip, transition: systemProxyTransition, isOn: isSystemProxyEnabled)
+        // TUN 卡片
+        applyChipState(chip: tunStatusChip, transition: tunTransition, isOn: isTunEnabled)
         syncProxyPreferenceControls()
         refreshTrayIcon()
         refreshHomeFeatureStatus()
@@ -2291,7 +2581,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             currentNodeNameLabel.stringValue = formattedNode
             let activeDelay = nodes.first(where: { $0.tag == activeNodeInfo.name })?.delay ?? "—"
             currentNodeDelayLabel.stringValue = activeDelay == "未测试" ? "—" : activeDelay
-            
+            currentNodeDelayLabel.textColor = MD3.latencyTextColor(currentNodeDelayLabel.stringValue)
+
             if isRunning {
                 if statsTimer == nil {
                     startStatsTimer()
@@ -2440,7 +2731,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     }
 
     func stopServiceFromDelegate() {
-        stopService(clearSystemProxySynchronously: true)
+        stopService(clearSystemProxySynchronously: true, isTerminating: true)
     }
 
     func setSystemProxy(enabled: Bool, port: Int, rollbackOnMismatch: Bool = false) {

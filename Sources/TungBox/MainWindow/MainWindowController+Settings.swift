@@ -855,7 +855,9 @@ extension MainWindowController {
     }
 
     func isTunRuntimeRunning() -> Bool {
-        isTunEnabled && TunServiceManager.activeSingBoxPID(store: store) != nil
+        // Non-blocking (cache/pidfile only) — called from refreshStatus on the main
+        // thread, so it must never trigger the ~2s `ps` scan or the UI freezes.
+        isTunEnabled && TunServiceManager.activeSingBoxPID(store: store, allowScan: false) != nil
     }
 
     func enableTunServiceSafely(configText: String) throws {
