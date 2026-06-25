@@ -485,8 +485,15 @@ extension MainWindowController {
         }
         runningStatsMissCount = 0
 
+        // TUN 守护进程是独立 sing-box 进程，clash_api 在 9091。要算 TUN 流量
+        // 必须把那个端口也拉上，否则 TUN-only 时 delta 永远是 0、流量统计为 0。
+        let extraPorts: [Int] = isTunRuntimeRunning() ? [TungBoxConfig.tunDaemonClashPort] : []
+        let allPorts: [Int] = [9090] + extraPorts
+        let prevTotals = prevTrafficTotals
+        let elapsedSinceLast = max(Date().timeIntervalSince(connectionRefreshTime), 0.5)
         Task {
-            let apiConnections = try? await ClashAPI.connections()
+            let apiConnections = try? await ClashAPI.connectionsFromAll(extraPorts: extraPorts)
+            let totals = (try? await ClashAPI.trafficTotals(ports: allPorts)) ?? [:]
             let proxiesObj = (try? await ClashAPI.proxies())
             
             let rssValue = await withCheckedContinuation { (continuation: CheckedContinuation<String, Never>) in
@@ -521,11 +528,29 @@ extension MainWindowController {
             await MainActor.run { [weak self] in
                 guard let self = self else { return }
                 guard self.isProxyRuntimeRunning() else { return }
-                
+
                 if let apiConnections {
                     self.applyConnections(apiConnections, detail: "实时刷新")
                 }
-                
+
+                // 流量累计走 totals 路径（包含 UDP/IPv6/已关闭短连接），同时算出
+                // 这次 ↔ 上次的 delta 用作实时速率显示。
+                if !totals.isEmpty {
+                    var deltaUp: Int64 = 0, deltaDown: Int64 = 0
+                    for (port, curr) in totals {
+                        if let p = prevTotals[port], curr.upload >= p.upload, curr.download >= p.download {
+                            deltaUp += curr.upload - p.upload
+                            deltaDown += curr.download - p.download
+                        }
+                    }
+                    self.accumulateTrafficFromTotals(totals)
+                    if !prevTotals.isEmpty {
+                        let upSpeed = Int(Double(deltaUp) / elapsedSinceLast)
+                        let downSpeed = Int(Double(deltaDown) / elapsedSinceLast)
+                        self.updateRealtimeSpeed(uploadSpeed: upSpeed, downloadSpeed: downSpeed)
+                    }
+                }
+
                 // Sync delays and active node from Clash API
                 self.lastProxiesObj = proxiesObj
                 self.syncNodeDelaysFromClashAPI(proxiesObj: proxiesObj)
@@ -538,7 +563,7 @@ extension MainWindowController {
 
                 // 1. Update connections card
                 self.updateConnectionsCard(value: "\(connectionCount)", detail: "内存占用: \(rssValue)")
-                
+
                 if apiConnections == nil {
                     self.uploadValueLabel.stringValue = "—"
                     self.downloadValueLabel.stringValue = "—"

@@ -168,6 +168,10 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var runningStatsMissCount = 0
     var lastProxiesObj: [String: Any]? = nil
     var prevConnections: [ConnectionInfo] = []
+    /// 上一次拉到的 sing-box 进程级累计字节数（按端口分别记，因为用户代理 9090 和
+    /// TUN 守护 9091 是独立进程）。流量累计用这两个数字相减得 delta，能算上 UDP /
+    /// IPv6 / 已关闭的短连接（per-connection delta 会漏算 YouTube 那种 QUIC 短流）。
+    var prevTrafficTotals: [Int: (upload: Int64, download: Int64)] = [:]
     var connectionRefreshTime: Date = .distantPast
     var settingsPages: [NSView] = []
     let settingsTabView = NSView()

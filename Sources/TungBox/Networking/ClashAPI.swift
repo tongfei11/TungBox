@@ -28,7 +28,42 @@ enum ClashAPI {
     }
 
     static func connections() async throws -> [ConnectionInfo] {
-        guard let object = try await requestJSON(path: "/connections") as? [String: Any],
+        try await parseConnections(from: requestJSON(path: "/connections"))
+    }
+
+    /// 同时拉用户代理(9090) 和 TUN 守护进程(9091) 的 connections，合并返回。
+    /// 解耦架构后两个 sing-box 进程各自维护连接表，流量统计必须把两边都算上，
+    /// 否则 TUN-only 模式（用户代理不跑）下流量永远为 0。
+    /// 用 ConnectionInfo.id 前缀加上端口区分，防止两个进程内部 id 碰撞。
+    static func connectionsFromAll(extraPorts: [Int]) async throws -> [ConnectionInfo] {
+        var results: [ConnectionInfo] = []
+        // 主端口（9090）
+        do {
+            let primary = try await connections()
+            results.append(contentsOf: primary)
+        } catch {
+            // 主端口拉不到不算致命，可能用户代理未启动。继续拉次端口。
+        }
+        for port in extraPorts {
+            do {
+                let raw = try await requestJSON(path: "/connections", port: port)
+                let extra = try await parseConnections(from: raw)
+                // 加端口前缀防止两个进程的 id 碰撞
+                let prefixed = extra.map { conn -> ConnectionInfo in
+                    var c = conn
+                    c.id = "p\(port):\(conn.id)"
+                    return c
+                }
+                results.append(contentsOf: prefixed)
+            } catch {
+                continue
+            }
+        }
+        return results
+    }
+
+    private static func parseConnections(from raw: Any) async throws -> [ConnectionInfo] {
+        guard let object = raw as? [String: Any],
               let connections = object["connections"] as? [[String: Any]] else { return [] }
         return connections.map { item in
             let metadata = item["metadata"] as? [String: Any] ?? [:]
@@ -95,9 +130,41 @@ enum ClashAPI {
         return ((object["up"] as? Int) ?? 0, (object["down"] as? Int) ?? 0)
     }
 
+    /// 拉 `/connections` 顶层的 `uploadTotal` / `downloadTotal` —— 这是 sing-box
+    /// 进程级累计字节数（从启动起算），**包含 TCP + UDP + IPv6 + 已关闭的短连接**。
+    /// per-connection 的 upload/download 在连接关闭后会从列表移除，按 id 算 delta
+    /// 会丢掉短连接的字节（典型例子：YouTube 的 QUIC 短流，几秒钟传完就关）。
+    /// 用 totals 算 delta 可避免这种漏算。
+    /// 同时支持多端口（用户代理 + TUN 守护进程），返回 [port: (upload, download)]。
+    static func trafficTotals(ports: [Int]) async throws -> [Int: (upload: Int64, download: Int64)] {
+        var out: [Int: (upload: Int64, download: Int64)] = [:]
+        for port in ports {
+            guard let obj = try? await requestJSON(path: "/connections", port: port) as? [String: Any] else { continue }
+            // 不同版本 sing-box 字段类型可能是 Int 或 NSNumber，统一转 Int64
+            let up: Int64
+            let down: Int64
+            if let v = obj["uploadTotal"] as? Int64 { up = v }
+            else if let v = obj["uploadTotal"] as? Int { up = Int64(v) }
+            else if let v = obj["uploadTotal"] as? NSNumber { up = v.int64Value }
+            else { up = 0 }
+            if let v = obj["downloadTotal"] as? Int64 { down = v }
+            else if let v = obj["downloadTotal"] as? Int { down = Int64(v) }
+            else if let v = obj["downloadTotal"] as? NSNumber { down = v.int64Value }
+            else { down = 0 }
+            out[port] = (up, down)
+        }
+        return out
+    }
+
     @discardableResult
-    private static func requestJSON(path: String, method: String = "GET", body: [String: Any]? = nil) async throws -> Any {
-        guard let url = URL(string: TungBoxConfig.clashAPIURL + path) else {
+    private static func requestJSON(path: String, method: String = "GET", body: [String: Any]? = nil, port: Int? = nil) async throws -> Any {
+        let base: String
+        if let port = port {
+            base = "http://127.0.0.1:\(port)"
+        } else {
+            base = TungBoxConfig.clashAPIURL
+        }
+        guard let url = URL(string: base + path) else {
             throw NSError.user("Clash API 地址无效")
         }
         var request = URLRequest(url: url)

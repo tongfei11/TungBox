@@ -168,6 +168,7 @@ extension MainWindowController {
     func clearConnections() {
         connections.removeAll()
         prevConnections.removeAll()
+        prevTrafficTotals.removeAll()   // sing-box 重启时基准会归零，下次重新算
         connectionRefreshTime = .distantPast
         connectionsTable.reloadData()
         updateConnectionsCard(value: "0", detail: "服务未运行")
@@ -180,6 +181,10 @@ extension MainWindowController {
         }
         guard !isRefreshingConnections else { return }
         isRefreshingConnections = true
+        // 同时拉用户代理(9090) 和 TUN 守护进程(9091) 的 connections + totals。
+        // 流量累计走 totals 路径，包含 UDP/IPv6/已关闭短连接。
+        let extraPorts: [Int] = isTunRuntimeRunning() ? [TungBoxConfig.tunDaemonClashPort] : []
+        let allPorts: [Int] = [9090] + extraPorts
         Task {
             defer {
                 Task { @MainActor [weak self] in
@@ -187,9 +192,13 @@ extension MainWindowController {
                 }
             }
             do {
-                let list = try await ClashAPI.connections()
+                async let connsTask = ClashAPI.connectionsFromAll(extraPorts: extraPorts)
+                async let totalsTask = ClashAPI.trafficTotals(ports: allPorts)
+                let list = try await connsTask
+                let totals = (try? await totalsTask) ?? [:]
                 await MainActor.run {
                     applyConnections(list, detail: "实时刷新")
+                    if !totals.isEmpty { accumulateTrafficFromTotals(totals) }
                 }
             } catch {
                 await MainActor.run {
@@ -205,20 +214,16 @@ extension MainWindowController {
 
     func applyConnections(_ list: [ConnectionInfo], detail: String) {
         let now = Date()
-        let hasPreviousSnapshot = connectionRefreshTime != .distantPast && !prevConnections.isEmpty
         let elapsed = max(now.timeIntervalSince(connectionRefreshTime), 0.5)
 
+        // 每个 connection 的瞬时速率（仅用于显示连接表的"上传速度"列）。
+        // ⚠️ 这里只算速率，**不再用于流量累计** —— per-connection delta 会丢掉
+        // 短连接关闭后的字节（典型：YouTube QUIC 流），流量累计走 totals 路径。
         var speedMap: [String: (up: Int, down: Int)] = [:]
-        var deltaUpload = 0
-        var deltaDownload = 0
         for prev in prevConnections {
             if let curr = list.first(where: { $0.id == prev.id }) {
                 let upSpeed = max(0, curr.upload - prev.upload)
                 let downSpeed = max(0, curr.download - prev.download)
-                if hasPreviousSnapshot {
-                    deltaUpload += upSpeed
-                    deltaDownload += downSpeed
-                }
                 speedMap[curr.id] = (
                     Int(Double(upSpeed) / elapsed),
                     Int(Double(downSpeed) / elapsed)
@@ -237,30 +242,52 @@ extension MainWindowController {
         connectionRefreshTime = now
         connectionsTable.reloadData()
         updateConnectionsCard(value: "\(connections.count)", detail: detail)
-
-        let uploadSpeed = speedMap.values.reduce(0) { $0 + $1.up }
-        let downloadSpeed = speedMap.values.reduce(0) { $0 + $1.down }
-        updateRealtimeTraffic(uploadSpeed: uploadSpeed, downloadSpeed: downloadSpeed, deltaUpload: deltaUpload, deltaDownload: deltaDownload)
     }
 
-    func updateRealtimeTraffic(uploadSpeed: Int, downloadSpeed: Int, deltaUpload: Int, deltaDownload: Int) {
+    /// 用 sing-box 进程级累计字节数（`uploadTotal` / `downloadTotal`）算 delta，
+    /// 累加到持久化流量历史。包含 UDP / IPv6 / 已关闭的短连接，这是正确流量源。
+    /// 同时更新右上角实时速率（基于这一次和上一次的差值 / 间隔）。
+    func accumulateTrafficFromTotals(_ totals: [Int: (upload: Int64, download: Int64)]) {
+        // 第一次拉到：仅记录基准，不算 delta（否则会把"从 sing-box 启动到现在"
+        // 的累计全部一次性算进当前会话）。
+        guard !prevTrafficTotals.isEmpty else {
+            prevTrafficTotals = totals
+            return
+        }
+
+        var deltaUp: Int64 = 0
+        var deltaDown: Int64 = 0
+        for (port, curr) in totals {
+            if let prev = prevTrafficTotals[port], curr.upload >= prev.upload, curr.download >= prev.download {
+                deltaUp += curr.upload - prev.upload
+                deltaDown += curr.download - prev.download
+            }
+            // 若 sing-box 进程重启（totals 回到 0 或减小），那个端口本轮跳过，
+            // 不计 delta，从下一轮重新算基准。
+        }
+        prevTrafficTotals = totals
+
+        if deltaUp > 0 || deltaDown > 0 {
+            recordTraffic(upload: Int(min(Int64(Int.max), deltaUp)),
+                          download: Int(min(Int64(Int.max), deltaDown)))
+            totalUploadBytes += Int(min(Int64(Int.max), deltaUp))
+            totalDownloadBytes += Int(min(Int64(Int.max), deltaDown))
+            updateTrafficLabels()
+        }
+    }
+
+    /// 速率更新现在仅依赖 totals delta（流量累计同源），不再独立累加 delta。
+    func updateRealtimeSpeed(uploadSpeed: Int, downloadSpeed: Int) {
         let speedChanged = (currentUploadSpeed != uploadSpeed) || (currentDownloadSpeed != downloadSpeed)
         currentUploadSpeed = uploadSpeed
         currentDownloadSpeed = downloadSpeed
         uploadValueLabel.stringValue = "\(formatBytes(uploadSpeed))/s"
         downloadValueLabel.stringValue = "\(formatBytes(downloadSpeed))/s"
-        
         let activeState = isProxyServiceActiveOrRequested()
         if speedChanged || lastTrayActiveState == nil || activeState != lastTrayActiveState {
             lastTrayActiveState = activeState
             refreshTrayIcon()
         }
-
-        guard deltaUpload > 0 || deltaDownload > 0 else { return }
-        totalUploadBytes += deltaUpload
-        totalDownloadBytes += deltaDownload
-        recordTraffic(upload: deltaUpload, download: deltaDownload)
-        updateTrafficLabels()
     }
 
     @objc func closeSingleConnectionClicked(_ sender: Any) {
