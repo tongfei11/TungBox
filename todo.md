@@ -71,19 +71,9 @@
 
 ---
 
-## 4. TLS / 传输 高级
+## 4. TLS / 传输 高级（透传，无需 UI）
 
-| 功能 | 状态 | 备注 |
-|---|---|---|
-| **uTLS 指纹** (`tls.utls.fingerprint`) | 🟡 解析已支持 | 跟订阅；**UI 手动选择仍待办** |
-| **Reality** (`tls.reality`) | 🟡 解析已支持 | public_key + short_id；**UI 展示/校验仍待办** |
-| **ECH** (`tls.ech`) | ✅ [0123] 解析支持 | 跟订阅 ech-opts；UI 单独开关仍待办 |
-| **hy2 混淆 (salamander)** | ✅ | obfs.type + obfs-password |
-| **允许不安全证书** (`tls.insecure`) | ✅ 解析支持 | skip-cert-verify；可考虑 UI 全局开关 |
-| **httpupgrade 传输** | ✅ [0123] | 嵌套 httpupgrade-opts |
-| **Multiplex** (smux/brutal) | ✅ [0123] | 仅 TCP 协议生效 |
-
-**待办**：uTLS 指纹 / Reality / ECH 各自的 UI 配置面板（让用户手动开关 + 填字段），不只是跟订阅。
+uTLS 指纹 / Reality / ECH / hy2 salamander 混淆 / insecure / httpupgrade / Multiplex 都是**节点级字段，由服务端决定是否启用**（Reality 必须服务端配对 short_id+public_key；ECH 必须服务端发布 config；uTLS 仅客户端指纹）。订阅把字段下发，TungBox 解析后透传 sing-box 即可 —— **不需要任何 UI 开关**。全部已支持解析 [0122-0123]。
 
 ---
 
@@ -165,6 +155,5 @@
 1. **本地端口可配 + 局域网共享**（高频，竞品标配）
 2. **TUN 高级**（stack + MTU + strict_route + EIN）
 3. **DNS 设置面板**（上游 + 策略 + FakeIP 开关）
-4. **uTLS / Reality / ECH UI**（让用户能手动开关 + 填字段）
-5. **自动测速 interval/tolerance** + fallback UI
-6. **导入跳过节点提示** + clash secret 外部访问
+4. **自动测速 interval/tolerance** + fallback UI
+5. **导入跳过节点提示** + clash secret 外部访问
