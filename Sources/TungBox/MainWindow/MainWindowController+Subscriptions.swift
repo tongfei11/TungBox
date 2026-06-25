@@ -308,9 +308,11 @@ extension MainWindowController {
 
     @objc func deleteSubscriptionClicked() {
         guard let index = selectedSubscriptionIndex, subscriptions.indices.contains(index) else { return }
+        let name = subscriptions[index].name
         subscriptions.remove(at: index)
         selectSubscription(at: nil)
         store.saveSubscriptions(subscriptions)
+        showToast("订阅「\(name)」已删除", style: .info)
     }
 
     func selectSubscription(at index: Int?) {
@@ -483,6 +485,12 @@ extension MainWindowController {
     }
 
     func notifySubscriptionFailure(name: String, error: String) {
+        // UNUserNotificationCenter.current() ABORTS (SIGABRT, NSAssertion) when the
+        // process has no bundle identifier — e.g. `swift run` runs the raw binary
+        // outside an .app, and a subscription failure here would crash the whole
+        // app. Only call it when packaged; otherwise the log + showError already
+        // surface the failure.
+        guard Bundle.main.bundleIdentifier != nil else { return }
         let content = UNMutableNotificationContent()
         content.title = "订阅刷新失败"
         content.body = "\(name): \(String(error.prefix(120)))"
@@ -532,6 +540,27 @@ extension MainWindowController {
         refreshNodesFromEditor()
         refreshHomeFeatureStatus()
         appendLog("[订阅] \(subscription.name) 已刷新并写入配置\n")
+        showToast("订阅「\(subscription.name)」已更新", style: .success)
+        // 代理/TUN 在跑：必须让 sing-box 接管新订阅前后保持一致。
+        //
+        // 不做这步时的故障链：runner 还跑旧 config → editor/磁盘已是新 config → 节点表
+        // 渲染成新订阅 → 任何后续测速/自动 urltest 用新 tag 去找旧 runner 的 outbound →
+        // sing-box 报 "initialize outbound[N]: TLS required" 之类的混合状态错误。
+        //
+        // 修复：进入 transitioning 锁住测速入口、清空旧延迟（避免 stale 显示）、断开
+        // 所有旧连接、然后强制重启 runner 用新配置。reconcileRuntime 是异步的，
+        // 它内部成功后会自动 clearFeatureTransitions() 解锁。
+        if isSystemProxyEnabled || isTunEnabled {
+            beginFeatureTransition(
+                systemProxy: isSystemProxyEnabled ? .starting : nil,
+                tun: isTunEnabled ? .starting : nil
+            )
+            // 把所有节点延迟重置为"未测试"，防止用户点到旧延迟值误判节点状态。
+            for i in nodes.indices { nodes[i].delay = "未测试" }
+            refreshNodeGroupsView()
+            Task { _ = try? await ClashAPI.closeConnections() }
+            reconcileRuntime(reason: "订阅刷新", forceRestart: true)
+        }
     }
 
     func currentSubscription() -> Subscription? {

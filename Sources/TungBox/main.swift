@@ -2653,52 +2653,116 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         }
     }
 
+    enum ToastStyle {
+        case info, success, warning, error
+        var iconName: String {
+            switch self {
+            case .info: return "info.circle.fill"
+            case .success: return "checkmark.circle.fill"
+            case .warning: return "exclamationmark.triangle.fill"
+            case .error: return "xmark.octagon.fill"
+            }
+        }
+        @MainActor
+        var accentColor: NSColor {
+            switch self {
+            case .info: return MD3.primary
+            case .success: return MD3.success
+            case .warning: return MD3.warning
+            case .error: return MD3.error
+            }
+        }
+    }
+
     @MainActor
-    func showToast(_ message: String) {
+    func showToast(_ message: String, style: ToastStyle = .info, duration: TimeInterval = 3.0) {
         guard let contentView = window?.contentView else { return }
         toastView?.removeFromSuperview()
 
+        // 卡片容器 (右上角 / 阴影 / 圆角 / MD3 surface)
+        let card = NSView()
+        card.wantsLayer = true
+        card.layer?.backgroundColor = MD3.surface.cgColor
+        card.layer?.cornerRadius = 12
+        card.layer?.borderWidth = 1
+        card.layer?.borderColor = MD3.outlineVariant.cgColor
+        card.layer?.shadowColor = NSColor.black.cgColor
+        card.layer?.shadowOpacity = 0.18
+        card.layer?.shadowRadius = 14
+        card.layer?.shadowOffset = CGSize(width: 0, height: -3)
+        card.alphaValue = 0
+        card.translatesAutoresizingMaskIntoConstraints = false
+
+        // 左侧强调色条
+        let accent = NSView()
+        accent.wantsLayer = true
+        accent.layer?.backgroundColor = style.accentColor.cgColor
+        accent.layer?.cornerRadius = 2
+        accent.translatesAutoresizingMaskIntoConstraints = false
+
+        // 图标
+        let iconView = NSImageView()
+        iconView.image = NSImage(systemSymbolName: style.iconName, accessibilityDescription: nil)
+        iconView.contentTintColor = style.accentColor
+        iconView.imageScaling = .scaleProportionallyDown
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+
+        // 消息
         let label = NSTextField(labelWithString: message)
         label.font = .systemFont(ofSize: 13, weight: .semibold)
-        label.textColor = .white
-        label.alignment = .center
-        label.lineBreakMode = .byTruncatingTail
+        label.textColor = MD3.onSurface
+        label.lineBreakMode = .byWordWrapping
+        label.maximumNumberOfLines = 3
+        label.preferredMaxLayoutWidth = 280
         label.translatesAutoresizingMaskIntoConstraints = false
 
-        let container = NSView()
-        container.wantsLayer = true
-        container.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.78).cgColor
-        container.layer?.cornerRadius = 12
-        container.alphaValue = 0
-        container.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(label)
-        contentView.addSubview(container)
-        toastView = container
+        card.addSubview(accent)
+        card.addSubview(iconView)
+        card.addSubview(label)
+        contentView.addSubview(card)
+        toastView = card
 
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
-            label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
-            label.topAnchor.constraint(equalTo: container.topAnchor, constant: 10),
-            label.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -10),
-            container.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
-            container.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -28),
-            container.widthAnchor.constraint(lessThanOrEqualTo: contentView.widthAnchor, multiplier: 0.72)
+            accent.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 8),
+            accent.topAnchor.constraint(equalTo: card.topAnchor, constant: 12),
+            accent.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -12),
+            accent.widthAnchor.constraint(equalToConstant: 3),
+
+            iconView.leadingAnchor.constraint(equalTo: accent.trailingAnchor, constant: 10),
+            iconView.centerYAnchor.constraint(equalTo: card.centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: 18),
+            iconView.heightAnchor.constraint(equalToConstant: 18),
+
+            label.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 10),
+            label.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -14),
+            label.topAnchor.constraint(equalTo: card.topAnchor, constant: 12),
+            label.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -12),
+
+            // 右上角，从顶部下来一点不挡标题栏
+            card.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 16),
+            card.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
+            card.widthAnchor.constraint(greaterThanOrEqualToConstant: 220),
+            card.widthAnchor.constraint(lessThanOrEqualToConstant: 360)
         ])
 
+        // 滑入：alpha 0→1 + 从右滑入约 12pt
+        card.layer?.transform = CATransform3DMakeTranslation(12, 0, 0)
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.16
-            container.animator().alphaValue = 1
+            context.duration = 0.22
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            card.animator().alphaValue = 1
+            card.layer?.transform = CATransform3DIdentity
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { [weak self, weak container] in
-            guard let container, self?.toastView === container else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self, weak card] in
+            guard let card, self?.toastView === card else { return }
             NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.18
-                container.animator().alphaValue = 0
+                context.duration = 0.22
+                context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+                card.animator().alphaValue = 0
+                card.layer?.transform = CATransform3DMakeTranslation(12, 0, 0)
             } completionHandler: {
-                DispatchQueue.main.async {
-                    container.removeFromSuperview()
-                }
+                DispatchQueue.main.async { card.removeFromSuperview() }
             }
         }
     }

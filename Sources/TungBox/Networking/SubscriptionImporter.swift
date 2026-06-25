@@ -15,6 +15,14 @@ enum SubscriptionImporter {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 30
         config.timeoutIntervalForResource = 60
+        // 订阅下载必须直连，不能走系统代理。否则代理开着时 URLSession 会读
+        // 系统代理设置（指向 127.0.0.1:7890）→ 订阅请求经自家代理 → 该域名若
+        // 命中代理规则又被丢回本机，自家代理空转/超时 → 刷新失败 → 触发崩溃路径。
+        config.connectionProxyDictionary = [
+            kCFNetworkProxiesHTTPEnable as AnyHashable: 0,
+            kCFNetworkProxiesHTTPSEnable as AnyHashable: 0,
+            kCFNetworkProxiesSOCKSEnable as AnyHashable: 0
+        ]
         let session = URLSession(configuration: config)
 
         let semaphore = DispatchSemaphore(value: 0)

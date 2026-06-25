@@ -269,7 +269,7 @@ final class Runner: @unchecked Sendable {
         guard let binary = findSingBox() else {
             throw NSError.user("找不到 sing-box。请先安装：brew install sing-box")
         }
-        let actualConfig = preprocessTestConfig(at: config)
+        let actualConfig = preprocessTestConfig(at: config, isolatingOutbound: outbound)
         let start = Date()
         
         let result: (status: Int32, output: String) = try await withCheckedThrowingContinuation { continuation in
@@ -290,7 +290,11 @@ final class Runner: @unchecked Sendable {
         
         if result.status != 0 {
             let message = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-            throw NSError.user(message.isEmpty ? "节点延迟测试超时或失败" : message)
+            // Include the test-config path so a "TLS required" / "initialize outbound"
+            // failure can be inspected against the EXACT JSON sing-box saw at that
+            // moment (race conditions during subscription swap are otherwise opaque).
+            let diag = "（测速配置：\(actualConfig.path)）"
+            throw NSError.user((message.isEmpty ? "节点延迟测试超时或失败" : message) + diag)
         }
         return "\(Int(Date().timeIntervalSince(start) * 1000)) ms"
     }
@@ -417,16 +421,22 @@ final class Runner: @unchecked Sendable {
         return url
     }
 
-    private func preprocessTestConfig(at url: URL) -> URL {
+    /// Build a SINGLE-outbound test config for `outboundTag` so `sing-box tools fetch`
+    /// only initializes that one node — not the full 30+ outbound graph. The previous
+    /// implementation kept ALL outbounds in the test config, so cold-starting the
+    /// fetcher meant loading the entire profile (~700-1500ms overhead). NekoBox feels
+    /// faster because it tests against a running core via clash API; for the cold
+    /// path we make the cold itself cheap.
+    private func preprocessTestConfig(at url: URL, isolatingOutbound outboundTag: String? = nil) -> URL {
         guard let data = try? Data(contentsOf: url),
               var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return url
         }
-        
+
         // Auto-fix any compatibility issues (like network: grpc) on the fly
         let (fixedJson, _) = ConfigCompatibilityChecker.autoFix(config: json)
         json = fixedJson
-        
+
         json.removeValue(forKey: "experimental")
         json.removeValue(forKey: "inbounds")
         
@@ -467,28 +477,48 @@ final class Runner: @unchecked Sendable {
             ]
         }
         
-        // 3. Filter out virtual/test outbounds to prevent background startup storm during testing,
-        // and set domain_resolver for proxy outbounds.
+        // Outbounds. If a single tag is requested, keep ONLY that outbound + direct
+        // (sing-box always needs direct/block). This is the big perf win on the cold
+        // test path — initializing one outbound takes ~30ms vs ~1500ms for 30+.
         if var outbounds = json["outbounds"] as? [[String: Any]] {
-            let virtualTypes: Set<String> = ["direct", "block", "dns", "selector", "urltest", "url-test", "fallback"]
-            // Filter out selectors, urltests, and fallbacks to prevent background testing storm at startup
-            outbounds = outbounds.filter { outbound in
-                guard let type = outbound["type"] as? String else { return false }
-                let typeLower = type.lowercased()
-                return !["selector", "urltest", "url-test", "fallback"].contains(typeLower)
-            }
-            
-            // Inject domain_resolver to use the direct public DNS for all physical proxy outbounds
-            for i in outbounds.indices {
-                if let type = outbounds[i]["type"] as? String,
-                   !virtualTypes.contains(type.lowercased()) {
-                    outbounds[i]["domain_resolver"] = dnsServerTag
+            if let only = outboundTag {
+                var matched: [String: Any]? = nil
+                for o in outbounds where (o["tag"] as? String) == only {
+                    matched = o; break
                 }
+                var kept: [[String: Any]] = []
+                if var m = matched {
+                    m["domain_resolver"] = dnsServerTag
+                    kept.append(m)
+                }
+                kept.append(["type": "direct", "tag": "direct"])
+                json["outbounds"] = kept
+            } else {
+                let virtualTypes: Set<String> = ["direct", "block", "dns", "selector", "urltest", "url-test", "fallback"]
+                outbounds = outbounds.filter { outbound in
+                    guard let type = outbound["type"] as? String else { return false }
+                    let typeLower = type.lowercased()
+                    return !["selector", "urltest", "url-test", "fallback"].contains(typeLower)
+                }
+                for i in outbounds.indices {
+                    if let type = outbounds[i]["type"] as? String, !virtualTypes.contains(type.lowercased()) {
+                        outbounds[i]["domain_resolver"] = dnsServerTag
+                    }
+                }
+                json["outbounds"] = outbounds
             }
-            json["outbounds"] = outbounds
         }
         
-        let tempURL = url.deletingLastPathComponent().appendingPathComponent("test_" + url.lastPathComponent)
+        // Suffix the file by tag so concurrent tag tests never overwrite each other.
+        let suffix: String = {
+            guard let t = outboundTag, !t.isEmpty else { return "" }
+            let safe = t.unicodeScalars
+                .map { CharacterSet.alphanumerics.contains($0) ? String(Character($0)) : "_" }
+                .joined()
+                .prefix(40)
+            return "_\(safe)"
+        }()
+        let tempURL = url.deletingLastPathComponent().appendingPathComponent("test\(suffix)_\(url.lastPathComponent)")
         if let outData = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys]) {
             try? outData.write(to: tempURL)
             return tempURL

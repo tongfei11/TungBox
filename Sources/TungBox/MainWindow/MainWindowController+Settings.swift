@@ -1216,6 +1216,7 @@ extension MainWindowController {
         }
         setupRuleSetURLFields()
         appendLog("[规则集] 已保存规则集获取地址。留空时使用订阅地址；订阅没有时使用内置默认地址。\n")
+        showToast("规则集地址已保存", style: .success)
     }
 
     @objc func toggleThemeClicked() {
@@ -1224,6 +1225,7 @@ extension MainWindowController {
         NSApp.appearance = NSAppearance(named: MD3.isDark ? .darkAqua : .aqua)
         notifyThemeChanged()
         appendLog("[TungBox] 已切换到\(MD3.isDark ? "深色" : "浅色")外观\n")
+        showToast("已切换到\(MD3.isDark ? "深色" : "浅色")外观", style: .info)
     }
 
     @discardableResult

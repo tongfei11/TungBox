@@ -209,17 +209,18 @@ extension MainWindowController {
         logs.string = ""
         logCountLabel.stringValue = "显示 0 条"
         refreshHomeFeatureStatus()
+        showToast("日志已清空", style: .info)
     }
 
     @objc func copyLogsClicked() {
         let text = logs.string
         guard !text.isEmpty else {
-            showToast("日志为空")
+            showToast("日志为空", style: .warning)
             return
         }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
-        showToast("日志已复制到剪贴板（\(text.components(separatedBy: .newlines).filter { !$0.isEmpty }.count) 行）")
+        showToast("日志已复制到剪贴板（\(text.components(separatedBy: .newlines).filter { !$0.isEmpty }.count) 行）", style: .success)
     }
 
     func appendLog(_ text: String) {

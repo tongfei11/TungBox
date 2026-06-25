@@ -557,6 +557,7 @@ extension MainWindowController {
         beginFeatureTransition(systemProxy: sender.isOn ? .starting : .stopping)
         syncProxyPreferenceControls()
         refreshStatus()   // show 启动中/关闭中 + spinner right away
+        showToast(sender.isOn ? "系统代理已开启" : "系统代理已关闭", style: sender.isOn ? .success : .info)
         reconcileRuntime(reason: sender.isOn ? "开启系统代理" : "关闭系统代理")
     }
 
@@ -591,6 +592,7 @@ extension MainWindowController {
         syncProxyPreferenceControls()
         refreshStatus()   // show 启动中/关闭中 + spinner right away
         appendLog("[\(source)] TUN 模式已\(tunEnabled ? "开启" : "关闭")\n")
+        showToast(tunEnabled ? "TUN 模式已开启" : "TUN 模式已关闭", style: tunEnabled ? .success : .info)
         reconcileRuntime(reason: tunEnabled ? "开启 TUN" : "关闭 TUN")
     }
 
@@ -598,6 +600,7 @@ extension MainWindowController {
         do {
             try saveCurrent()
             appendLog("[TungBox] 已保存\n")
+            showToast("配置已保存", style: .success)
         } catch {
             showError(error)
         }

@@ -14,20 +14,23 @@
 |---|---|---|
 | Shadowsocks (ss) | ✅ | method + password |
 | VMess | ✅ | uuid + alterId + cipher |
-| VLess | ✅ | uuid + flow |
+| VLess | ✅ | uuid + flow + **packet_encoding(xudp)** [0122] |
 | Trojan | ✅ | password |
 | Hysteria2 (hy2) | ✅ | password + **obfs/salamander 混淆** + up/down 带宽 |
-| TUIC | ✅ | uuid + password |
-| SOCKS / SOCKS5 | ✅ | username + password |
+| TUIC | ✅ | uuid + password + **alpn(默认h3) + congestion_control + udp_relay_mode** [0122] |
+| SOCKS / SOCKS5 | ✅ | username + password（socks5→socks 修正）[0122] |
 | HTTP | ✅ | username + password |
-| **Hysteria v1** | ❌ | 老版 hysteria，链接/字段与 hy2 不同（auth_str、协议字段差异） |
-| **Naive** | ❌ | naïveproxy（基于 HTTP/2 CONNECT），需要 `type: naive` 映射 |
-| **Mieru** | ❌ | mieru 协议（multiplexing + 抗探测），sing-box 1.11+ 支持 |
-| **AnyTLS** | ❌ | **订阅里已出现但被静默丢弃**（`default: return nil`），sing-box 1.12+ 支持，需加 `type: anytls` 映射 |
+| **Hysteria v1** | ✅ [0122] | auth_str + 字符串 obfs + 整数 mbps（与 hy2 区分） |
+| **Naive** | ✅ [0122] | username + password + 强制 TLS |
+| **AnyTLS** | ✅ [0122] | password + 强制 TLS（padding 由服务端协商，无需客户端配） |
+| **Mieru** | ❌ 内核不支持 | sing-box `option/` 无 mieru，跑不了（同 xhttp，需换 Xray/mihomo 内核） |
 
-**待办**：补 Hysteria v1 / Naive / Mieru / AnyTLS 的解析映射（截图里要的这几个）。
-- 优先 **AnyTLS**（用户订阅里已有，现在直接丢节点，体验最差）。
-- 传输层当前支持：ws / h2(http) / grpc；**缺 httpupgrade、quic**（可顺带补）。
+**已完成 [0122]**：AnyTLS / Hysteria v1 / Naive 解析；TUIC 补全 alpn/拥塞控制/udp_relay_mode；VLess 补 packet_encoding；TLS 增加 ALPN 解析 + 对 tuic/hy2/hy1/anytls/naive 强制建 TLS。已用 `sing-box check`(1.13.13) 逐个验证通过。
+**核内不支持**：**Mieru**、**xhttp 传输** —— sing-box 内核没有，订阅里这类节点会被丢弃（建议 UI 后续提示"X 个节点协议不支持已跳过"）。
+**已完成(B) [0123]**：传输层 **httpupgrade**（嵌套 httpupgrade-opts/ws-opts）+ http/h2（h2-opts host 数组）；TLS **ECH**（ech-opts.enable → `tls.ech`）；ws/grpc 改读嵌套 *-opts。`quic` 传输需 with_quic 编译标签，暂不主动生成。
+**已完成(C) [0123]**：**多路复用 smux → multiplex**（仅 vmess/vless/trojan/ss；含 protocol/max-connections/min-max-streams/padding/brutal）。
+**已完成(YAML 根治) [0123]**：手写**零依赖 YAML 子集解析器**（`parseYAMLDocument`）替换行式解析——支持块映射、块序列、**compact `- key: val`**、flow `{}`/`[]`、嵌套 map、带逗号引号标量。`parseClashProxies` 优先走它，行式解析保留为兜底。已用 8 节点混合 fixture（block+flow+嵌套 reality/ws/grpc/smux/ech/alpn）跑通 `sing-box check`。
+**待办**：导入时提示「X 个节点协议不支持已跳过」（mieru/xhttp 等被静默丢，需把丢弃计数传到导入 UI）。
 
 ---
 
