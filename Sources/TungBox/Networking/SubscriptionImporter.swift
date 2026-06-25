@@ -1,14 +1,127 @@
 import Foundation
 
 enum SubscriptionImporter {
-    static func fetch(urlString: String) throws -> String {
+    /// 机场后端常按 User-Agent 返回不同格式。同一个订阅 URL，sing-box UA 拿到
+    /// 的可能是没有节点的"骨架"，而 Clash UA 拿到完整节点表。fetch 优先用
+    /// sing-box UA（原生格式最优），上层若解析到 0 节点会用回退 UA 重试。
+    ///
+    /// 只列我们实际**能解析**的格式对应的 UA（sing-box JSON / Clash YAML）。
+    /// 不列 Surge 或 NekoBox UA：那些 UA 服务端会返回 Surge MANAGED-CONFIG 或
+    /// base64 share-link 列表，我们当前不解析这些格式，加进来只会浪费一次请求。
+    static let fallbackUserAgents = [
+        "sing-box/1.12.0",
+        "clash-verge/v2.4.4 mihomo/Meta",
+        "ClashMetaForAndroid/2.11.10.Meta",
+        "Clash/v1.18.0"
+    ]
+
+    /// 解析 HTTP 响应头里的 `subscription-userinfo: upload=X; download=Y; total=Z; expire=T`。
+    /// expire 为空或 0 表示无限期。
+    struct SubscriptionUserInfo {
+        var upload: Int64?
+        var download: Int64?
+        var total: Int64?
+        var expiresAt: Date?
+    }
+
+    static func parseSubscriptionUserInfo(_ header: String?) -> SubscriptionUserInfo {
+        var info = SubscriptionUserInfo()
+        guard let header = header else { return info }
+        for part in header.components(separatedBy: ";") {
+            let kv = part.trimmingCharacters(in: .whitespaces).components(separatedBy: "=")
+            guard kv.count == 2 else { continue }
+            let key = kv[0].trimmingCharacters(in: .whitespaces).lowercased()
+            let raw = kv[1].trimmingCharacters(in: .whitespaces)
+            switch key {
+            case "upload":   info.upload = Int64(raw)
+            case "download": info.download = Int64(raw)
+            case "total":    info.total = Int64(raw)
+            case "expire":
+                if let ts = TimeInterval(raw), ts > 0 {
+                    info.expiresAt = Date(timeIntervalSince1970: ts)
+                }
+            default: break
+            }
+        }
+        return info
+    }
+
+    /// Fetch the subscription trying multiple User-Agents until one returns content
+    /// that parses to at least one node. Mirrors what NekoBox/Surge users would see
+    /// — the same URL returns different formats per UA, and we always want the one
+    /// with real nodes (not the "skeleton" some panels return for unrecognized UAs).
+    /// Also returns the standard `subscription-userinfo` header so the UI can show
+    /// traffic usage / expiry.
+    static func fetchBest(urlString: String) throws -> (text: String, userAgent: String, info: SubscriptionUserInfo) {
+        var lastError: Error? = nil
+        var lastFetched: (text: String, info: SubscriptionUserInfo)? = nil
+        for ua in fallbackUserAgents {
+            do {
+                let (text, header) = try fetchWithHeader(urlString: urlString, userAgent: ua)
+                let info = parseSubscriptionUserInfo(header)
+                lastFetched = (text, info)
+                if let nodes = try? extractNodesFromAnyFormat(text), !nodes.isEmpty {
+                    return (text, ua, info)
+                }
+            } catch {
+                lastError = error
+            }
+        }
+        if let f = lastFetched { return (f.text, fallbackUserAgents.last ?? "", f.info) }
+        throw lastError ?? NSError.user("订阅下载失败")
+    }
+
+    /// fetch 的内部版本，同时返回响应里的 `subscription-userinfo`。
+    private static func fetchWithHeader(urlString: String, userAgent: String) throws -> (text: String, header: String?) {
+        guard let url = URL(string: urlString.trimmingCharacters(in: .whitespacesAndNewlines)),
+              ["http", "https"].contains(url.scheme?.lowercased()) else {
+            throw NSError.user("订阅地址必须是 http 或 https URL")
+        }
+        var request = URLRequest(url: url, timeoutInterval: 30)
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue("application/json,text/plain,*/*", forHTTPHeaderField: "Accept")
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForResource = 60
+        config.connectionProxyDictionary = [
+            kCFNetworkProxiesHTTPEnable as AnyHashable: 0,
+            kCFNetworkProxiesHTTPSEnable as AnyHashable: 0,
+            kCFNetworkProxiesSOCKSEnable as AnyHashable: 0
+        ]
+        let session = URLSession(configuration: config)
+        let semaphore = DispatchSemaphore(value: 0)
+        let result = LockedValue<Result<(Data, URLResponse), Error>?>(nil)
+        session.dataTask(with: request) { data, response, error in
+            if let error { result.set(.failure(error)) }
+            else { result.set(.success((data ?? Data(), response ?? URLResponse()))) }
+            semaphore.signal()
+        }.resume()
+        _ = semaphore.wait(timeout: .now() + 30)
+        guard let resolved = result.get() else { throw NSError.user("订阅下载超时，请检查网络或订阅地址") }
+        let (data, response) = try resolved.get()
+        let http = response as? HTTPURLResponse
+        if let http, !(200..<300).contains(http.statusCode) {
+            throw NSError.user("订阅下载失败：HTTP \(http.statusCode)")
+        }
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw NSError.user("订阅内容不是 UTF-8 文本")
+        }
+        // 响应头大小写不敏感；标准 key 是 subscription-userinfo
+        let header = http?.value(forHTTPHeaderField: "subscription-userinfo")
+            ?? http?.value(forHTTPHeaderField: "Subscription-Userinfo")
+        return (text, header)
+    }
+
+    static func fetch(urlString: String, userAgent: String = "sing-box/1.12.0") throws -> String {
         guard let url = URL(string: urlString.trimmingCharacters(in: .whitespacesAndNewlines)),
               ["http", "https"].contains(url.scheme?.lowercased()) else {
             throw NSError.user("订阅地址必须是 http 或 https URL")
         }
 
         var request = URLRequest(url: url, timeoutInterval: 30)
-        request.setValue("SFA/1.12.0 sing-box/1.12.0", forHTTPHeaderField: "User-Agent")
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         request.setValue("application/json,text/plain,*/*", forHTTPHeaderField: "Accept")
         request.cachePolicy = .reloadIgnoringLocalCacheData
 
@@ -82,6 +195,9 @@ enum SubscriptionImporter {
         let format = SubscriptionFormatParser.detectFormat(text)
 
         // sing-box JSON: use existing logic (config structure + rule sets already present)
+        // 给 sing-box JSON 分支做诊断：服务端可能下发了一份"骨架配置"——只有
+        // selector/urltest 组但成员是空的，订阅过期/套餐用完时常见。
+        var diagnostic: String? = nil
         if format == .singBoxJSON {
             let candidates = [
                 text.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -94,19 +210,30 @@ enum SubscriptionImporter {
                 if !nodes.isEmpty {
                     return (config, extractRuleSetURLs(fromConfig: config))
                 }
+                // 收集第一份能解析但 0 物理节点的配置作为诊断
+                if diagnostic == nil, let obs = config["outbounds"] as? [[String: Any]] {
+                    let virtual: Set<String> = ["selector", "urltest", "url-test", "fallback", "direct", "block", "dns"]
+                    let virtualCount = obs.filter { virtual.contains(($0["type"] as? String)?.lowercased() ?? "") }.count
+                    diagnostic = "下发了 \(obs.count) 个 outbound，其中 \(virtualCount) 个是 selector/urltest/direct 等虚拟节点，0 个真实代理节点"
+                }
             }
         }
 
         // Clash YAML / share links: extract nodes, wrap in minimal config
-        let nodes: [[String: Any]]
+        let rawNodes: [[String: Any]]
         switch format {
         case .singBoxJSON:
-            throw NSError.user("订阅内容看起来是 sing-box JSON 格式，但未找到可用的 outbounds 节点。请确认 Xboard 模板正确输出 outbounds。")
+            let detail = diagnostic.map { "\n\n诊断：\($0)。" } ?? ""
+            throw NSError.user("订阅内容是合法的 sing-box JSON，但里面没有真实代理节点。\(detail)\n\n常见原因：订阅 token 已过期、套餐已用完/到期、或服务端模板配置错误。请联系订阅服务商核查。")
         case .clashYAML:
-            nodes = try SubscriptionFormatParser.parseClashProxies(text)
+            rawNodes = try SubscriptionFormatParser.parseClashProxies(text)
         case .unknown:
             throw NSError.user("无法识别订阅格式。支持：\n• sing-box JSON（Xboard 面板模板输出）\n• Clash YAML（机场通用订阅格式）\n\nTungBox 仅支持订阅链接（http/https）导入，不支持单条节点分享链接（vmess:// / trojan:// 等）。\n\n当前内容预览：\(text.prefix(300))")
         }
+
+        // 过滤"信息伪节点"（剩余流量/套餐到期/官网/客服群 等）—— 这些机场塞进
+        // proxies 列表当公告用，连不上代理。默认过滤，不暴露开关。
+        let nodes = rawNodes.filter { !isFakeInfoNode($0) }
 
         guard !nodes.isEmpty else {
             throw NSError.user("解析到 0 个可用节点，请检查订阅内容是否有效。")
@@ -220,13 +347,34 @@ enum SubscriptionImporter {
     private static func appendNode(_ outbound: [String: Any], to result: inout [[String: Any]], seen: inout Set<String>) {
         guard let type = outbound["type"] as? String,
               isNodeOutbound(type),
-              isUsableNode(outbound) else { return }
+              isUsableNode(outbound),
+              !isFakeInfoNode(outbound) else { return }
 
         var node = outbound
         let tag = uniqueTag(normalizedTag(node["tag"] as? String, type: type, server: node["server"] as? String, index: result.count), seen: seen)
         node["tag"] = tag
         result.append(node)
         seen.insert(tag)
+    }
+
+    /// 机场常把套餐/流量/官网这些"提示信息"塞成伪节点（同一台 server，名字写
+    /// "剩余流量：xxx GB" / "套餐到期：2027-..." / "永久官网《xxx》" 等）。这些
+    /// 节点连不上代理，留在列表里只会占位 + 让测速一片失败。默认过滤，不暴露开关。
+    static func isFakeInfoNode(_ outbound: [String: Any]) -> Bool {
+        guard let tag = outbound["tag"] as? String else { return false }
+        let lower = tag.lowercased()
+        // 中文常见
+        let zhKeywords = ["剩余流量", "套餐", "到期", "重置", "官网", "网址", "群组", "telegram", "频道", "续费", "购买", "tg群", "TG群", "客服", "qq群", "QQ群", "公告"]
+        for kw in zhKeywords where tag.contains(kw) { return true }
+        // 英文常见
+        let enKeywords = ["expire", "reset", "traffic", "website", "homepage", "official", "subscribe", "renew", "remaining", "left:"]
+        for kw in enKeywords where lower.contains(kw) { return true }
+        // 含 URL/域名后缀的多半是导航/官网节点
+        if lower.contains("http://") || lower.contains("https://") { return true }
+        // 名字里直接带带宽/天数信息（如 "剩余 28 天"、"127.39 GB"）
+        if tag.range(of: #"\d+(\.\d+)?\s*(GB|MB|TB|KB|gb|mb|tb)"#, options: .regularExpression) != nil { return true }
+        if tag.range(of: #"\d+\s*(天|day|days)"#, options: .regularExpression) != nil { return true }
+        return false
     }
 
     private static func isNodeOutbound(_ type: String) -> Bool {

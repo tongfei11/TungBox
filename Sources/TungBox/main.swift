@@ -50,6 +50,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
     let split = MD3SplitView()
     let currentNodeNameLabel = NSTextField(labelWithString: "未连接")
+    let currentNodeAutoBadge = NSTextField(labelWithString: "自动")
     let currentNodeDelayLabel = NSTextField(labelWithString: "—")
     var totalUploadBytes = 0
     var totalDownloadBytes = 0
@@ -2577,8 +2578,10 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         
         if isActiveOrRequested {
             let activeNodeInfo = resolveActiveOutbound(proxiesObj: lastProxiesObj)
-            let formattedNode = activeNodeInfo.isAuto ? "\(activeNodeInfo.name) (自动)" : activeNodeInfo.name
-            currentNodeNameLabel.stringValue = formattedNode
+            // 自动模式刚启动 / 切换订阅那一刻，clash API 的 "now" 可能还没填好 →
+            // resolved name 是空字符串。给个明确的占位避免节点名行整个空白。
+            currentNodeNameLabel.stringValue = activeNodeInfo.name.isEmpty ? "（选择中…）" : activeNodeInfo.name
+            currentNodeAutoBadge.isHidden = !activeNodeInfo.isAuto
             let activeDelay = nodes.first(where: { $0.tag == activeNodeInfo.name })?.delay ?? "—"
             currentNodeDelayLabel.stringValue = activeDelay == "未测试" ? "—" : activeDelay
             currentNodeDelayLabel.textColor = MD3.latencyTextColor(currentNodeDelayLabel.stringValue)
@@ -2597,6 +2600,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             }
         } else {
             currentNodeNameLabel.stringValue = "未连接"
+            currentNodeAutoBadge.isHidden = true
             currentNodeDelayLabel.stringValue = "—"
             currentUploadSpeed = 0
             currentDownloadSpeed = 0

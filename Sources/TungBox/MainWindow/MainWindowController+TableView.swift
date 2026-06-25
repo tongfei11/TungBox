@@ -40,6 +40,12 @@ extension MainWindowController {
                 },
                 rightClick: { [weak self] in
                     self?.selectSubscription(at: rightIndex)
+                },
+                leftRefresh: { [weak self] in
+                    self?.refreshSubscription(at: leftIndex)
+                },
+                rightRefresh: { [weak self] in
+                    self?.refreshSubscription(at: rightIndex)
                 }
             )
             return cell

@@ -57,7 +57,7 @@ extension MainWindowController {
         let scroll = NSScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.hasVerticalScroller = true
-        scroll.drawsBackground = false
+        scroll.applyThinOverlayScroller()
         scroll.documentView = rulesTable
 
         rulesTable.backgroundColor = .clear

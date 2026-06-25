@@ -77,7 +77,7 @@ extension MainWindowController {
         let logScroll = NSScrollView()
         logScroll.translatesAutoresizingMaskIntoConstraints = false
         logScroll.hasVerticalScroller = true
-        logScroll.drawsBackground = false
+        logScroll.applyThinOverlayScroller()
         logScroll.documentView = logs
 
         logs.font = .monospacedSystemFont(ofSize: 12, weight: .regular)

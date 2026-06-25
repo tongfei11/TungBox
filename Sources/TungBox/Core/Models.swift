@@ -14,6 +14,12 @@ struct Subscription: Codable, Equatable {
     var profileID: UUID?
     var updatedAt: Date?
     var lastError: String?
+    /// 标准 `subscription-userinfo` 响应头里的流量信息（字节数）。
+    var upload: Int64?
+    var download: Int64?
+    var total: Int64?
+    /// 套餐到期时间（来自 expire= unix 时间戳）。
+    var expiresAt: Date?
 }
 
 struct NodeInfo {

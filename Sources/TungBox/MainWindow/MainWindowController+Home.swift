@@ -89,24 +89,60 @@ extension MainWindowController {
         currentNodeNameLabel.lineBreakMode = .byTruncatingTail
         currentNodeNameLabel.maximumNumberOfLines = 1
         currentNodeNameLabel.translatesAutoresizingMaskIntoConstraints = false
-        
+
+        // 自动选择标签：放在节点名右边的小绿色 chip。手动选节点时整体隐藏。
+        currentNodeAutoBadge.font = .systemFont(ofSize: 11, weight: .semibold)
+        currentNodeAutoBadge.textColor = MD3.onSuccessContainer
+        currentNodeAutoBadge.backgroundColor = MD3.successContainer
+        currentNodeAutoBadge.drawsBackground = true
+        currentNodeAutoBadge.isBezeled = false
+        currentNodeAutoBadge.alignment = .center
+        currentNodeAutoBadge.wantsLayer = true
+        currentNodeAutoBadge.layer?.cornerRadius = 8
+        currentNodeAutoBadge.layer?.masksToBounds = true
+        currentNodeAutoBadge.translatesAutoresizingMaskIntoConstraints = false
+        currentNodeAutoBadge.isHidden = true   // 默认隐藏
+        currentNodeAutoBadge.setContentHuggingPriority(.required, for: .horizontal)
+        currentNodeAutoBadge.setContentCompressionResistancePriority(.required, for: .horizontal)
+        registerThemeObserver { [weak self] in
+            guard let self else { return }
+            self.currentNodeAutoBadge.textColor = MD3.onSuccessContainer
+            self.currentNodeAutoBadge.backgroundColor = MD3.successContainer
+        }
+
         currentNodeDelayLabel.font = .systemFont(ofSize: 22, weight: .bold)
         currentNodeDelayLabel.textColor = MD3.success
+        currentNodeDelayLabel.lineBreakMode = .byClipping
+        currentNodeDelayLabel.maximumNumberOfLines = 1
         currentNodeDelayLabel.translatesAutoresizingMaskIntoConstraints = false
-        
+        // 延迟数字绝不被横向压缩/截断（之前 "141 ms" 被裁成 "141 n"）。
+        currentNodeDelayLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        currentNodeDelayLabel.setContentHuggingPriority(.required, for: .horizontal)
+
         let nodeLabelTitle = NSTextField(labelWithString: "当前节点")
         nodeLabelTitle.font = .systemFont(ofSize: 12, weight: .medium)
         nodeLabelTitle.textColor = MD3.onSurfaceVariant
-        
+
         let delayLabelTitle = NSTextField(labelWithString: "节点延迟")
         delayLabelTitle.font = .systemFont(ofSize: 12, weight: .medium)
         delayLabelTitle.textColor = MD3.onSurfaceVariant
-        
-        let nodeCol = NSStackView(views: [nodeLabelTitle, currentNodeNameLabel])
+
+        // 标题行：「当前节点」+ (自动) 绿色 chip。手动选节点时 chip 隐藏。
+        let titleRow = NSStackView(views: [nodeLabelTitle, currentNodeAutoBadge])
+        titleRow.orientation = .horizontal
+        titleRow.alignment = .centerY
+        titleRow.spacing = 6
+        titleRow.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            currentNodeAutoBadge.heightAnchor.constraint(equalToConstant: 18),
+            currentNodeAutoBadge.widthAnchor.constraint(greaterThanOrEqualToConstant: 36)
+        ])
+
+        let nodeCol = NSStackView(views: [titleRow, currentNodeNameLabel])
         nodeCol.orientation = .vertical
         nodeCol.alignment = .leading
         nodeCol.spacing = 4
-        
+
         let delayCol = NSStackView(views: [delayLabelTitle, currentNodeDelayLabel])
         delayCol.orientation = .vertical
         delayCol.alignment = .leading
@@ -494,8 +530,8 @@ extension MainWindowController {
                 self.lastProxiesObj = proxiesObj
                 self.syncNodeDelaysFromClashAPI(proxiesObj: proxiesObj)
                 let activeNodeInfo = self.resolveActiveOutbound(proxiesObj: proxiesObj)
-                let formattedNode = activeNodeInfo.isAuto ? "\(activeNodeInfo.name) (自动)" : activeNodeInfo.name
-                self.currentNodeNameLabel.stringValue = formattedNode
+                self.currentNodeNameLabel.stringValue = activeNodeInfo.name.isEmpty ? "（选择中…）" : activeNodeInfo.name
+                self.currentNodeAutoBadge.isHidden = !activeNodeInfo.isAuto
                 let activeDelay = self.nodes.first(where: { $0.tag == activeNodeInfo.name })?.delay ?? "—"
                 self.currentNodeDelayLabel.stringValue = activeDelay == "未测试" ? "—" : activeDelay
                 self.currentNodeDelayLabel.textColor = MD3.latencyTextColor(self.currentNodeDelayLabel.stringValue)

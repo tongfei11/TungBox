@@ -198,7 +198,10 @@ enum MD3 {
         isDark ? currentScheme.darkBackground.mixed(with: currentScheme.darkPrimary, ratio: 0.12) : currentScheme.lightBackground.mixed(with: currentScheme.lightPrimary, ratio: 0.08)
     }
     static var background: NSColor {
-        isDark ? currentScheme.darkBackground : currentScheme.lightBackground
+        // 浅色模式：固定 #ECECEC（用户指定）。深色模式保持原 darkBackground。
+        isDark
+            ? currentScheme.darkBackground
+            : NSColor(calibratedRed: 0xEC/255.0, green: 0xEC/255.0, blue: 0xEC/255.0, alpha: 1)
     }
     
     // Status colors
@@ -674,6 +677,74 @@ final class MD3TextField: NSTextField, MD3Themeable {
     func themeChanged() {
         updatePlaceholder()
         self.needsDisplay = true
+    }
+}
+
+// MARK: - 紧贴字符的 Label Cell（无左右 padding）
+
+/// 标准 `NSTextField(labelWithString:)` 在大字号下会有 ≈ 2-4pt 的水平 cell padding，
+/// 导致字符视觉左缘 比 frame.x 多缩进几 pt —— 视觉上和按钮/卡片对不齐。
+/// 这个 cell 把 padding 清零，字符从 frame.leading 紧贴绘制。
+final class MD3TightLabelCell: NSTextFieldCell {
+    override func drawingRect(forBounds rect: NSRect) -> NSRect { rect }
+    override func titleRect(forBounds rect: NSRect) -> NSRect { rect }
+}
+
+/// 替换给定 NSTextField 的 cell 为紧贴版本，保留原有的字体/颜色/字符串。
+@MainActor
+func tightenLabelCell(_ label: NSTextField) {
+    let new = MD3TightLabelCell()
+    new.isEditable = false
+    new.isBordered = false
+    new.drawsBackground = false
+    new.font = label.font
+    new.textColor = label.textColor
+    new.stringValue = label.stringValue
+    new.alignment = label.alignment
+    new.lineBreakMode = label.lineBreakMode
+    new.usesSingleLineMode = true
+    label.cell = new
+}
+
+// MARK: - MD3 Thin Overlay Scroller
+
+/// 极简滚动条：
+/// - 宽度只有系统默认的一半（≈ 7pt）
+/// - 完全透明的滑槽（无灰条占位）
+/// - 仅滚动时显示，停止后立即淡出
+/// 配合 NSScrollView 的 `scrollerStyle = .overlay`。
+final class MD3ThinScroller: NSScroller {
+    override class var isCompatibleWithOverlayScrollers: Bool { true }
+    override class func scrollerWidth(for controlSize: NSControl.ControlSize, scrollerStyle: NSScroller.Style) -> CGFloat {
+        // 系统 overlay scroller 一般 15pt → 减半
+        return 7
+    }
+    override func drawKnobSlot(in slotRect: NSRect, highlight flag: Bool) {
+        // 不画滑槽底色
+    }
+    override func drawKnob() {
+        let r = rect(for: .knob).insetBy(dx: 1.5, dy: 2)
+        guard r.width > 0, r.height > 0 else { return }
+        let radius = min(r.width, r.height) / 2
+        let path = NSBezierPath(roundedRect: r, xRadius: radius, yRadius: radius)
+        NSColor.secondaryLabelColor.withAlphaComponent(0.55).setFill()
+        path.fill()
+    }
+}
+
+extension NSScrollView {
+    /// 应用极简悬浮滚动条样式：无底色占位、宽度减半、仅滚动时显示。
+    func applyThinOverlayScroller() {
+        scrollerStyle = .overlay
+        autohidesScrollers = true
+        drawsBackground = false
+        if verticalScroller == nil { verticalScroller = MD3ThinScroller() }
+        else if !(verticalScroller is MD3ThinScroller) { verticalScroller = MD3ThinScroller() }
+        if let h = horizontalScroller, !(h is MD3ThinScroller) {
+            horizontalScroller = MD3ThinScroller()
+        }
+        // 让 knob 滚停后立即消失（fade out 立即触发）
+        verticalScroller?.knobStyle = .default
     }
 }
 
@@ -1224,164 +1295,310 @@ final class MD3ProfileCellView: NSTableCellView {
 }
 
 final class MD3SubscriptionItemView: NSView, MD3Themeable {
-    private let selectionPill = NSView()
-    private let iconView = NSImageView()
-    private let checkImageView = NSImageView()
+    // 仿 Clash Verge 排版：
+    //   左侧顶部：站点名（粗体）+ 域名（小）
+    //   左侧底部：流量进度条 + 「已用 / 总量」文本
+    //   右侧顶部：刷新按钮
+    //   右侧底部：上次刷新时间 + 到期日期
+    private let card = NSView()
     let titleLabel = NSTextField(labelWithString: "")
-    let subtitleLabel = NSTextField(labelWithString: "")
-    let statusLabel = NSTextField(labelWithString: "")
-    
-    var isSelected = false {
+    let domainLabel = NSTextField(labelWithString: "")
+    let trafficLabel = NSTextField(labelWithString: "")
+    let trafficBar = NSView()      // 进度条背景
+    let trafficFill = NSView()     // 进度条填充
+    private var trafficFillWidth: NSLayoutConstraint!
+    private let refreshButton = NSButton()
+    let updatedAtLabel = NSTextField(labelWithString: "")
+    let expiresLabel = NSTextField(labelWithString: "")
+    let errorLabel = NSTextField(labelWithString: "")
+
+    var isSelected = false { didSet { updateColors() } }
+    var isHovered = false { didSet { updateColors() } }
+    var isRefreshing = false {
         didSet {
-            updateColors()
+            if isRefreshing { startRefreshSpin() } else { stopRefreshSpin() }
         }
     }
-    
-    var isHovered = false {
-        didSet {
-            updateColors()
-        }
-    }
-    
     var onClick: (() -> Void)?
+    var onRefresh: (() -> Void)?
     private var trackingArea: NSTrackingArea?
-    
+
     override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        setup()
+        super.init(frame: frameRect); setup()
     }
-    
     required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        setup()
+        super.init(coder: coder); setup()
     }
-    
+
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
-        if let old = trackingArea {
-            removeTrackingArea(old)
-        }
+        if let old = trackingArea { removeTrackingArea(old) }
         let opts: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeAlways, .inVisibleRect]
-        let newArea = NSTrackingArea(rect: bounds, options: opts, owner: self, userInfo: nil)
-        addTrackingArea(newArea)
-        trackingArea = newArea
+        let area = NSTrackingArea(rect: bounds, options: opts, owner: self, userInfo: nil)
+        addTrackingArea(area); trackingArea = area
     }
-    
-    override func mouseEntered(with event: NSEvent) {
-        isHovered = true
-    }
-    
-    override func mouseExited(with event: NSEvent) {
-        isHovered = false
-    }
-    
-    override func mouseDown(with event: NSEvent) {
-        onClick?()
-    }
-    
+    override func mouseEntered(with event: NSEvent) { isHovered = true }
+    override func mouseExited(with event: NSEvent) { isHovered = false }
+    override func mouseDown(with event: NSEvent) { onClick?() }
+
     private func setup() {
         wantsLayer = true
-        
-        selectionPill.wantsLayer = true
-        selectionPill.layer?.cornerRadius = 16
-        selectionPill.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(selectionPill)
-        
-        iconView.image = NSImage(systemSymbolName: "personalhotspot", accessibilityDescription: nil)
-        iconView.imageScaling = .scaleProportionallyDown
-        iconView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(iconView)
-        
-        checkImageView.image = NSImage(systemSymbolName: "checkmark.circle.fill", accessibilityDescription: nil)
-        checkImageView.imageScaling = .scaleProportionallyDown
-        checkImageView.translatesAutoresizingMaskIntoConstraints = false
-        checkImageView.isHidden = true
-        addSubview(checkImageView)
-        
-        titleLabel.font = .systemFont(ofSize: 13, weight: .bold)
+
+        card.wantsLayer = true
+        card.layer?.cornerRadius = 12
+        card.layer?.borderWidth = 1
+        card.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(card)
+
+        titleLabel.font = .systemFont(ofSize: 16, weight: .bold)
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.maximumNumberOfLines = 1
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        
-        subtitleLabel.font = .systemFont(ofSize: 11)
-        subtitleLabel.lineBreakMode = .byTruncatingTail
-        subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
-        
-        statusLabel.font = .systemFont(ofSize: 10, weight: .medium)
-        statusLabel.translatesAutoresizingMaskIntoConstraints = false
-        
-        let textStack = NSStackView(views: [titleLabel, subtitleLabel, statusLabel])
-        textStack.orientation = .vertical
-        textStack.alignment = .leading
-        textStack.spacing = 2
-        textStack.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(textStack)
-        
+
+        domainLabel.font = .systemFont(ofSize: 11)
+        domainLabel.lineBreakMode = .byTruncatingTail
+        domainLabel.maximumNumberOfLines = 1
+        domainLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        trafficBar.wantsLayer = true
+        trafficBar.layer?.cornerRadius = 2
+        trafficBar.translatesAutoresizingMaskIntoConstraints = false
+
+        trafficFill.wantsLayer = true
+        trafficFill.layer?.cornerRadius = 2
+        trafficFill.translatesAutoresizingMaskIntoConstraints = false
+        trafficBar.addSubview(trafficFill)
+
+        trafficLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
+        trafficLabel.lineBreakMode = .byTruncatingTail
+        trafficLabel.maximumNumberOfLines = 1
+        trafficLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        refreshButton.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "刷新")
+        refreshButton.isBordered = false
+        refreshButton.bezelStyle = .regularSquare
+        refreshButton.imageScaling = .scaleProportionallyDown
+        refreshButton.translatesAutoresizingMaskIntoConstraints = false
+        refreshButton.wantsLayer = true   // 旋转动画需要
+        refreshButton.target = self
+        refreshButton.action = #selector(refreshClicked)
+
+        updatedAtLabel.font = .systemFont(ofSize: 10)
+        updatedAtLabel.alignment = .right
+        updatedAtLabel.lineBreakMode = .byTruncatingTail
+        updatedAtLabel.maximumNumberOfLines = 1
+        updatedAtLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        expiresLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .semibold)
+        expiresLabel.alignment = .right
+        expiresLabel.lineBreakMode = .byTruncatingTail
+        expiresLabel.maximumNumberOfLines = 1
+        expiresLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        errorLabel.font = .systemFont(ofSize: 10, weight: .medium)
+        errorLabel.lineBreakMode = .byTruncatingTail
+        errorLabel.maximumNumberOfLines = 1
+        errorLabel.translatesAutoresizingMaskIntoConstraints = false
+        errorLabel.isHidden = true
+
+        card.addSubview(titleLabel)
+        card.addSubview(domainLabel)
+        card.addSubview(trafficLabel)
+        card.addSubview(trafficBar)
+        card.addSubview(refreshButton)
+        card.addSubview(updatedAtLabel)
+        card.addSubview(expiresLabel)
+        card.addSubview(errorLabel)
+
+        trafficFillWidth = trafficFill.widthAnchor.constraint(equalTo: trafficBar.widthAnchor, multiplier: 0)
+
         NSLayoutConstraint.activate([
-            selectionPill.leadingAnchor.constraint(equalTo: leadingAnchor),
-            selectionPill.trailingAnchor.constraint(equalTo: trailingAnchor),
-            selectionPill.topAnchor.constraint(equalTo: topAnchor),
-            selectionPill.bottomAnchor.constraint(equalTo: bottomAnchor),
-            
-            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            iconView.widthAnchor.constraint(equalToConstant: 24),
-            iconView.heightAnchor.constraint(equalToConstant: 24),
-            
-            textStack.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 12),
-            textStack.centerYAnchor.constraint(equalTo: centerYAnchor),
-            textStack.trailingAnchor.constraint(equalTo: checkImageView.leadingAnchor, constant: -12),
-            
-            checkImageView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-            checkImageView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            checkImageView.widthAnchor.constraint(equalToConstant: 20),
-            checkImageView.heightAnchor.constraint(equalToConstant: 20)
+            card.leadingAnchor.constraint(equalTo: leadingAnchor),
+            card.trailingAnchor.constraint(equalTo: trailingAnchor),
+            card.topAnchor.constraint(equalTo: topAnchor),
+            card.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            // === 第一行：左 titleLabel ↔ 右 refreshButton ===
+            titleLabel.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 14),
+            titleLabel.topAnchor.constraint(equalTo: card.topAnchor, constant: 10),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: refreshButton.leadingAnchor, constant: -8),
+
+            refreshButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+            refreshButton.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -10),
+            refreshButton.widthAnchor.constraint(equalToConstant: 22),
+            refreshButton.heightAnchor.constraint(equalToConstant: 22),
+
+            // === 第二行：左 domainLabel ↔ 右 updatedAtLabel ===
+            domainLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            domainLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 2),
+            domainLabel.trailingAnchor.constraint(lessThanOrEqualTo: updatedAtLabel.leadingAnchor, constant: -8),
+
+            updatedAtLabel.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -14),
+            updatedAtLabel.centerYAnchor.constraint(equalTo: domainLabel.centerYAnchor),
+
+            // === 第三行（底部）：左 trafficLabel ↔ 右 expiresLabel；进度条贴底缘 ===
+            trafficBar.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            trafficBar.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -14),
+            trafficBar.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -10),
+            trafficBar.heightAnchor.constraint(equalToConstant: 4),
+
+            trafficLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            trafficLabel.bottomAnchor.constraint(equalTo: trafficBar.topAnchor, constant: -4),
+            trafficLabel.trailingAnchor.constraint(lessThanOrEqualTo: expiresLabel.leadingAnchor, constant: -8),
+
+            expiresLabel.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -14),
+            expiresLabel.centerYAnchor.constraint(equalTo: trafficLabel.centerYAnchor),
+
+            trafficFill.leadingAnchor.constraint(equalTo: trafficBar.leadingAnchor),
+            trafficFill.topAnchor.constraint(equalTo: trafficBar.topAnchor),
+            trafficFill.bottomAnchor.constraint(equalTo: trafficBar.bottomAnchor),
+            trafficFillWidth,
+
+            errorLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            errorLabel.bottomAnchor.constraint(equalTo: trafficBar.topAnchor, constant: -4),
+            errorLabel.trailingAnchor.constraint(lessThanOrEqualTo: card.trailingAnchor, constant: -14)
         ])
-        
+
         updateColors()
     }
-    
+
+    @objc private func refreshClicked() {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        onRefresh?()
+        // 即便上层瞬间完成也至少转一圈，避免动画一闪而过感觉没反应
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            self?.isRefreshing = false
+        }
+    }
+
+    private func startRefreshSpin() {
+        guard let layer = refreshButton.layer, layer.bounds.width > 0 else { return }
+        // NSView 的 backing layer 在 macOS 上 anchorPoint 默认是 (0, 0) ——
+        // transform.rotation.z 会绕左下角转，导致图标在按钮区域内绕大圈跑。
+        // 把 anchorPoint 移到中心，同时把 position 同步偏移，保证视觉 frame 不动。
+        if layer.anchorPoint != CGPoint(x: 0.5, y: 0.5) {
+            let oldAnchor = layer.anchorPoint
+            let dx = (0.5 - oldAnchor.x) * layer.bounds.width
+            let dy = (0.5 - oldAnchor.y) * layer.bounds.height
+            layer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+            layer.position = CGPoint(x: layer.position.x + dx, y: layer.position.y + dy)
+        }
+        layer.removeAnimation(forKey: "spin")
+        let spin = CABasicAnimation(keyPath: "transform.rotation.z")
+        spin.fromValue = 0
+        spin.toValue = -CGFloat.pi * 2
+        spin.duration = 0.9
+        spin.repeatCount = .infinity
+        spin.isRemovedOnCompletion = false
+        layer.add(spin, forKey: "spin")
+    }
+
+    private func stopRefreshSpin() {
+        refreshButton.layer?.removeAnimation(forKey: "spin")
+    }
+
     func configure(with sub: Subscription, selected: Bool) {
         self.isSelected = selected
-        
+
         titleLabel.stringValue = sub.name
-        subtitleLabel.stringValue = sub.url
-        
-        if let error = sub.lastError {
-            statusLabel.stringValue = "失败: \(String(error.prefix(40)))"
-            statusLabel.textColor = MD3.error
-        } else if let updateDate = sub.updatedAt {
-            statusLabel.stringValue = "更新于: \(DateFormatter.short.string(from: updateDate))"
+        domainLabel.stringValue = URL(string: sub.url)?.host ?? sub.url
+
+        // 流量
+        let used = (sub.upload ?? 0) + (sub.download ?? 0)
+        if let total = sub.total, total > 0 {
+            trafficLabel.stringValue = "\(Self.formatBytes(used)) / \(Self.formatBytes(total))"
+            let frac = max(0, min(1, Double(used) / Double(total)))
+            trafficFillWidth.isActive = false
+            trafficFillWidth = trafficFill.widthAnchor.constraint(equalTo: trafficBar.widthAnchor, multiplier: CGFloat(max(frac, 0.001)))
+            trafficFillWidth.isActive = true
         } else {
-            statusLabel.stringValue = "未刷新"
+            trafficLabel.stringValue = used > 0 ? "已用 \(Self.formatBytes(used)) / 不限" : "未获取流量信息"
+            trafficFillWidth.isActive = false
+            trafficFillWidth = trafficFill.widthAnchor.constraint(equalTo: trafficBar.widthAnchor, multiplier: 0)
+            trafficFillWidth.isActive = true
         }
-        
+
+        // 上次刷新
+        if let updated = sub.updatedAt {
+            updatedAtLabel.stringValue = Self.relativeAgo(from: updated)
+        } else {
+            updatedAtLabel.stringValue = "未刷新"
+        }
+
+        // 到期
+        if let exp = sub.expiresAt {
+            let f = DateFormatter()
+            f.dateFormat = "yyyy-MM-dd"
+            expiresLabel.stringValue = f.string(from: exp)
+        } else {
+            expiresLabel.stringValue = "无限期"
+        }
+
+        // 错误
+        if let err = sub.lastError, !err.isEmpty {
+            errorLabel.stringValue = "失败：\(String(err.prefix(60)))"
+            errorLabel.isHidden = false
+            trafficLabel.isHidden = true
+        } else {
+            errorLabel.isHidden = true
+            trafficLabel.isHidden = false
+        }
+
         updateColors()
     }
-    
+
     func updateColors() {
-        checkImageView.isHidden = !isSelected
-        
         if isSelected {
-            selectionPill.layer?.backgroundColor = MD3.primaryContainer.cgColor
+            card.layer?.backgroundColor = MD3.primaryContainer.cgColor
+            card.layer?.borderColor = MD3.primary.cgColor
+            card.layer?.borderWidth = 1.5
             titleLabel.textColor = MD3.onPrimaryContainer
-            subtitleLabel.textColor = MD3.onPrimaryContainer.withAlphaComponent(0.8)
-            statusLabel.textColor = MD3.onPrimaryContainer.withAlphaComponent(0.6)
-            iconView.contentTintColor = MD3.onPrimaryContainer
-            checkImageView.contentTintColor = MD3.onPrimaryContainer
+            domainLabel.textColor = MD3.onPrimaryContainer.withAlphaComponent(0.75)
+            trafficLabel.textColor = MD3.onPrimaryContainer
+            updatedAtLabel.textColor = MD3.onPrimaryContainer.withAlphaComponent(0.7)
+            expiresLabel.textColor = MD3.onPrimaryContainer
+            refreshButton.contentTintColor = MD3.onPrimaryContainer
+            trafficBar.layer?.backgroundColor = MD3.onPrimaryContainer.withAlphaComponent(0.2).cgColor
+            trafficFill.layer?.backgroundColor = MD3.primary.cgColor
         } else {
-            if isHovered {
-                selectionPill.layer?.backgroundColor = MD3.surfaceContainer.cgColor
-            } else {
-                selectionPill.layer?.backgroundColor = NSColor.clear.cgColor
-            }
+            let bg = isHovered ? MD3.surfaceContainer : MD3.surface
+            card.layer?.backgroundColor = bg.cgColor
+            card.layer?.borderColor = MD3.outlineVariant.cgColor
+            card.layer?.borderWidth = 1
             titleLabel.textColor = MD3.onSurface
-            subtitleLabel.textColor = MD3.onSurfaceVariant
-            statusLabel.textColor = MD3.onSurfaceVariant.withAlphaComponent(0.7)
-            iconView.contentTintColor = MD3.onSurfaceVariant
+            domainLabel.textColor = MD3.onSurfaceVariant
+            trafficLabel.textColor = MD3.onSurface
+            updatedAtLabel.textColor = MD3.onSurfaceVariant
+            expiresLabel.textColor = MD3.onSurface
+            refreshButton.contentTintColor = MD3.primary
+            trafficBar.layer?.backgroundColor = MD3.outlineVariant.cgColor
+            trafficFill.layer?.backgroundColor = MD3.primary.cgColor
         }
+        errorLabel.textColor = MD3.error
     }
-    
-    func themeChanged() {
-        updateColors()
+
+    func themeChanged() { updateColors() }
+
+    /// 字节数 → "127GB" 这种最大 3 位整数 + 单位（不显示小数，进位）。
+    static func formatBytes(_ bytes: Int64) -> String {
+        guard bytes > 0 else { return "0B" }
+        let units = ["B", "KB", "MB", "GB", "TB", "PB", "EB"]
+        var v = Double(bytes), i = 0
+        while v >= 1000, i < units.count - 1 { v /= 1024; i += 1 }
+        return "\(Int(v.rounded()))\(units[i])"
+    }
+
+    /// 相对时间 "刚刚 / 5分钟前 / 3小时前 / 2天前"（最多 999 天）。
+    static func relativeAgo(from date: Date) -> String {
+        let secs = Int(Date().timeIntervalSince(date))
+        if secs < 60 { return "刚刚" }
+        let m = secs / 60
+        if m < 60 { return "\(m)分钟前" }
+        let h = m / 60
+        if h < 24 { return "\(h)小时前" }
+        let d = min(999, h / 24)
+        return "\(d)天前"
     }
 }
 
@@ -1409,31 +1626,35 @@ final class MD3SubscriptionCellView: NSTableCellView, MD3Themeable {
         addSubview(rightItem)
         
         NSLayoutConstraint.activate([
-            leftItem.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            leftItem.topAnchor.constraint(equalTo: topAnchor, constant: 4),
-            leftItem.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
-            leftItem.trailingAnchor.constraint(equalTo: centerXAnchor, constant: -8),
-            
-            rightItem.leadingAnchor.constraint(equalTo: centerXAnchor, constant: 8),
-            rightItem.topAnchor.constraint(equalTo: topAnchor, constant: 4),
-            rightItem.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
-            rightItem.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8)
+            // 卡片左右贴 cell 边缘 = 贴 table 边缘（intercellSpacing 已清零），
+            // 行间距由 NSTableView 自己控制。中央左右各 4pt 留 8pt 间隙。
+            leftItem.leadingAnchor.constraint(equalTo: leadingAnchor),
+            leftItem.topAnchor.constraint(equalTo: topAnchor),
+            leftItem.bottomAnchor.constraint(equalTo: bottomAnchor),
+            leftItem.trailingAnchor.constraint(equalTo: centerXAnchor, constant: -4),
+
+            rightItem.leadingAnchor.constraint(equalTo: centerXAnchor, constant: 4),
+            rightItem.topAnchor.constraint(equalTo: topAnchor),
+            rightItem.bottomAnchor.constraint(equalTo: bottomAnchor),
+            rightItem.trailingAnchor.constraint(equalTo: trailingAnchor)
         ])
     }
     
-    func configure(leftSub: Subscription?, leftSelected: Bool, rightSub: Subscription?, rightSelected: Bool, leftClick: (() -> Void)?, rightClick: (() -> Void)?) {
+    func configure(leftSub: Subscription?, leftSelected: Bool, rightSub: Subscription?, rightSelected: Bool, leftClick: (() -> Void)?, rightClick: (() -> Void)?, leftRefresh: (() -> Void)? = nil, rightRefresh: (() -> Void)? = nil) {
         if let left = leftSub {
             leftItem.isHidden = false
             leftItem.configure(with: left, selected: leftSelected)
             leftItem.onClick = leftClick
+            leftItem.onRefresh = leftRefresh
         } else {
             leftItem.isHidden = true
         }
-        
+
         if let right = rightSub {
             rightItem.isHidden = false
             rightItem.configure(with: right, selected: rightSelected)
             rightItem.onClick = rightClick
+            rightItem.onRefresh = rightRefresh
         } else {
             rightItem.isHidden = true
         }
@@ -1823,6 +2044,7 @@ final class MD3AppVersionFooter: NSControl, MD3Themeable {
         badgeLabel.font = .systemFont(ofSize: 9, weight: .bold)
         badgeLabel.alignment = .center
         badgeLabel.maximumNumberOfLines = 1
+        badgeLabel.lineBreakMode = .byTruncatingTail
         badgeLabel.wantsLayer = true
         badgeLabel.layer?.cornerRadius = 6
         badgeLabel.layer?.masksToBounds = true
@@ -2275,10 +2497,18 @@ final class MD3NodeTileView: NSView, MD3Themeable {
         nameLabel.textColor = MD3.onSurface
         nameLabel.translatesAutoresizingMaskIntoConstraints = false
         nameLabel.lineBreakMode = .byTruncatingTail
-        
+        nameLabel.maximumNumberOfLines = 1
+        // 内容不能强制把 cell 撑宽：超长名字必须收敛，由外层 fillEqually 决定列宽。
+        nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        nameLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
         subLabel.font = .systemFont(ofSize: 9, weight: .regular)
         subLabel.textColor = MD3.onSurfaceVariant
         subLabel.translatesAutoresizingMaskIntoConstraints = false
+        subLabel.lineBreakMode = .byTruncatingTail
+        subLabel.maximumNumberOfLines = 1
+        subLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        subLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
         
         actionButton.isBordered = false
         actionButton.wantsLayer = true

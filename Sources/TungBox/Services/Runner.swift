@@ -1,4 +1,5 @@
 import Foundation
+import Network
 
 final class Runner: @unchecked Sendable {
     private var process: Process?
@@ -263,6 +264,63 @@ final class Runner: @unchecked Sendable {
                 Darwin.kill(pid, SIGKILL)
             }
         }
+    }
+
+    /// 直接 TCP 拨号测节点 server:port 的延迟（毫秒）。
+    ///
+    /// 关代理时这是最快的"可达性测速"方式 —— 不启动 sing-box，没有配置初始化
+    /// 开销，几十 ms 就完成。竞品（NekoBox 等）关 VPN 时也是这么测的。
+    ///
+    /// 局限：UDP-only 协议（hy2 / tuic）的 server 端口大多不接 TCP，
+    /// 这些节点会"超时"。调用方在那种情况下应回退到 sing-box fetch。
+    nonisolated static func tcpDialDelayMs(serverHostPort: String, timeout: TimeInterval = 3.0) async -> Int? {
+        // serverHostPort 形如 "host:port"，host 可能是 IPv6 字面量（带 []）
+        guard let (host, port) = splitHostPort(serverHostPort) else { return nil }
+        guard let nwPort = NWEndpoint.Port(rawValue: port) else { return nil }
+        return await withCheckedContinuation { (cont: CheckedContinuation<Int?, Never>) in
+            let conn = NWConnection(host: NWEndpoint.Host(host), port: nwPort, using: .tcp)
+            let start = Date()
+            // 防止 stateUpdateHandler 和 timeout 同时 resume continuation。
+            let resumed = LockedValue<Bool>(false)
+            @Sendable func finish(_ ms: Int?) {
+                if resumed.get() { return }
+                resumed.set(true)
+                conn.cancel()
+                cont.resume(returning: ms)
+            }
+            conn.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    finish(Int(Date().timeIntervalSince(start) * 1000))
+                case .failed, .cancelled:
+                    finish(nil)
+                default: break
+                }
+            }
+            conn.start(queue: .global(qos: .userInitiated))
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+                finish(nil)
+            }
+        }
+    }
+
+    private nonisolated static func splitHostPort(_ s: String) -> (host: String, port: UInt16)? {
+        // IPv6 形如 [::1]:443
+        if s.hasPrefix("[") {
+            guard let close = s.firstIndex(of: "]") else { return nil }
+            let host = String(s[s.index(after: s.startIndex)..<close])
+            let rest = s.index(after: close)
+            guard rest < s.endIndex, s[rest] == ":" else { return nil }
+            let portStr = String(s[s.index(after: rest)...])
+            guard let p = UInt16(portStr) else { return nil }
+            return (host, p)
+        }
+        // IPv4 / hostname:port —— 从最后一个冒号切（兼容含端口号）
+        guard let colon = s.lastIndex(of: ":") else { return nil }
+        let host = String(s[..<colon])
+        let portStr = String(s[s.index(after: colon)...])
+        guard !host.isEmpty, let p = UInt16(portStr) else { return nil }
+        return (host, p)
     }
 
     func urlTest(config: URL, outbound: String, testURL: String) async throws -> String {

@@ -16,6 +16,7 @@ extension MainWindowController {
         title.font = .systemFont(ofSize: 30, weight: .bold)
         title.textColor = MD3.onSurface
         title.translatesAutoresizingMaskIntoConstraints = false
+        tightenLabelCell(title)   // 让字符紧贴 frame.x，避免视觉缩进
         registerThemeObserver { [weak title] in
             title?.textColor = MD3.onSurface
         }
@@ -47,15 +48,7 @@ extension MainWindowController {
         importClipboardButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
         importClipboardButton.widthAnchor.constraint(equalToConstant: 120).isActive = true
 
-        let updateButton = MD3Button()
-        updateButton.title = "更新选中"
-        updateButton.style = .tonal
-        updateButton.target = self
-        updateButton.action = #selector(updateSubscriptionClicked)
-        updateButton.translatesAutoresizingMaskIntoConstraints = false
-        updateButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
-        updateButton.widthAnchor.constraint(equalToConstant: 120).isActive = true
-
+        // 顶部操作栏不再放"更新选中" —— 每张卡片右上角已有刷新按钮，避免重复。
         let deleteButton = MD3Button()
         deleteButton.title = "删除订阅"
         deleteButton.style = .destructive
@@ -65,15 +58,18 @@ extension MainWindowController {
         deleteButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
         deleteButton.widthAnchor.constraint(equalToConstant: 120).isActive = true
 
-        let buttons = NSStackView(views: [addButton, importFileButton, importClipboardButton, updateButton, deleteButton])
+        let buttons = NSStackView(views: [addButton, importFileButton, importClipboardButton, deleteButton])
         buttons.orientation = .horizontal
         buttons.spacing = 12
+        buttons.edgeInsets = NSEdgeInsetsZero   // 显式清零，否则按钮和标题/卡片对不齐
         buttons.translatesAutoresizingMaskIntoConstraints = false
 
         let scroll = NSScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.hasVerticalScroller = true
-        scroll.drawsBackground = false
+        scroll.applyThinOverlayScroller()       // 极简悬浮滚动条
+        scroll.automaticallyAdjustsContentInsets = false
+        scroll.contentInsets = NSEdgeInsetsZero
         
         subscriptionTable.backgroundColor = .clear
         subscriptionTable.selectionHighlightStyle = .none
@@ -87,18 +83,18 @@ extension MainWindowController {
         subscriptionTable.headerView = nil
         subscriptionTable.delegate = self
         subscriptionTable.dataSource = self
-        subscriptionTable.rowHeight = 88
+        // NSTableView 默认 intercellSpacing = (3, 2) 会让 cell 内容横向缩进 3pt，
+        // 视觉上卡片就比标题/按钮右移 → 看不齐。清零横向间距，保留 8pt 行间距。
+        subscriptionTable.intercellSpacing = NSSize(width: 0, height: 8)
+        subscriptionTable.rowHeight = 84   // 紧凑卡片高度（行间距由 intercellSpacing 给）
         scroll.documentView = subscriptionTable
         subscriptionTable.sizeLastColumnToFit()
 
-        let panel = MD3Panel()
-        panel.type = .filled
-        panel.translatesAutoresizingMaskIntoConstraints = false
-        panel.addSubview(scroll)
-
+        // 直接把 scroll 放到 view 上（不再包 MD3Panel 底色），让卡片左缘和上方按钮、
+        // 标题完全对齐 —— 视觉上更干净。
         view.addSubview(title)
         view.addSubview(buttons)
-        view.addSubview(panel)
+        view.addSubview(scroll)
 
         NSLayoutConstraint.activate([
             title.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
@@ -108,23 +104,18 @@ extension MainWindowController {
             buttons.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 20),
             buttons.heightAnchor.constraint(equalToConstant: 36),
 
-            panel.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            panel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
-            panel.topAnchor.constraint(equalTo: buttons.bottomAnchor, constant: 20),
-            panel.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -24),
-            
-            scroll.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 8),
-            scroll.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -8),
-            scroll.topAnchor.constraint(equalTo: panel.topAnchor, constant: 8),
-            scroll.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -8)
+            scroll.leadingAnchor.constraint(equalTo: title.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
+            scroll.topAnchor.constraint(equalTo: buttons.bottomAnchor, constant: 16),
+            scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -24)
         ])
 
-        let emptyLabel = subscriptionZeroStateLabel(panel: panel)
+        let emptyLabel = subscriptionZeroStateLabel(panel: scroll)
         view.addSubview(emptyLabel)
         NSLayoutConstraint.activate([
-            emptyLabel.centerXAnchor.constraint(equalTo: panel.centerXAnchor),
-            emptyLabel.centerYAnchor.constraint(equalTo: panel.centerYAnchor),
-            emptyLabel.widthAnchor.constraint(lessThanOrEqualTo: panel.widthAnchor, constant: -32)
+            emptyLabel.centerXAnchor.constraint(equalTo: scroll.centerXAnchor),
+            emptyLabel.centerYAnchor.constraint(equalTo: scroll.centerYAnchor),
+            emptyLabel.widthAnchor.constraint(lessThanOrEqualTo: scroll.widthAnchor, constant: -32)
         ])
 
         refreshSubscriptionEmptyState()
@@ -328,11 +319,12 @@ extension MainWindowController {
             return
         }
         guard subscriptions.indices.contains(index) else { return }
+        let switchingProfile = subscriptions[index].profileID != currentSubscription()?.profileID
         selectedSubscriptionIndex = index
         let subscription = subscriptions[index]
         subscriptionNameField.stringValue = subscription.name
         subscriptionURLField.stringValue = subscription.url
-        
+
         // Load associated profile
         if let profileID = subscription.profileID,
            let profileIndex = profiles.firstIndex(where: { $0.id == profileID }) {
@@ -342,8 +334,23 @@ extension MainWindowController {
             nodeTable.reloadData()
         }
         subscriptionTable.reloadData()
-            refreshSubscriptionEmptyState()
-            refreshSubscriptionBadge()
+        refreshSubscriptionEmptyState()
+        refreshSubscriptionBadge()
+
+        // 切到了一个不同的订阅而代理/TUN 在跑：runner 还在跑旧订阅的 sing-box，
+        // editor/磁盘已经是新订阅。必须原子地切换 runner，否则流量仍从旧节点出，
+        // 而节点表显示新节点（用户看到的：切了订阅但实际节点没变）。
+        if switchingProfile, isSystemProxyEnabled || isTunEnabled {
+            beginFeatureTransition(
+                systemProxy: isSystemProxyEnabled ? .starting : nil,
+                tun: isTunEnabled ? .starting : nil
+            )
+            for i in nodes.indices { nodes[i].delay = "未测试" }
+            refreshNodeGroupsView()
+            Task { _ = try? await ClashAPI.closeConnections() }
+            reconcileRuntime(reason: "切换订阅", forceRestart: true)
+            showToast("已切换到订阅「\(subscription.name)」", style: .success)
+        }
     }
 
     func createProfile(named name: String, content: String) {
@@ -376,10 +383,25 @@ extension MainWindowController {
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             do {
-                let content = try SubscriptionImporter.fetch(urlString: subscription.url)
+                // 用 UA 回退拉取：sing-box / clash 多个 UA 依次试，挑出第一个能
+                // 解析到节点的版本（很多机场后端给不同 UA 返回不同内容）。同时
+                // 拿响应头里的 subscription-userinfo（流量/到期）。
+                let (content, ua, info) = try SubscriptionImporter.fetchBest(urlString: subscription.url)
                 let format = SubscriptionFormatParser.detectFormat(content)
                 let nodes = try SubscriptionImporter.extractNodesFromAnyFormat(content)
                 let config = try SubscriptionImporter.singBoxConfig(from: content, profileName: subscription.name)
+                DispatchQueue.main.async { [weak self] in
+                    if ua != SubscriptionImporter.fallbackUserAgents.first {
+                        self?.appendLog("[订阅] 服务端按 UA 返回不同内容，使用「\(ua)」拉取成功\n")
+                    }
+                    // 更新流量/到期 metadata 到订阅卡片（subscription-userinfo header）
+                    if let idx = self?.subscriptions.firstIndex(where: { $0.id == subscription.id }) {
+                        self?.subscriptions[idx].upload = info.upload
+                        self?.subscriptions[idx].download = info.download
+                        self?.subscriptions[idx].total = info.total
+                        self?.subscriptions[idx].expiresAt = info.expiresAt
+                    }
+                }
                 let fixLog = SubscriptionImporter.compatibilityFixLog
                 SubscriptionImporter.compatibilityFixLog = []
                 // Check for manual-fix issues
@@ -512,18 +534,22 @@ extension MainWindowController {
             return
         }
 
+        // 写文件到对应 profile（仅写文件，不切换当前活动 profile）。
+        let updatedProfileIndex: Int
         if let profileID = subscription.profileID,
            let profileIndex = profiles.firstIndex(where: { $0.id == profileID }) {
             profiles[profileIndex].name = profileName
             profiles[profileIndex].updatedAt = Date()
             try? mergedConfig.write(to: store.configURL(for: profiles[profileIndex]), atomically: true, encoding: .utf8)
-            selectedIndex = profileIndex
+            updatedProfileIndex = profileIndex
         } else {
+            // 新订阅首次落地：建一个新 profile。当前没有任何选中时才把它设为当前。
             let profile = ConfigProfile(id: UUID(), name: profileName, fileName: "\(UUID().uuidString).json", updatedAt: Date())
             profiles.append(profile)
             subscription.profileID = profile.id
             try? mergedConfig.write(to: store.configURL(for: profile), atomically: true, encoding: .utf8)
-            selectedIndex = profiles.count - 1
+            updatedProfileIndex = profiles.count - 1
+            if selectedIndex == nil { selectedIndex = updatedProfileIndex }
         }
 
         subscription.updatedAt = Date()
@@ -532,30 +558,28 @@ extension MainWindowController {
         store.saveSubscriptions(subscriptions)
         table.reloadData()
         subscriptionTable.reloadData()
-            refreshSubscriptionEmptyState()
-            refreshSubscriptionBadge()
-        if let selectedIndex {
-            selectProfile(at: selectedIndex, forceReload: true)
+        refreshSubscriptionEmptyState()
+        refreshSubscriptionBadge()
+
+        // 关键修复：只在被刷新的订阅就是**当前活动 profile** 时才重载 editor /
+        // 节点表 / 重启代理。否则刷新订阅 A 会把当前正在用的订阅 B 切走（你看到
+        // 的"刷新一下就被切过去"的 bug 就是从这来的）。
+        let isCurrent = (selectedIndex == updatedProfileIndex)
+        if isCurrent {
+            selectProfile(at: updatedProfileIndex, forceReload: true)
+            refreshNodesFromEditor()
+            refreshHomeFeatureStatus()
         }
-        refreshNodesFromEditor()
-        refreshHomeFeatureStatus()
         appendLog("[订阅] \(subscription.name) 已刷新并写入配置\n")
         showToast("订阅「\(subscription.name)」已更新", style: .success)
-        // 代理/TUN 在跑：必须让 sing-box 接管新订阅前后保持一致。
-        //
-        // 不做这步时的故障链：runner 还跑旧 config → editor/磁盘已是新 config → 节点表
-        // 渲染成新订阅 → 任何后续测速/自动 urltest 用新 tag 去找旧 runner 的 outbound →
-        // sing-box 报 "initialize outbound[N]: TLS required" 之类的混合状态错误。
-        //
-        // 修复：进入 transitioning 锁住测速入口、清空旧延迟（避免 stale 显示）、断开
-        // 所有旧连接、然后强制重启 runner 用新配置。reconcileRuntime 是异步的，
-        // 它内部成功后会自动 clearFeatureTransitions() 解锁。
-        if isSystemProxyEnabled || isTunEnabled {
+
+        // runner 重启**只**在当前 profile 被刷新时做。其他订阅的刷新不应该惊动当前
+        // 流量。
+        if isCurrent, isSystemProxyEnabled || isTunEnabled {
             beginFeatureTransition(
                 systemProxy: isSystemProxyEnabled ? .starting : nil,
                 tun: isTunEnabled ? .starting : nil
             )
-            // 把所有节点延迟重置为"未测试"，防止用户点到旧延迟值误判节点状态。
             for i in nodes.indices { nodes[i].delay = "未测试" }
             refreshNodeGroupsView()
             Task { _ = try? await ClashAPI.closeConnections() }

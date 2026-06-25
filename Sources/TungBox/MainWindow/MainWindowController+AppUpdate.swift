@@ -96,9 +96,8 @@ extension MainWindowController {
         let scroll = NSScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.borderType = .noBorder
-        scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
-        scroll.autohidesScrollers = true
+        scroll.applyThinOverlayScroller()
         scroll.verticalScrollElasticity = .allowed
         scroll.documentView = notesView
         scroll.heightAnchor.constraint(equalToConstant: 220).isActive = true
