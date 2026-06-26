@@ -160,6 +160,10 @@ extension MainWindowController {
             rowStack.alignment = .top
             rowStack.translatesAutoresizingMaskIntoConstraints = false
             
+            if i + 1 < sortedGroups.count {
+                first.heightAnchor.constraint(equalTo: second.heightAnchor).isActive = true
+            }
+            
             nodeGroupsStack.addArrangedSubview(rowStack)
             NSLayoutConstraint.activate([
                 rowStack.leadingAnchor.constraint(equalTo: nodeGroupsStack.leadingAnchor),

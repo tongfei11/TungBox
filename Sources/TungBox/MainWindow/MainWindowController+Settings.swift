@@ -131,13 +131,6 @@ extension MainWindowController {
         settingsStartSilentlyCheckbox.state = UserDefaults.standard.bool(forKey: "startSilently") ? .on : .off
 
 
-        let proxyHint = NSTextField(labelWithString: "系统代理与 TUN 模式是两个独立开关，可同时开启。开机自启动时会自动恢复上次退出前的开关状态。")
-        proxyHint.textColor = MD3.onSurfaceVariant
-        proxyHint.font = .systemFont(ofSize: 13)
-        proxyHint.lineBreakMode = .byWordWrapping
-        proxyHint.maximumNumberOfLines = 0
-        proxyHint.translatesAutoresizingMaskIntoConstraints = false
-
         // Subscription auto-refresh interval
         let refreshLabel = settingsLabel("订阅自动刷新间隔")
         let refreshPopup = MD3PopUpButton()
@@ -164,9 +157,6 @@ extension MainWindowController {
         refreshRow.translatesAutoresizingMaskIntoConstraints = false
 
         return settingsPageStack([
-            settingsPanel(title: "代理启动配置", views: [
-                proxyHint
-            ]),
             settingsPanel(title: "软件启动配置", views: [
                 settingsLaunchAtLoginCheckbox,
                 settingsStartSilentlyCheckbox

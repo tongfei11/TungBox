@@ -340,9 +340,14 @@ extension MainWindowController {
         refreshSubscriptionEmptyState()
         refreshSubscriptionBadge()
 
-        // 切到了一个不同的订阅而代理/TUN 在跑：runner 还在跑旧订阅的 sing-box，
-        // editor/磁盘已经是新订阅。必须原子地切换 runner，否则流量仍从旧节点出，
-        // 而节点表显示新节点（用户看到的：切了订阅但实际节点没变）。
+        // 切到不同订阅就给提示 —— 节点列表会换成新订阅的，无论代理是否在跑都
+        // 对用户有实际影响。
+        if switchingProfile {
+            showToast("已切换到订阅「\(subscription.name)」", style: .success)
+        }
+        // 代理/TUN 在跑：runner 还在跑旧订阅的 sing-box，editor/磁盘已经是新订阅。
+        // 必须原子地切换 runner，否则流量仍从旧节点出，而节点表显示新节点
+        // （用户看到：切了订阅但实际节点没变）。
         if switchingProfile, isSystemProxyEnabled || isTunEnabled {
             beginFeatureTransition(
                 systemProxy: isSystemProxyEnabled ? .starting : nil,
@@ -352,7 +357,6 @@ extension MainWindowController {
             refreshNodeGroupsView()
             Task { _ = try? await ClashAPI.closeConnections() }
             reconcileRuntime(reason: "切换订阅", forceRestart: true)
-            showToast("已切换到订阅「\(subscription.name)」", style: .success)
         }
     }
 
