@@ -124,6 +124,33 @@ enum TungBoxConfig {
     ]
 
     static let urlTestURL = "https://www.gstatic.com/generate_204"
+
+    // urltest 组的自动测速参数。订阅刷新时把这两个值塞进生成的 outbound：
+    // - interval：多久重新测一次（分钟）。sing-box 收的是 duration 字符串 "3m"。
+    // - tolerance：当前节点比最快节点慢多少毫秒之内不切换（避免来回抖动）。
+    // 改动只影响下次订阅刷新生成的配置，旧 profile 不动。
+    static let urlTestIntervalDefaultMinutes = 3
+    static let urlTestToleranceDefaultMs = 50
+    static let urlTestIntervalOptionsMinutes: [Int] = [1, 3, 5, 10, 30]
+    static let urlTestToleranceOptionsMs: [Int] = [0, 30, 50, 100, 150, 300]
+
+    static var urlTestIntervalMinutes: Int {
+        let stored = UserDefaults.standard.integer(forKey: "urlTestIntervalMinutes")
+        return stored > 0 ? stored : urlTestIntervalDefaultMinutes
+    }
+
+    static var urlTestIntervalString: String {
+        "\(urlTestIntervalMinutes)m"
+    }
+
+    static var urlTestTolerance: Int {
+        // object(forKey:) so 0 is a valid stored value (默认 50，但用户选 0 也应保留)
+        if let stored = UserDefaults.standard.object(forKey: "urlTestToleranceMs") as? Int {
+            return stored
+        }
+        return urlTestToleranceDefaultMs
+    }
+
     static let clashAPIListen = "127.0.0.1:9090"
     static let clashAPIURL = "http://127.0.0.1:9090"
     static let mixedPort = 7890

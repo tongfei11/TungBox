@@ -21,12 +21,12 @@ extension MainWindowController {
         }
 
         let tabControl = MD3SegmentedControl()
-        tabControl.items = ["常规", "Core", "TUN 设置", "规则集", "外观"]
+        tabControl.items = ["常规", "Core", "TUN 设置", "DNS", "规则集", "外观"]
         tabControl.selectedSegment = 0
         tabControl.target = self
         tabControl.action = #selector(settingsTabChanged(_:))
         tabControl.translatesAutoresizingMaskIntoConstraints = false
-        tabControl.widthAnchor.constraint(equalToConstant: 380).isActive = true
+        tabControl.widthAnchor.constraint(equalToConstant: 460).isActive = true
         tabControl.heightAnchor.constraint(equalToConstant: 36).isActive = true
 
         let headerStack = NSStackView(views: [title])
@@ -51,6 +51,7 @@ extension MainWindowController {
             makeSettingsGeneralPage(),
             makeSettingsCorePage(),
             makeSettingsTunPage(),
+            makeSettingsDNSPage(),
             makeSettingsRuleSetPage(),
             makeSettingsAppearancePage()
         ]
@@ -156,12 +157,72 @@ extension MainWindowController {
         refreshRow.spacing = 12
         refreshRow.translatesAutoresizingMaskIntoConstraints = false
 
+        // 自动测速 interval / tolerance（写进 urltest outbound）
+        let urlTestIntervalLabel = settingsLabel("自动测速间隔")
+        let urlTestIntervalPopup = MD3PopUpButton()
+        urlTestIntervalPopup.removeAllItems()
+        for minutes in TungBoxConfig.urlTestIntervalOptionsMinutes {
+            urlTestIntervalPopup.addItem(withTitle: "\(minutes) 分钟")
+        }
+        let currentInterval = TungBoxConfig.urlTestIntervalMinutes
+        if let idx = TungBoxConfig.urlTestIntervalOptionsMinutes.firstIndex(of: currentInterval) {
+            urlTestIntervalPopup.selectItem(at: idx)
+        }
+        urlTestIntervalPopup.target = self
+        urlTestIntervalPopup.action = #selector(urlTestIntervalChanged(_:))
+        urlTestIntervalPopup.translatesAutoresizingMaskIntoConstraints = false
+        urlTestIntervalPopup.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        urlTestIntervalPopup.widthAnchor.constraint(equalToConstant: 160).isActive = true
+
+        let urlTestIntervalRow = NSStackView(views: [urlTestIntervalLabel, urlTestIntervalPopup])
+        urlTestIntervalRow.orientation = .horizontal
+        urlTestIntervalRow.alignment = .centerY
+        urlTestIntervalRow.spacing = 12
+        urlTestIntervalRow.translatesAutoresizingMaskIntoConstraints = false
+
+        let urlTestToleranceLabel = settingsLabel("自动测速容差 (ms)")
+        let urlTestTolerancePopup = MD3PopUpButton()
+        urlTestTolerancePopup.removeAllItems()
+        for ms in TungBoxConfig.urlTestToleranceOptionsMs {
+            urlTestTolerancePopup.addItem(withTitle: "\(ms) ms")
+        }
+        let currentTolerance = TungBoxConfig.urlTestTolerance
+        if let idx = TungBoxConfig.urlTestToleranceOptionsMs.firstIndex(of: currentTolerance) {
+            urlTestTolerancePopup.selectItem(at: idx)
+        }
+        urlTestTolerancePopup.target = self
+        urlTestTolerancePopup.action = #selector(urlTestToleranceChanged(_:))
+        urlTestTolerancePopup.translatesAutoresizingMaskIntoConstraints = false
+        urlTestTolerancePopup.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        urlTestTolerancePopup.widthAnchor.constraint(equalToConstant: 160).isActive = true
+
+        let urlTestToleranceRow = NSStackView(views: [urlTestToleranceLabel, urlTestTolerancePopup])
+        urlTestToleranceRow.orientation = .horizontal
+        urlTestToleranceRow.alignment = .centerY
+        urlTestToleranceRow.spacing = 12
+        urlTestToleranceRow.translatesAutoresizingMaskIntoConstraints = false
+
+        let urlTestHint = NSTextField(labelWithString: "「自动选择」组的 sing-box urltest 参数。间隔决定多久重新拨测一次；容差是当前节点比最快节点慢多少毫秒之内不切换，避免来回抖动。改动在下次刷新订阅后生效。")
+        urlTestHint.textColor = MD3.onSurfaceVariant
+        urlTestHint.font = .systemFont(ofSize: 12)
+        urlTestHint.lineBreakMode = .byWordWrapping
+        urlTestHint.maximumNumberOfLines = 0
+        urlTestHint.usesSingleLineMode = false
+        urlTestHint.cell?.wraps = true
+        urlTestHint.cell?.isScrollable = false
+        urlTestHint.translatesAutoresizingMaskIntoConstraints = false
+        urlTestHint.preferredMaxLayoutWidth = 520
+        registerThemeObserver { [weak urlTestHint] in
+            urlTestHint?.textColor = MD3.onSurfaceVariant
+        }
+
         return settingsPageStack([
             settingsPanel(title: "软件启动配置", views: [
                 settingsLaunchAtLoginCheckbox,
                 settingsStartSilentlyCheckbox
             ]),
             settingsPanel(title: "订阅", views: [refreshRow]),
+            settingsPanel(title: "自动测速", views: [urlTestIntervalRow, urlTestToleranceRow, urlTestHint]),
             settingsPanel(title: "软件信息", views: [detailsText, openFolderButton])
         ])
     }
@@ -334,7 +395,7 @@ extension MainWindowController {
         return settingsPageStack([statusBarPanel, appearancePanel])
     }
 
-    private func settingsPageStack(_ cards: [NSView]) -> NSView {
+    func settingsPageStack(_ cards: [NSView]) -> NSView {
         let view = MD3SettingsPageView()
         view.translatesAutoresizingMaskIntoConstraints = false
         view.wantsLayer = true
@@ -391,7 +452,7 @@ extension MainWindowController {
         return view
     }
 
-    private func settingsPanel(title: String, views: [NSView]) -> NSView {
+    func settingsPanel(title: String, views: [NSView]) -> NSView {
         let panel = MD3Panel()
         panel.type = .filled
         panel.translatesAutoresizingMaskIntoConstraints = false
@@ -426,7 +487,7 @@ extension MainWindowController {
         return panel
     }
 
-    private func settingsButton(title: String, action: Selector, style: MD3Button.ButtonStyle = .filled) -> MD3Button {
+    func settingsButton(title: String, action: Selector, style: MD3Button.ButtonStyle = .filled) -> MD3Button {
         let button = MD3Button()
         configureSettingsButton(button, title: title, action: action, style: style)
         return button
@@ -444,7 +505,7 @@ extension MainWindowController {
         return button
     }
 
-    private func settingsButtonGrid(_ buttons: [NSView]) -> NSView {
+    func settingsButtonGrid(_ buttons: [NSView]) -> NSView {
         let grid = NSStackView()
         grid.orientation = .vertical
         grid.spacing = 10
@@ -805,6 +866,24 @@ extension MainWindowController {
         appendLog("[设置] 订阅自动刷新间隔已设为 \(sender.titleOfSelectedItem ?? "关闭")\n")
     }
 
+    @objc func urlTestIntervalChanged(_ sender: MD3PopUpButton) {
+        let options = TungBoxConfig.urlTestIntervalOptionsMinutes
+        let index = max(0, min(sender.indexOfSelectedItem, options.count - 1))
+        let minutes = options[index]
+        UserDefaults.standard.set(minutes, forKey: "urlTestIntervalMinutes")
+        appendLog("[设置] 自动测速间隔已设为 \(minutes) 分钟（下次刷新订阅生效）\n")
+        showToast("自动测速间隔：\(minutes) 分钟（下次刷新订阅生效）", style: .info)
+    }
+
+    @objc func urlTestToleranceChanged(_ sender: MD3PopUpButton) {
+        let options = TungBoxConfig.urlTestToleranceOptionsMs
+        let index = max(0, min(sender.indexOfSelectedItem, options.count - 1))
+        let ms = options[index]
+        UserDefaults.standard.set(ms, forKey: "urlTestToleranceMs")
+        appendLog("[设置] 自动测速容差已设为 \(ms) ms（下次刷新订阅生效）\n")
+        showToast("自动测速容差：\(ms) ms（下次刷新订阅生效）", style: .info)
+    }
+
     @objc func openTunLogClicked() {
         if FileManager.default.fileExists(atPath: TunServiceManager.logURL.path) {
             NSWorkspace.shared.open(TunServiceManager.logURL)
@@ -843,6 +922,30 @@ extension MainWindowController {
         if runner.isRunning { return nil }           // nil → ClashAPI 默认 9090
         if isTunRuntimeRunning() { return TungBoxConfig.tunDaemonClashPort }
         return nil
+    }
+
+    /// 监听系统唤醒：睡醒后 TUN 守护进程的 DNS 缓存 / UDP NAT 会话 / utun 路由可能失效，
+    /// 但 sing-box 没有 wake-poke 机制，浏览器再访问也激不活 UDP 通道。表现就是
+    /// "TUN 开关亮着但全网无响应，得手动切一下系统代理才恢复"——切代理顺带
+    /// 触发了 reconcileRuntime → enableTunServiceSafely，把守护进程的配置重新下发
+    /// 一遍，UDP/DNS 链路才重建。这里就把"切一下"自动化：只在 TUN 在跑时动它，
+    /// 用户代理依赖 inbound 触发，会自愈，不碰。
+    func registerSystemWakeObserver() {
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            // 网络接口（en*）的 IP / 默认路由 / DNS resolver 在 didWake 那一刻
+            // 可能还没回来，立刻 reconcile 会建在错的接口上。等 2s 再动手。
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                guard let self else { return }
+                guard self.isTunRuntimeRunning() else { return }
+                self.appendLog("[TungBox] 系统已唤醒，自动重新下发 TUN 配置以恢复守护进程\n")
+                self.reconcileRuntime(reason: "唤醒", forceRestart: false)
+            }
+        }
     }
 
     func isProxyServiceActiveOrRequested() -> Bool {

@@ -394,8 +394,11 @@ extension MainWindowController {
                 // 解析到节点的版本（很多机场后端给不同 UA 返回不同内容）。同时
                 // 拿响应头里的 subscription-userinfo（流量/到期）。
                 let (content, ua, info) = try SubscriptionImporter.fetchBest(urlString: subscription.url)
-                let format = SubscriptionFormatParser.detectFormat(content)
-                let nodes = try SubscriptionImporter.extractNodesFromAnyFormat(content)
+                let summary = try SubscriptionImporter.extractWithSummary(content)
+                let format = summary.format
+                let nodes = summary.nodes
+                let skippedTotal = summary.skippedTotal
+                let skippedDetail = summary.skippedTypesDescription
                 let config = try SubscriptionImporter.singBoxConfig(from: content, profileName: subscription.name)
                 DispatchQueue.main.async { [weak self] in
                     if ua != SubscriptionImporter.fallbackUserAgents.first {
@@ -424,6 +427,10 @@ extension MainWindowController {
                         self?.subscriptionTable.reloadData()
                     }
                     self?.appendLog("[订阅] 检测到 \(format.rawValue) 格式，\(nodes.count) 个节点\n")
+                    if skippedTotal > 0 {
+                        self?.appendLog("[订阅] \(skippedTotal) 个节点协议不支持已跳过（\(skippedDetail)）\n")
+                        self?.showToast("\(subscription.name): \(skippedTotal) 个节点协议不支持已跳过（\(skippedDetail)）", style: .warning, duration: 5.0)
+                    }
                     for fix in fixLog { self?.appendLog(fix + "\n") }
                     for issue in manualIssues {
                         self?.appendLog("[兼容性] [\(issue.severity.rawValue)] \(issue.path): \(issue.message)\n")
@@ -617,7 +624,7 @@ extension MainWindowController {
 
         do {
             let content = try String(contentsOf: url, encoding: .utf8)
-            let nodes = try SubscriptionImporter.extractNodesFromAnyFormat(content)
+            let summary = try SubscriptionImporter.extractWithSummary(content)
             let config = try SubscriptionImporter.singBoxConfig(from: content, profileName: url.deletingPathExtension().lastPathComponent)
             let newName = url.deletingPathExtension().lastPathComponent
             let subscription = Subscription(id: UUID(), name: newName, url: url.absoluteString, profileID: nil, updatedAt: Date())
@@ -626,7 +633,12 @@ extension MainWindowController {
             applySubscriptionConfig(config, at: subscriptions.count - 1)
             subscriptionTable.reloadData()
             refreshSubscriptionBadge()
-            appendLog("[订阅] 从文件导入 \(newName)（\(nodes.count) 个节点）\n")
+            appendLog("[订阅] 从文件导入 \(newName)（\(summary.nodes.count) 个节点）\n")
+            if summary.skippedTotal > 0 {
+                let detail = summary.skippedTypesDescription
+                appendLog("[订阅] \(summary.skippedTotal) 个节点协议不支持已跳过（\(detail)）\n")
+                showToast("\(newName): \(summary.skippedTotal) 个节点协议不支持已跳过（\(detail)）", style: .warning, duration: 5.0)
+            }
         } catch {
             showError(NSError.user("文件导入失败：\(error.localizedDescription)"))
         }
@@ -681,7 +693,7 @@ extension MainWindowController {
 
         // Config text (JSON/YAML) in clipboard → direct import
         do {
-            let nodes = try SubscriptionImporter.extractNodesFromAnyFormat(text)
+            let summary = try SubscriptionImporter.extractWithSummary(text)
             let config = try SubscriptionImporter.singBoxConfig(from: text, profileName: "剪贴板导入")
             let subscription = Subscription(id: UUID(), name: "剪贴板导入", url: "clipboard://", profileID: nil, updatedAt: Date())
             subscriptions.append(subscription)
@@ -689,7 +701,12 @@ extension MainWindowController {
             applySubscriptionConfig(config, at: subscriptions.count - 1)
             subscriptionTable.reloadData()
             refreshSubscriptionBadge()
-            appendLog("[订阅] 从剪贴板导入（\(nodes.count) 个节点）\n")
+            appendLog("[订阅] 从剪贴板导入（\(summary.nodes.count) 个节点）\n")
+            if summary.skippedTotal > 0 {
+                let detail = summary.skippedTypesDescription
+                appendLog("[订阅] \(summary.skippedTotal) 个节点协议不支持已跳过（\(detail)）\n")
+                showToast("剪贴板导入: \(summary.skippedTotal) 个节点协议不支持已跳过（\(detail)）", style: .warning, duration: 5.0)
+            }
         } catch {
             showError(NSError.user("剪贴板内容无法识别。请复制订阅链接（http/https）或完整的配置内容（JSON / YAML）。"))
         }

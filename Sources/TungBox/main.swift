@@ -146,6 +146,15 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     let settingsLaunchAtLoginCheckbox = MD3Checkbox(checkboxWithTitle: "开机自启动", target: nil, action: nil)
     let settingsStartSilentlyCheckbox = MD3Checkbox(checkboxWithTitle: "静默启动", target: nil, action: nil)
     let trayIconStylePopup = MD3PopUpButton()
+    let dnsLocalServerField = MD3TextField()
+    let dnsProxyServerField = MD3TextField()
+    let dnsStrategyPopup = MD3PopUpButton()
+    let dnsFakeIPCheckbox = MD3Checkbox(checkboxWithTitle: "启用 Fake-IP", target: nil, action: nil)
+    let dnsFakeIPRangeField = MD3TextField()
+    let dnsFakeIPExcludesTextView = NSTextView()
+    let dnsReadSystemHostsCheckbox = MD3Checkbox(checkboxWithTitle: "读取系统 /etc/hosts", target: nil, action: nil)
+    let dnsCustomHostsTextView = NSTextView()
+    var dnsApplyWorkItem: DispatchWorkItem?
     let tunServiceStatusLabel = NSTextField(labelWithString: "TUN 服务状态：未检测")
     let tunServiceLogLabel = NSTextField(labelWithString: "最近状态：暂无")
     let tunServiceToggleButton = MD3Button()
@@ -332,6 +341,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
         checkSingBoxInstall(showAlert: true)
         refreshSubscriptionBadge()
+        registerSystemWakeObserver()
     }
 
     func normalizeProxyPreferences() {
@@ -1812,12 +1822,11 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             appendLog("[TUN] 已排除 DNS/节点上游地址 \(bypassCIDRs.count) 个，避免代理握手被 TUN 捕获\n")
         }
 
-        if var dns = config["dns"] as? [String: Any] {
-            if dns["strategy"] as? String != "ipv4_only" {
-                dns["strategy"] = "ipv4_only"
-                config["dns"] = dns
-                appendLog("[TUN] DNS 策略已切换为 ipv4_only，降低 IPv6 无路由导致的失败\n")
-            }
+        // 不再硬覆盖 dns.strategy —— 由 DNSConfig 用户设置主导。仅在调试日志里记一笔，
+        // 方便排查"明明没 IPv6 路由怎么还在查 AAAA"的问题。
+        if let dns = config["dns"] as? [String: Any],
+           let strategy = dns["strategy"] as? String {
+            appendLog("[TUN] DNS 策略：\(strategy)\n")
         }
 
         return config

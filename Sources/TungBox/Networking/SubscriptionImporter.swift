@@ -247,8 +247,8 @@ enum SubscriptionImporter {
                 "tag": TungBoxConfig.tagAuto,
                 "outbounds": nodeTags,
                 "url": TungBoxConfig.urlTestURL,
-                "interval": "3m",
-                "tolerance": 50,
+                "interval": TungBoxConfig.urlTestIntervalString,
+                "tolerance": TungBoxConfig.urlTestTolerance,
                 "idle_timeout": "10m",
                 "interrupt_exist_connections": true
             ], [
@@ -270,18 +270,9 @@ enum SubscriptionImporter {
         return (config, [:])
     }
 
-    private static func basicDNS() -> [String: Any] {[
-        "servers": [
-            ["type": "udp", "tag": "dns-local", "server": "223.5.5.5", "server_port": 53],
-            ["type": "udp", "tag": "dns-proxy", "server": "1.1.1.1", "server_port": 53, "detour": TungBoxConfig.tagManual]
-        ],
-        "rules": [
-            ["rule_set": [TungBoxConfig.ruleSetCN, TungBoxConfig.ruleSetPrivate], "server": "dns-local"],
-            ["rule_set": TungBoxConfig.ruleSetGeolocationNotCN, "server": "dns-proxy"]
-        ],
-        "final": "dns-proxy",
-        "strategy": "prefer_ipv4"
-    ]}
+    private static func basicDNS() -> [String: Any] {
+        DNSConfig.buildSingBoxDNS()
+    }
 
     private static func basicRoute() -> [String: Any] {[
         "rule_set": [
@@ -420,8 +411,8 @@ enum SubscriptionImporter {
                 "tag": TungBoxConfig.tagAuto,
                 "outbounds": nodeTags,
                 "url": TungBoxConfig.urlTestURL,
-                "interval": "3m",
-                "tolerance": 50,
+                "interval": TungBoxConfig.urlTestIntervalString,
+                "tolerance": TungBoxConfig.urlTestTolerance,
                 "idle_timeout": "10m",
                 "interrupt_exist_connections": true
             ],

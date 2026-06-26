@@ -56,13 +56,30 @@ enum SubscriptionFormatParser {
     }
 
     static func parseClashProxies(_ text: String) throws -> [[String: Any]] {
+        try parseClashProxiesWithSummary(text).proxies
+    }
+
+    /// 同 parseClashProxies，但把转换中丢弃的"非 sing-box 兼容协议"按类型计数返回。
+    /// `mieru` / `xhttp` / 其他未知 type 都会 fall through `clashProxyToSingBox`
+    /// 的 default → nil 分支被静默丢掉。这里把这些 raw type 收集起来给导入 UI 显示。
+    static func parseClashProxiesWithSummary(_ text: String) throws -> (proxies: [[String: Any]], skippedTypes: [String: Int]) {
+        var skipped: [String: Int] = [:]
         // Preferred path: a real (zero-dependency) YAML parse that preserves nested
         // structures — tls/reality-opts/ws-opts/grpc-opts/smux/ech-opts/alpn arrays —
         // so protocol options aren't mangled by line-based heuristics.
         if let doc = parseYAMLDocument(text) as? [String: Any],
            let rawProxies = (doc["proxies"] as? [Any]) ?? (doc["Proxy"] as? [Any]) {
-            let proxies = rawProxies.compactMap { ($0 as? [String: Any]).flatMap(clashProxyToSingBox) }
-            if !proxies.isEmpty { return proxies }
+            var proxies: [[String: Any]] = []
+            for raw in rawProxies {
+                guard let dict = raw as? [String: Any] else { continue }
+                if let node = clashProxyToSingBox(dict) {
+                    proxies.append(node)
+                } else {
+                    let rawType = ((dict["type"] as? String) ?? "unknown").lowercased()
+                    skipped[rawType, default: 0] += 1
+                }
+            }
+            if !proxies.isEmpty { return (proxies, skipped) }
         }
 
         // Legacy fallback: line-based parser (kept for odd inputs the YAML parse misses).
@@ -137,7 +154,16 @@ enum SubscriptionFormatParser {
             throw NSError.user("Clash YAML 中未找到代理节点（proxies 列表为空）")
         }
 
-        return proxies.compactMap { clashProxyToSingBox($0) }
+        var converted: [[String: Any]] = []
+        for entry in proxies {
+            if let node = clashProxyToSingBox(entry) {
+                converted.append(node)
+            } else {
+                let rawType = ((entry["type"] as? String) ?? "unknown").lowercased()
+                skipped[rawType, default: 0] += 1
+            }
+        }
+        return (converted, skipped)
     }
 
     private static func parseClashInlineProxy(_ entry: String) -> [String: Any] {
@@ -625,13 +651,38 @@ enum SubscriptionFormatParser {
 
 // Extension point in the main subscription parser
 extension SubscriptionImporter {
+    struct ExtractionSummary {
+        var nodes: [[String: Any]]
+        var format: SubscriptionFormat
+        /// 转换时按类型计数被丢弃的"非 sing-box 兼容"节点
+        /// （目前仅 Clash YAML 路径会填充——sing-box JSON 路径未做协议白名单）。
+        var skippedTypes: [String: Int]
+
+        var skippedTotal: Int { skippedTypes.values.reduce(0, +) }
+
+        /// "mieru 2, xhttp 1" 这种紧凑文案，用于日志/Toast。
+        var skippedTypesDescription: String {
+            skippedTypes
+                .sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }
+                .map { "\($0.key) \($0.value)" }
+                .joined(separator: ", ")
+        }
+    }
+
     static func extractNodesFromAnyFormat(_ text: String) throws -> [[String: Any]] {
+        try extractWithSummary(text).nodes
+    }
+
+    static func extractWithSummary(_ text: String) throws -> ExtractionSummary {
         let format = SubscriptionFormatParser.detectFormat(text)
         switch format {
         case .singBoxJSON:
-            return try extractNodes(from: text)
+            // sing-box JSON 路径目前不主动过滤协议（透传给 Core，由 Core 校验失败时报错）。
+            let nodes = try extractNodes(from: text)
+            return ExtractionSummary(nodes: nodes, format: format, skippedTypes: [:])
         case .clashYAML:
-            return try SubscriptionFormatParser.parseClashProxies(text)
+            let result = try SubscriptionFormatParser.parseClashProxiesWithSummary(text)
+            return ExtractionSummary(nodes: result.proxies, format: format, skippedTypes: result.skippedTypes)
         case .unknown:
             throw NSError.user("无法识别订阅格式。支持：\n• sing-box JSON（Xboard 面板模板输出）\n• Clash YAML（机场通用订阅格式）\n\n当前内容预览：\(text.prefix(300))")
         }

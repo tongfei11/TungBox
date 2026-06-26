@@ -87,7 +87,8 @@ extension MainWindowController {
         } else {
             for node in members {
                 let displayTitle = trayProxyNodeTitle(for: node)
-                let item = NSMenuItem(title: displayTitle, action: isAuto ? nil : #selector(proxyNodeFromTray(_:)), keyEquivalent: "")
+                let item = NSMenuItem(title: displayTitle.string, action: isAuto ? nil : #selector(proxyNodeFromTray(_:)), keyEquivalent: "")
+                item.attributedTitle = displayTitle
                 if !isAuto {
                     item.target = self
                     item.representedObject = ["group": group, "node": node]
@@ -115,22 +116,45 @@ extension MainWindowController {
         }
     }
 
-    private func trayProxyNodeTitle(for node: String) -> String {
+    private func trayProxyNodeTitle(for node: String) -> NSAttributedString {
+        var baseString = ""
+        var delayStr: String? = nil
+        
         if let group = nodeGroups.first(where: { $0.tag == node }),
            ["urltest", "url-test", "fallback"].contains(group.type.lowercased()) {
             let resolved = resolveActiveOutboundForGroup(groupTag: group.tag, proxiesObj: lastProxiesObj)
             let resolvedNode = resolved.name.trimmingCharacters(in: .whitespacesAndNewlines)
             if !resolvedNode.isEmpty, resolvedNode != node {
+                baseString = "\(node) - \(resolvedNode)"
                 let delay = nodes.first(where: { $0.tag == resolvedNode })?.delay
                 if let delay, !delay.isEmpty, delay != "未测试" {
-                    return "\(node) - \(resolvedNode) (\(delay))"
+                    delayStr = delay
                 }
-                return "\(node) - \(resolvedNode)"
+            } else {
+                baseString = node
             }
+        } else {
+            baseString = node
+            delayStr = nodes.first(where: { $0.tag == node })?.delay ?? "未测试"
         }
-
-        let delay = nodes.first(where: { $0.tag == node })?.delay ?? "未测试"
-        return "\(node) (\(delay))"
+        
+        let font = NSFont.menuFont(ofSize: 0)
+        let result = NSMutableAttributedString(string: baseString, attributes: [
+            .font: font,
+            .foregroundColor: NSColor.labelColor
+        ])
+        
+        if let delayStr = delayStr {
+            let delayColor = MD3.latencyTextColor(delayStr)
+            let suffix = " (\(delayStr))"
+            let suffixAttr = NSAttributedString(string: suffix, attributes: [
+                .font: font,
+                .foregroundColor: delayColor
+            ])
+            result.append(suffixAttr)
+        }
+        
+        return result
     }
 
     func trayIcon() -> NSImage? {

@@ -2839,9 +2839,9 @@ final class MD3GroupDelayButton: NSView, MD3Themeable {
             iconView.isHidden = true
             
             if let ms = Int(numStr) {
-                if ms < 100 {
+                if ms < 400 {
                     label.textColor = NSColor(red: 0.15, green: 0.54, blue: 0.28, alpha: 1.0)
-                } else if ms < 250 {
+                } else if ms < 800 {
                     label.textColor = NSColor(red: 0.65, green: 0.45, blue: 0.05, alpha: 1.0)
                 } else {
                     label.textColor = NSColor(red: 0.80, green: 0.20, blue: 0.20, alpha: 1.0)
