@@ -93,7 +93,7 @@ extension MainWindowController {
         notesView.minSize = NSSize(width: 0, height: 0)
         notesView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
 
-        let scroll = NSScrollView()
+        let scroll = MD3ScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.borderType = .noBorder
         scroll.hasVerticalScroller = true

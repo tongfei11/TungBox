@@ -39,7 +39,7 @@ extension MainWindowController {
         topBar.distribution = .fill
         topBar.translatesAutoresizingMaskIntoConstraints = false
 
-        let scroll = NSScrollView()
+        let scroll = MD3ScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.hasVerticalScroller = true
         scroll.applyThinOverlayScroller()

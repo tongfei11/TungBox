@@ -353,7 +353,7 @@ extension MainWindowController {
             view?.layer?.backgroundColor = MD3.background.cgColor
         }
 
-        let scroll = NSScrollView()
+        let scroll = MD3ScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true

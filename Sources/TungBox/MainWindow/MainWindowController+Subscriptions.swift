@@ -64,7 +64,7 @@ extension MainWindowController {
         buttons.edgeInsets = NSEdgeInsetsZero   // 显式清零，否则按钮和标题/卡片对不齐
         buttons.translatesAutoresizingMaskIntoConstraints = false
 
-        let scroll = NSScrollView()
+        let scroll = MD3ScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.hasVerticalScroller = true
         scroll.applyThinOverlayScroller()       // 极简悬浮滚动条
@@ -74,6 +74,9 @@ extension MainWindowController {
         subscriptionTable.backgroundColor = .clear
         subscriptionTable.selectionHighlightStyle = .none
         subscriptionTable.autoresizingMask = [.width]
+        if #available(macOS 11.0, *) {
+            subscriptionTable.style = .fullWidth
+        }
         
         let subColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("subscription"))
         subColumn.resizingMask = .autoresizingMask

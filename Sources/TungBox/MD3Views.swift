@@ -730,6 +730,54 @@ final class MD3ThinScroller: NSScroller {
         NSColor.secondaryLabelColor.withAlphaComponent(0.55).setFill()
         path.fill()
     }
+    override func draw(_ dirtyRect: NSRect) {
+        // 只画滑块，不画滑轨背景与边框
+        drawKnob()
+    }
+}
+
+final class MD3ScrollView: NSScrollView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+    
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setup()
+    }
+    
+    private func setup() {
+        self.scrollerStyle = .overlay
+        self.autohidesScrollers = true
+        self.drawsBackground = false
+        if self.verticalScroller == nil { self.verticalScroller = MD3ThinScroller() }
+        else if !(self.verticalScroller is MD3ThinScroller) { self.verticalScroller = MD3ThinScroller() }
+        if self.horizontalScroller == nil { self.horizontalScroller = MD3ThinScroller() }
+        else if !(self.horizontalScroller is MD3ThinScroller) { self.horizontalScroller = MD3ThinScroller() }
+        self.verticalScroller?.knobStyle = .default
+        self.horizontalScroller?.knobStyle = .default
+    }
+    
+    override var scrollerStyle: NSScroller.Style {
+        get { return .overlay }
+        set { super.scrollerStyle = .overlay }
+    }
+    
+    override func tile() {
+        if self.scrollerStyle != .overlay {
+            self.scrollerStyle = .overlay
+        }
+        super.tile()
+        
+        if verticalScroller == nil { verticalScroller = MD3ThinScroller() }
+        else if !(verticalScroller is MD3ThinScroller) { verticalScroller = MD3ThinScroller() }
+        if let h = horizontalScroller, !(h is MD3ThinScroller) {
+            horizontalScroller = MD3ThinScroller()
+        }
+        verticalScroller?.knobStyle = .default
+        horizontalScroller?.knobStyle = .default
+    }
 }
 
 extension NSScrollView {

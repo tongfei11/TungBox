@@ -54,7 +54,7 @@ extension MainWindowController {
         ruleToolbar.translatesAutoresizingMaskIntoConstraints = false
         ruleSearchField.widthAnchor.constraint(equalToConstant: 320).isActive = true
 
-        let scroll = NSScrollView()
+        let scroll = MD3ScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.hasVerticalScroller = true
         scroll.applyThinOverlayScroller()
