@@ -15,12 +15,12 @@ enum ClashAPI {
         try await requestJSON(path: "/proxies/\(escaped)", method: "PUT", body: ["name": node])
     }
 
-    static func delay(node: String, url: String) async throws -> Int {
+    static func delay(node: String, url: String, port: Int? = nil) async throws -> Int {
         let escapedNode = node.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? node
         let escapedURL = url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? url
         let path = "/proxies/\(escapedNode)/delay?url=\(escapedURL)&timeout=5000"
-        
-        guard let object = try await requestJSON(path: path) as? [String: Any],
+
+        guard let object = try await requestJSON(path: path, port: port) as? [String: Any],
               let delay = object["delay"] as? Int else {
             throw NSError.user("测速接口响应无效")
         }

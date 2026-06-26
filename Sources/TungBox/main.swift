@@ -448,7 +448,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         appVersionFooter.target = self
         appVersionFooter.action = #selector(appVersionFooterClicked)
         appVersionFooter.translatesAutoresizingMaskIntoConstraints = false
-        appVersionFooter.heightAnchor.constraint(equalToConstant: 28).isActive = true
         registerThemeObserver { [weak self] in
             self?.appVersionFooter.themeChanged()
         }

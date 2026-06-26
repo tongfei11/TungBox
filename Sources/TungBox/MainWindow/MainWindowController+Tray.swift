@@ -25,22 +25,15 @@ extension MainWindowController {
         menu.addItem(NSMenuItem(title: "\(TungBoxVersion.display) \(status)", action: nil, keyEquivalent: ""))
         menu.addItem(.separator())
 
-        let proxyService = NSMenuItem(title: "代理服务", action: #selector(toggleProxyServiceFromTray), keyEquivalent: "")
-        proxyService.target = self
-        proxyService.state = isProxyServiceActiveOrRequested() ? .on : .off
-        menu.addItem(proxyService)
+        let systemProxyItem = NSMenuItem(title: "系统代理", action: #selector(toggleProxyServiceFromTray), keyEquivalent: "")
+        systemProxyItem.target = self
+        systemProxyItem.state = isSystemProxyEnabled ? .on : .off
+        menu.addItem(systemProxyItem)
 
-        let captureMenu = NSMenu()
-        for (title, useTun) in [("系统代理", false), ("TUN 模式", true)] {
-            let item = NSMenuItem(title: title, action: #selector(captureModeFromTray(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = useTun
-            item.state = isTunEnabled == useTun ? .on : .off
-            captureMenu.addItem(item)
-        }
-        let captureRoot = NSMenuItem(title: "接管方式", action: nil, keyEquivalent: "")
-        captureRoot.submenu = captureMenu
-        menu.addItem(captureRoot)
+        let tunItem = NSMenuItem(title: "TUN 模式", action: #selector(toggleTunFromTray), keyEquivalent: "")
+        tunItem.target = self
+        tunItem.state = isTunEnabled ? .on : .off
+        menu.addItem(tunItem)
 
         menu.addItem(.separator())
 
@@ -250,21 +243,17 @@ extension MainWindowController {
     }
 
     @objc func toggleProxyServiceFromTray() {
-        // Independent system-proxy toggle (does not touch TUN).
         isSystemProxyEnabled.toggle()
         UserDefaults.standard.set(isSystemProxyEnabled, forKey: "systemProxyEnabled")
-        if isSystemProxyEnabled { isProxyServiceTransitioning = true }
+        beginFeatureTransition(systemProxy: isSystemProxyEnabled ? .starting : .stopping)
         syncProxyPreferenceControls()
         refreshTrayIcon()
         appendLog("[托盘] 系统代理已\(isSystemProxyEnabled ? "开启" : "关闭")\n")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-            self?.reconcileRuntime(reason: "托盘系统代理")
-        }
+        reconcileRuntime(reason: "托盘系统代理")
     }
 
-    @objc func captureModeFromTray(_ sender: NSMenuItem) {
-        guard let useTun = sender.representedObject as? Bool else { return }
-        setCaptureMode(tunEnabled: useTun, source: "托盘")
+    @objc func toggleTunFromTray() {
+        setCaptureMode(tunEnabled: !isTunEnabled, source: "托盘")
     }
 
     @objc func showConsoleFromTray() {

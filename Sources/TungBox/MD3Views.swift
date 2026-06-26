@@ -2041,11 +2041,29 @@ final class MD3SidebarItem: NSView, MD3Themeable {
     }
 }
 
+final class CenteredTextFieldCell: NSTextFieldCell {
+    override func drawingRect(forBounds rect: NSRect) -> NSRect {
+        let titleSize = cellSize(forBounds: rect)
+        var newRect = rect
+        let yOffset = (rect.height - titleSize.height) / 2.0
+        newRect.origin.y += yOffset
+        newRect.size.height = titleSize.height
+        return newRect
+    }
+}
+
+final class CenteredLabel: NSTextField {
+    override class var cellClass: AnyClass? {
+        get { CenteredTextFieldCell.self }
+        set {}
+    }
+}
+
 final class MD3AppVersionFooter: NSControl, MD3Themeable {
+    private let stackView = NSStackView()
     private let versionLabel = NSTextField(labelWithString: "")
-    private let badgeLabel = NSTextField(labelWithString: "NEW")
-    private var badgeLeadingConstraint: NSLayoutConstraint?
-    private var badgeWidthConstraint: NSLayoutConstraint?
+    private let badgeLabel = CenteredLabel(labelWithString: "NEW")
+    private let badgeContainer = NSView()
     private var trackingArea: NSTrackingArea?
     private var isHovered = false {
         didSet { updateColors() }
@@ -2063,9 +2081,7 @@ final class MD3AppVersionFooter: NSControl, MD3Themeable {
 
     var showsNewBadge: Bool = false {
         didSet {
-            badgeLabel.isHidden = !showsNewBadge
-            badgeLeadingConstraint?.constant = showsNewBadge ? 6 : 0
-            badgeWidthConstraint?.constant = showsNewBadge ? 34 : 0
+            badgeContainer.isHidden = !showsNewBadge
             invalidateIntrinsicContentSize()
         }
     }
@@ -2097,25 +2113,38 @@ final class MD3AppVersionFooter: NSControl, MD3Themeable {
         badgeLabel.layer?.cornerRadius = 6
         badgeLabel.layer?.masksToBounds = true
         badgeLabel.translatesAutoresizingMaskIntoConstraints = false
-        badgeLabel.isHidden = true
 
-        addSubview(versionLabel)
-        addSubview(badgeLabel)
+        badgeContainer.translatesAutoresizingMaskIntoConstraints = false
+        badgeContainer.isHidden = true
+        badgeContainer.addSubview(badgeLabel)
 
-        let leadingConstraint = badgeLabel.leadingAnchor.constraint(equalTo: versionLabel.trailingAnchor, constant: 0)
-        let widthConstraint = badgeLabel.widthAnchor.constraint(equalToConstant: 0)
-        badgeLeadingConstraint = leadingConstraint
-        badgeWidthConstraint = widthConstraint
+        stackView.orientation = .vertical
+        stackView.spacing = 4
+        stackView.alignment = .leading
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stackView)
+
+        stackView.addArrangedSubview(badgeContainer)
+        stackView.addArrangedSubview(versionLabel)
 
         NSLayoutConstraint.activate([
-            versionLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 0),
-            versionLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            badgeLabel.trailingAnchor.constraint(equalTo: badgeContainer.trailingAnchor),
+            badgeLabel.topAnchor.constraint(equalTo: badgeContainer.topAnchor),
+            badgeLabel.bottomAnchor.constraint(equalTo: badgeContainer.bottomAnchor),
+            badgeLabel.widthAnchor.constraint(equalToConstant: 34),
+            badgeLabel.heightAnchor.constraint(equalToConstant: 16),
 
-            leadingConstraint,
-            badgeLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
-            badgeLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            widthConstraint,
-            badgeLabel.heightAnchor.constraint(equalToConstant: 16)
+            badgeContainer.heightAnchor.constraint(equalTo: badgeLabel.heightAnchor),
+            badgeContainer.leadingAnchor.constraint(equalTo: stackView.leadingAnchor),
+            badgeContainer.trailingAnchor.constraint(equalTo: stackView.trailingAnchor),
+
+            versionLabel.leadingAnchor.constraint(equalTo: stackView.leadingAnchor),
+            versionLabel.trailingAnchor.constraint(equalTo: stackView.trailingAnchor),
+
+            stackView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            stackView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            stackView.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+            stackView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6)
         ])
 
         updateColors()
@@ -2124,8 +2153,12 @@ final class MD3AppVersionFooter: NSControl, MD3Themeable {
     override var intrinsicContentSize: NSSize {
         let attributes: [NSAttributedString.Key: Any] = [.font: versionLabel.font ?? NSFont.systemFont(ofSize: 13)]
         let versionWidth = ceil((versionText as NSString).size(withAttributes: attributes).width)
-        let badgeWidth: CGFloat = showsNewBadge ? 40 : 0
-        return NSSize(width: versionWidth + badgeWidth, height: 28)
+        let width = versionWidth + 16
+        if showsNewBadge {
+            return NSSize(width: width, height: 48)
+        } else {
+            return NSSize(width: width, height: 28)
+        }
     }
 
     override func updateTrackingAreas() {

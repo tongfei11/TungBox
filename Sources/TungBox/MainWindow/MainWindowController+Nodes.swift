@@ -455,6 +455,7 @@ extension MainWindowController {
             refreshNodeGroupsView()
 
             let runner = runner
+            let apiPort = delayAPIPort()
             let runtimeRunning = isProxyRuntimeRunning()
             let groupName = group.tag
             // 关代理时用 TCP 直拨 → 不启动 sing-box，几十 ms 完成（接近竞品速度）。
@@ -468,7 +469,7 @@ extension MainWindowController {
                         tg.addTask { @Sendable in
                             if runtimeRunning {
                                 do {
-                                    let ms = try await ClashAPI.delay(node: tag, url: finalURL)
+                                    let ms = try await ClashAPI.delay(node: tag, url: finalURL, port: apiPort)
                                     return (tag, "\(ms) ms")
                                 } catch {
                                     return (tag, error.localizedDescription.contains("超时") ? "超时" : "失败")
@@ -550,13 +551,14 @@ extension MainWindowController {
             }
             
             let runner = runner
+            let apiPort = delayAPIPort()
             let runtimeRunning = isProxyRuntimeRunning()
             let server = nodes.first(where: { $0.tag == tag })?.server
-            Task.detached { [weak self, runner, runtimeRunning, server] in
+            Task.detached { [weak self, runner, apiPort, runtimeRunning, server] in
                 let result: String
                 if runtimeRunning {
                     do {
-                        let ms = try await ClashAPI.delay(node: tag, url: finalURL)
+                        let ms = try await ClashAPI.delay(node: tag, url: finalURL, port: apiPort)
                         result = "\(ms) ms"
                     } catch {
                         let msg = error.localizedDescription
@@ -607,6 +609,7 @@ extension MainWindowController {
             refreshNodeGroupsView()
 
             let runner = runner
+            let apiPort = delayAPIPort()
             let runtimeRunning = isProxyRuntimeRunning()
             let tags = nodes.map(\.tag)
             let serverByTag = Dictionary(uniqueKeysWithValues: nodes.map { ($0.tag, $0.server) })
@@ -619,7 +622,7 @@ extension MainWindowController {
                         tg.addTask { @Sendable in
                             if runtimeRunning {
                                 do {
-                                    let ms = try await ClashAPI.delay(node: tag, url: testURL)
+                                    let ms = try await ClashAPI.delay(node: tag, url: testURL, port: apiPort)
                                     return (tag, "\(ms) ms")
                                 } catch {
                                     return (tag, error.localizedDescription.contains("超时") ? "超时" : "失败")

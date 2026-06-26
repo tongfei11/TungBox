@@ -837,6 +837,14 @@ extension MainWindowController {
         runner.isRunning || isTunRuntimeRunning()
     }
 
+    /// 测速时应打的 sing-box ClashAPI 端口。
+    /// 用户代理在跑用 9090；仅 TUN 守护在跑用 9091；否则返回 nil（走 fastDelayProbe）。
+    func delayAPIPort() -> Int? {
+        if runner.isRunning { return nil }           // nil → ClashAPI 默认 9090
+        if isTunRuntimeRunning() { return TungBoxConfig.tunDaemonClashPort }
+        return nil
+    }
+
     func isProxyServiceActiveOrRequested() -> Bool {
         isProxyServiceTransitioning
             || runner.isRunning
