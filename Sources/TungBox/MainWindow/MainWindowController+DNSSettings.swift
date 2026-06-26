@@ -50,10 +50,14 @@ extension MainWindowController: NSTextViewDelegate, NSTextFieldDelegate {
         let upstreamHint = dnsHintLabel("支持裸 IP（默认 UDP/53）、tls://(DoT)、https://(DoH)、quic://(DoQ)、h3://(DoH3)。国外 DNS 默认走当前节点出去，防污染。")
 
         // -------- Fake-IP --------
-        dnsFakeIPCheckbox.title = "启用 Fake-IP（防 DNS 污染 + 省一次解析往返）"
         dnsFakeIPCheckbox.target = self
         dnsFakeIPCheckbox.action = #selector(dnsFakeIPToggled(_:))
         dnsFakeIPCheckbox.state = DNSConfig.fakeIPEnabled ? .on : .off
+        let fakeIPRow = settingsToggleRow(
+            title: "启用 Fake-IP",
+            hint: "防 DNS 污染 + 省一次解析往返。",
+            checkbox: dnsFakeIPCheckbox
+        )
 
         dnsFakeIPRangeField.stringValue = DNSConfig.fakeIPRange
         dnsFakeIPRangeField.placeholderString = DNSConfig.defaultFakeIPRange
@@ -75,7 +79,7 @@ extension MainWindowController: NSTextViewDelegate, NSTextFieldDelegate {
                                                    initial: DNSConfig.fakeIPExcludes.joined(separator: "\n"),
                                                    height: 120)
 
-        let fakeipHint = dnsHintLabel("国内域名、私有网段、跳过列表会走真实 DNS；国外域名走 Fake-IP。")
+        let fakeipFooter = dnsHintLabel("国内域名、私有网段、跳过列表会走真实 DNS；国外域名走 Fake-IP。")
 
         // -------- Hosts（两个子区独立，互不依赖）--------
         let hostsCustomTitle = settingsLabel("自定义 hosts")
@@ -92,12 +96,14 @@ extension MainWindowController: NSTextViewDelegate, NSTextFieldDelegate {
 
         let hostsSystemTitle = settingsLabel("系统 hosts")
         hostsSystemTitle.font = .systemFont(ofSize: 13, weight: .semibold)
-        dnsReadSystemHostsCheckbox.title = "读取系统 /etc/hosts"
         dnsReadSystemHostsCheckbox.target = self
         dnsReadSystemHostsCheckbox.action = #selector(dnsReadSystemHostsToggled(_:))
         dnsReadSystemHostsCheckbox.state = DNSConfig.readSystemHosts ? .on : .off
-
-        let hostsSystemHint = dnsHintLabel("TUN 接管 53 端口后系统 /etc/hosts 默认不生效；启用后由 sing-box 一并读取。与上方「自定义 hosts」相互独立，可单独使用；同名域名以自定义为准。")
+        let systemHostsRow = settingsToggleRow(
+            title: "读取系统 /etc/hosts",
+            hint: "TUN 接管 53 端口后系统 /etc/hosts 默认不生效；启用后由 sing-box 一并读取。与上方「自定义 hosts」相互独立，可单独使用；同名域名以自定义为准。",
+            checkbox: dnsReadSystemHostsCheckbox
+        )
 
         // -------- 重置（独立放底部，不进 panel）--------
         let resetButton = settingsButton(title: "重置为默认值", action: #selector(dnsSettingsResetClicked), style: .outlined)
@@ -109,11 +115,11 @@ extension MainWindowController: NSTextViewDelegate, NSTextFieldDelegate {
 
         return settingsPageStack([
             settingsPanel(title: "DNS 上游", views: [upstreamForm, upstreamHint]),
-            settingsPanel(title: "Fake-IP", views: [dnsFakeIPCheckbox, rangeRow, excludesLabel, excludesScroll, fakeipHint]),
+            settingsPanel(title: "Fake-IP", views: [fakeIPRow, settingsDivider(), rangeRow, excludesLabel, excludesScroll, fakeipFooter]),
             settingsPanel(title: "Hosts", views: [
                 hostsCustomTitle, customHostsLabel, customHostsScroll,
                 divider,
-                hostsSystemTitle, dnsReadSystemHostsCheckbox, hostsSystemHint
+                hostsSystemTitle, systemHostsRow
             ]),
             resetRow
         ])
@@ -238,7 +244,8 @@ extension MainWindowController: NSTextViewDelegate, NSTextFieldDelegate {
         guard let field = obj.object as? NSTextField,
               let action = field.action else { return }
         switch field {
-        case dnsLocalServerField, dnsProxyServerField, dnsFakeIPRangeField:
+        case dnsLocalServerField, dnsProxyServerField, dnsFakeIPRangeField,
+             tunMTUField, tunIncludeIfaceField, tunExcludeIfaceField:
             NSApp.sendAction(action, to: field.target, from: field)
         default: break
         }
@@ -261,6 +268,15 @@ extension MainWindowController: NSTextViewDelegate, NSTextFieldDelegate {
             guard v != DNSConfig.customHosts else { return }
             DNSConfig.customHosts = v
             scheduleDNSApply()
+        case tunRouteExcludeTextView:
+            let lines = tv.string.components(separatedBy: CharacterSet.newlines)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            guard lines != TUNConfig.routeExclude else { return }
+            TUNConfig.routeExclude = lines
+            // 触发 TUN 应用——直接调用 TUN 那边的 schedule 通过 selector 化的中介，避免
+            // 跨文件 private 函数访问问题。这里直接重新启动 reconcile（与 schedule 等价）。
+            tunRouteExcludeChanged()
         default: break
         }
     }

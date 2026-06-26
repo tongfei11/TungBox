@@ -1,6 +1,6 @@
 # TungBox 功能待办（sing-box 特性覆盖）
 
-> 盘点日期：2026-06-26 · 基线版本 **0.2.1(0154)**
+> 盘点日期：2026-06-26 · 基线版本 **0.2.1(0156)**
 > 说明：每条写清楚「这个功能在 sing-box 里具体控制什么」，方便后续决定做不做、怎么做。
 > 状态标记：✅ 已支持 / 🟡 部分支持 / ❌ 未支持 / 🚧 进行中
 > 大项标记：每个一级章节标题后跟整体状态，反映该章节核心待办的完成度。
@@ -63,20 +63,26 @@
 
 ---
 
-## 3. TUN 高级选项 ❌
+## 3. TUN 高级选项 ✅
 
-> 现状：TUN 配置写死（auto_route + auto_detect_interface + 物理出口绑定 + ipv4_only）。
+> 设置 → TUN 设置：原「服务管理」面板下面新增「协议栈 / 网络参数 / 路由排除 / 高级」四个 panel + 重置。改动落 `UserDefaults`，500ms 防抖；TUN 开启时 `reconcileRuntime(forceRestart: true)` → daemon 通过 `tunRequestConfigURL` 文件比对（`REQUEST_CONFIG -nt CONFIG`）1-2s 内热重载 sing-box 子进程，免 sudo。
 
-| 选项 | 控制什么 | 建议 |
+| 选项 | 状态 | 备注 |
 |---|---|---|
-| **协议栈** (`stack`) | `system` 最快但兼容性弱 / `gvisor` 兼容最好略慢 / `mixed` 折中 | UI 下拉，默认 mixed |
-| **MTU** (`mtu`) | 默认 9000（高吞吐）；某些网络要 1500 防分片丢包 | UI 数字输入，提示「卡顿可试 1500」 |
-| **严格路由** (`strict_route`) | 强路由防泄漏，代价：可能影响局域网/VPN 共存 | UI 开关，默认关 |
-| **endpoint_independent_nat** | UDP NAT 行为，对游戏/P2P/语音友好 | UI 开关，进阶 |
-| **路由排除** | 哪些 CIDR / 进程不走 TUN | 和「按进程分流」合并 |
-| `auto_route` / `inet4_address` | 核心机制 / utun 虚拟 IP | 一般不暴露 |
+| **协议栈** (`stack`) | ✅ [0155] | 下拉：System / GVisor / Mixed(默认) |
+| **MTU** (`mtu`) | ✅ [0155] | 数字输入，默认 9000（hint「卡顿可改 1500」），校验 576-65535 |
+| **严格路由** (`strict_route`) | ✅ [0155] | checkbox，默认关 |
+| **端点独立 NAT** (`endpoint_independent_nat`) | ✅ [0155] 高级 | checkbox，默认关（P2P/游戏/语音才需要） |
+| **路由排除** (`route_exclude_address`) | ✅ [0155] | 多行 CIDR 文本框，预填 9 段私有 + 链路本地 + 回环 |
+| **包含/排除接口** (`include/exclude_interface`) | ✅ [0155] 高级 | 单行逗号分隔，多网卡场景用 |
+| **DNS 劫持** | 隐式 | 路由规则里硬编码 `protocol: dns, action: hijack-dns`，不暴露 |
+| **设备名称** (`interface_name`) | ❌ 不暴露 | 固定 utun29/utun99，改了和 daemon 冲突 |
+| **白名单路由 (Fake-IP 旁路)** | ❌ 不做 | 跟 auto_route 哲学相反 |
+| **UDP 超时 / 自动路由 / 自动检测出口** | ❌ 不暴露 | 默认值已最佳，关掉 TUN 会废 |
+| **mihomo 私有：RecvMsgX / 禁用 ICMP** | ❌ | sing-box 无对应字段 |
+| **重置为默认值** | ✅ [0155] | |
 
-**待办**：「TUN 设置」加 协议栈下拉 + MTU 输入 + 严格路由开关 + EIN 开关。
+**daemon 热重载**：B 路径已验证可行。[TunServiceManager.swift:969](Sources/TungBox/Services/TunServiceManager.swift:969) 的 daemon polling 已经在比对 `REQUEST_CONFIG -nt CONFIG`；[reloadTunConfigInPlace](Sources/TungBox/MainWindow/MainWindowController+Settings.swift:986) 已经是 helper。TUN 设置改动复用现成 `reconcileRuntime(forceRestart: true)` → `enableTunServiceSafely` → `TunServiceManager.enable` 链路，免 sudo。
 
 ---
 

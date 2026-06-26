@@ -155,6 +155,14 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     let dnsReadSystemHostsCheckbox = MD3Checkbox(checkboxWithTitle: "读取系统 /etc/hosts", target: nil, action: nil)
     let dnsCustomHostsTextView = NSTextView()
     var dnsApplyWorkItem: DispatchWorkItem?
+    let tunStackPopup = MD3PopUpButton()
+    let tunMTUField = MD3TextField()
+    let tunStrictRouteCheckbox = MD3Checkbox(checkboxWithTitle: "严格路由（防泄漏，可能影响局域网共享）", target: nil, action: nil)
+    let tunEINCheckbox = MD3Checkbox(checkboxWithTitle: "端点独立 NAT（对 P2P / 游戏 / 语音友好）", target: nil, action: nil)
+    let tunRouteExcludeTextView = NSTextView()
+    let tunIncludeIfaceField = MD3TextField()
+    let tunExcludeIfaceField = MD3TextField()
+    var tunApplyWorkItem: DispatchWorkItem?
     let tunServiceStatusLabel = NSTextField(labelWithString: "TUN 服务状态：未检测")
     let tunServiceLogLabel = NSTextField(labelWithString: "最近状态：暂无")
     let tunServiceToggleButton = MD3Button()
@@ -1909,29 +1917,16 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             log["level"] = "warn"
             config["log"] = log
 
-            inbounds.insert([
+            let base: [String: Any] = [
                 "type": "tun",
                 "tag": "tun-in",
-                "stack": "mixed",
-                "mtu": 1500,
                 "address": [
                     "\(TunServiceManager.tunIPv4Address)/30"
                 ],
                 "interface_name": TunServiceManager.tunInterfaceName,
-                "auto_route": true,
-                "strict_route": false,
-                "route_exclude_address": [
-                    "10.0.0.0/8",
-                    "100.64.0.0/10",
-                    "127.0.0.0/8",
-                    "169.254.0.0/16",
-                    "172.16.0.0/12",
-                    "192.168.0.0/16",
-                    "::1/128",
-                    "fc00::/7",
-                    "fe80::/10"
-                ]
-            ], at: 0)
+                "auto_route": true
+            ]
+            inbounds.insert(TUNConfig.applyUserFields(to: base), at: 0)
 
             var outbounds = config["outbounds"] as? [[String: Any]] ?? []
 

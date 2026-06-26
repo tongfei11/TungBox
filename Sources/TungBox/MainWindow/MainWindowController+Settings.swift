@@ -289,14 +289,16 @@ extension MainWindowController {
         hint.translatesAutoresizingMaskIntoConstraints = false
 
         refreshTunServiceStatus()
-        return settingsPageStack([
-            settingsPanel(title: "TUN 设置", views: [
+        var cards: [NSView] = [
+            settingsPanel(title: "服务管理", views: [
                 tunServiceStatusLabel,
                 tunButtonGrid,
                 tunServiceLogLabel,
                 hint
             ])
-        ])
+        ]
+        cards.append(contentsOf: makeTunConfigPanels())
+        return settingsPageStack(cards)
     }
 
     func makeSettingsRuleSetPage() -> NSView {
@@ -1287,6 +1289,67 @@ extension MainWindowController {
             field.translatesAutoresizingMaskIntoConstraints = false
             field.heightAnchor.constraint(equalToConstant: 36).isActive = true
         }
+    }
+
+    /// 标题在左、checkbox 在右、灰色提示文案在下的设置行。统一 4 处 DNS/TUN 的开关
+    /// 视觉，避免 "[✓] 标题（长括号说明）" 那种把说明塞到 checkbox title 里的拥挤写法。
+    /// - checkbox 的 title 会被清空，所以传进来时不用关心 title 字段。
+    func settingsToggleRow(title: String, hint: String? = nil, checkbox: MD3Checkbox) -> NSView {
+        checkbox.title = ""
+        checkbox.translatesAutoresizingMaskIntoConstraints = false
+
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = .systemFont(ofSize: 13)
+        titleLabel.textColor = MD3.onSurface
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        registerThemeObserver { [weak titleLabel] in
+            titleLabel?.textColor = MD3.onSurface
+        }
+
+        let spacer = NSView()
+        spacer.translatesAutoresizingMaskIntoConstraints = false
+        spacer.setContentHuggingPriority(.defaultLow - 1, for: .horizontal)
+
+        let row = NSStackView(views: [titleLabel, spacer, checkbox])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 12
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.widthAnchor.constraint(equalToConstant: 560).isActive = true
+
+        guard let hint, !hint.isEmpty else { return row }
+
+        let hintLabel = NSTextField(labelWithString: hint)
+        hintLabel.textColor = MD3.onSurfaceVariant
+        hintLabel.font = .systemFont(ofSize: 12)
+        hintLabel.lineBreakMode = .byWordWrapping
+        hintLabel.maximumNumberOfLines = 0
+        hintLabel.usesSingleLineMode = false
+        hintLabel.cell?.wraps = true
+        hintLabel.cell?.isScrollable = false
+        hintLabel.translatesAutoresizingMaskIntoConstraints = false
+        hintLabel.preferredMaxLayoutWidth = 560
+        registerThemeObserver { [weak hintLabel] in
+            hintLabel?.textColor = MD3.onSurfaceVariant
+        }
+
+        let stack = NSStackView(views: [row, hintLabel])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 4
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.widthAnchor.constraint(equalToConstant: 560).isActive = true
+        return stack
+    }
+
+    /// 一条横向分隔线，宽度跟 panel 内容一致。用在同一 panel 里区分两组不相关的内容。
+    func settingsDivider() -> NSView {
+        let box = NSBox()
+        box.boxType = .separator
+        box.translatesAutoresizingMaskIntoConstraints = false
+        box.widthAnchor.constraint(equalToConstant: 560).isActive = true
+        return box
     }
 
     func settingsLabel(_ title: String) -> NSTextField {

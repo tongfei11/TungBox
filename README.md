@@ -27,7 +27,7 @@ TungBox 是 [sing-box](https://github.com/SagerNet/sing-box) 的 macOS 原生客
 
 > 系统代理与 TUN 模式为两个独立开关，可同时开启；切换出站模式（直连 / 全局 / 规则）实时生效。
 
-> Release 版本 **0.2.1** · 当前编译版本 **0.2.1(0154)**
+> Release 版本 **0.2.1** · 当前编译版本 **0.2.1(0156)**
 
 ## 安装
 
