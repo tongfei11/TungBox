@@ -175,6 +175,10 @@ final class Runner: @unchecked Sendable {
 
     private func startElevated(binary: String, config: URL) throws {
         let actualConfig = preprocessConfig(at: config, allowTun: true)
+        // Cap sing-box.log before the daemon starts appending — the shell `>>`
+        // redirect below has no built-in rotation, so without this the file grows
+        // forever across runs.
+        Store.rotateIfNeeded(at: store.logURL, maxBytes: 1_048_576)
         let command = [
             "cd \(shellQuote(store.baseURL.path))",
             "nohup env ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER=true \(shellQuote(binary)) run -c \(shellQuote(actualConfig.path)) >> \(shellQuote(store.logURL.path)) 2>&1 & echo $!"

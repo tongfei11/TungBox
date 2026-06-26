@@ -256,15 +256,16 @@ enum TunServiceManager {
             "cp \(shellQuote(store.coreBinaryURL.path)) \(shellQuote(corePath))",
             "cp \(shellQuote(tempPlist.path)) \(shellQuote(plistPath))",
             "rm -f \(shellQuote(flagPath)) \(shellQuote(legacyStdoutPath)) \(shellQuote(legacyStderrPath))",
-            "rm -f \(shellQuote(logPath)).old \(shellQuote(stdoutPath)).old \(shellQuote(stderrPath)).old",
+            // Nuke the old per-stream files (and any .old) — the new plist sends launchd
+            // stdout/stderr to /dev/null and the daemon writes everything through $LOG,
+            // so these are pure dead weight from prior installs.
+            "rm -f \(shellQuote(stdoutPath)) \(shellQuote(stderrPath)) \(shellQuote(stdoutPath)).old \(shellQuote(stderrPath)).old \(shellQuote(logPath)).old",
             "[ -f \(shellQuote(logPath)) ] && [ $(stat -f '%z' \(shellQuote(logPath)) 2>/dev/null || echo 0) -gt 1048576 ] && mv \(shellQuote(logPath)) \(shellQuote(logPath)).old || true",
-            "[ -f \(shellQuote(stdoutPath)) ] && [ $(stat -f '%z' \(shellQuote(stdoutPath)) 2>/dev/null || echo 0) -gt 1048576 ] && mv \(shellQuote(stdoutPath)) \(shellQuote(stdoutPath)).old || true",
-            "[ -f \(shellQuote(stderrPath)) ] && [ $(stat -f '%z' \(shellQuote(stderrPath)) 2>/dev/null || echo 0) -gt 1048576 ] && mv \(shellQuote(stderrPath)) \(shellQuote(stderrPath)).old || true",
-            "touch \(shellQuote(logPath)) \(shellQuote(stdoutPath)) \(shellQuote(stderrPath))",
-            "chown root:wheel \(shellQuote(installDirectoryPath)) \(shellQuote(scriptPath)) \(shellQuote(corePath)) \(shellQuote(logPath)) \(shellQuote(stdoutPath)) \(shellQuote(stderrPath)) \(shellQuote(plistPath))",
+            "touch \(shellQuote(logPath))",
+            "chown root:wheel \(shellQuote(installDirectoryPath)) \(shellQuote(scriptPath)) \(shellQuote(corePath)) \(shellQuote(logPath)) \(shellQuote(plistPath))",
             "chmod 755 \(shellQuote(installDirectoryPath))",
             "chmod 755 \(shellQuote(scriptPath)) \(shellQuote(corePath))",
-            "chmod 644 \(shellQuote(logPath)) \(shellQuote(stdoutPath)) \(shellQuote(stderrPath))",
+            "chmod 644 \(shellQuote(logPath))",
             "chmod 644 \(shellQuote(plistPath))",
             "xattr -c \(shellQuote(scriptPath)) \(shellQuote(corePath)) \(shellQuote(plistPath)) >/dev/null 2>&1 || true",
             // Retry bootstrap until the service is actually LOADED. We decide via
@@ -606,9 +607,26 @@ enum TunServiceManager {
         DNS_BACKUP=\(shellQuote(dnsBackupPath))
         TUN_DNS_ADDR="198.18.0.2"
         CHILD=""
-        SCRIPT_VERSION="2026-06-tun-dns-takeover-v23"
+        SCRIPT_VERSION="2026-06-tun-log-rotate-v24"
         REQUEST_MAX_AGE=30
         CLEANING_UP=0
+        LOG_MAX_BYTES=1048576
+
+        # Rotate $LOG in-place when it grows past LOG_MAX_BYTES. We use
+        # `cp + : > $LOG` (NOT mv) on purpose: sing-box was started with `>> $LOG`
+        # so it holds an O_APPEND fd to the original inode. A rename would silently
+        # divert future writes into the .old file forever; truncating in place
+        # keeps the fd valid and the next write lands at offset 0 of the cleared
+        # inode. Runs as root in the daemon loop — no AppleScript prompt needed.
+        rotate_log_if_big() {
+          [ -f "$LOG" ] || return 0
+          size="$(/usr/bin/stat -f '%z' "$LOG" 2>/dev/null || echo 0)"
+          case "$size" in ''|*[!0-9]*) return 0 ;; esac
+          [ "$size" -gt "$LOG_MAX_BYTES" ] || return 0
+          /bin/cp "$LOG" "$LOG.old" 2>/dev/null
+          : > "$LOG"
+          echo "$(date '+%Y-%m-%d %H:%M:%S') log rotated ($size bytes archived to .old)" >> "$LOG"
+        }
 
         is_safe_root_file() {
           path="$1"
@@ -955,6 +973,7 @@ enum TunServiceManager {
                   break
                 fi
               fi
+              rotate_log_if_big
               sleep 1
             done
             if [ -n "$CHILD" ]; then
@@ -997,9 +1016,9 @@ enum TunServiceManager {
           <key>KeepAlive</key>
           <true/>
           <key>StandardOutPath</key>
-          <string>\(xmlEscape(stdoutPath))</string>
+          <string>/dev/null</string>
           <key>StandardErrorPath</key>
-          <string>\(xmlEscape(stderrPath))</string>
+          <string>/dev/null</string>
         </dict>
         </plist>
         """
@@ -1025,7 +1044,8 @@ enum TunServiceManager {
             && script.contains("clean_routes")
             && script.contains("wait_for_pid_exit")
             && script.contains("stop_pid")
-            && script.contains("2026-06-tun-dns-takeover-v23")
+            && script.contains("2026-06-tun-log-rotate-v24")
+            && script.contains("rotate_log_if_big")
             && script.contains("clean_dns")
             && script.contains("flush_dns_after_tun_up")
             && script.contains("apply_tun_dns")
@@ -1036,8 +1056,7 @@ enum TunServiceManager {
             && script.contains("1.0.0.0/8 2.0.0.0/7")
             && script.contains("ifconfig \"$ifname\" down")
             && !script.contains("networksetup -renewdhcp")
-            && plist.contains(stdoutPath)
-            && plist.contains(stderrPath)
+            && plist.contains("/dev/null")
     }
 
     private static func stopChildCommand() -> String {

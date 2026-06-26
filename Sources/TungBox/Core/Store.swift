@@ -93,4 +93,21 @@ final class Store: @unchecked Sendable {
     func configURL(for profile: ConfigProfile) -> URL {
         baseURL.appendingPathComponent(profile.fileName)
     }
+
+    /// If the file at `url` is larger than `maxBytes`, rename it to `<url>.old`
+    /// (replacing any prior .old). Returns silently for files that don't exist
+    /// or are below the threshold. Used to keep user-owned text logs from
+    /// growing without bound — the TUN daemon's root-owned logs use a parallel
+    /// rotation in TunServiceManager.
+    static func rotateIfNeeded(at url: URL, maxBytes: UInt64) {
+        let fm = FileManager.default
+        guard let attrs = try? fm.attributesOfItem(atPath: url.path),
+              let size = attrs[.size] as? UInt64,
+              size > maxBytes else {
+            return
+        }
+        let oldURL = url.appendingPathExtension("old")
+        try? fm.removeItem(at: oldURL)
+        try? fm.moveItem(at: url, to: oldURL)
+    }
 }
