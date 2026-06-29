@@ -27,7 +27,17 @@ TungBox 是 [sing-box](https://github.com/SagerNet/sing-box) 的 macOS 原生客
 
 > 系统代理与 TUN 模式为两个独立开关，可同时开启；切换出站模式（直连 / 全局 / 规则）实时生效。
 
-> Release 版本 **0.2.1** · 当前编译版本 **0.2.1(0156)**
+> Release 版本 **0.2.1** · 当前编译版本 **0.2.1(0157)**
+
+## 开发
+
+```bash
+swift build              # 构建
+./script/test.sh         # 跑所有单元测试（DNS/TUN 配置覆盖 41 个用例）
+./script/test.sh DNSConfigTests   # 指定 suite
+```
+
+> 测试脚本会强制 `DEVELOPER_DIR` 指向 `/Applications/Xcode.app`，绕过系统 `xcode-select` 默认指着 CommandLineTools（没 XCTest）的问题。
 
 ## 安装
 

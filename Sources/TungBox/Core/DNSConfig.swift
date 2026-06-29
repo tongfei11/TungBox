@@ -343,7 +343,8 @@ enum DNSConfig {
     /// - `https://host[:port][/path]` (DoH)
     /// - `quic://host[:port]` (DoQ)
     /// - `h3://host[:port][/path]` (DoH3)
-    private static func parseServerURL(_ raw: String, tag: String, detour: String?) -> [String: Any]? {
+    /// Internal for testing; production code uses it via `buildSingBoxDNS()`.
+    static func parseServerURL(_ raw: String, tag: String, detour: String?) -> [String: Any]? {
         let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !s.isEmpty else { return nil }
 
@@ -398,7 +399,7 @@ enum DNSConfig {
         return out
     }
 
-    private static func splitHostPortPath(_ raw: String) -> (host: String, port: Int?, path: String?) {
+    static func splitHostPortPath(_ raw: String) -> (host: String, port: Int?, path: String?) {
         var rest = raw
         var path: String? = nil
         if let slash = rest.firstIndex(of: "/") {

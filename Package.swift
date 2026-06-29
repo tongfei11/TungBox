@@ -15,6 +15,10 @@ let package = Package(
             resources: [
                 .process("Resources")
             ]
+        ),
+        .testTarget(
+            name: "TungBoxTests",
+            dependencies: ["TungBox"]
         )
     ]
 )

@@ -8,6 +8,5 @@ scripts/
 *.dmg
 dist/
 .claude/
-Tests/
 test_port
 Sources/TungBox/main.swift.bak
