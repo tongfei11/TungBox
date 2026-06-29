@@ -9,4 +9,5 @@ scripts/
 dist/
 .claude/
 test_port
+script/test.sh
 Sources/TungBox/main.swift.bak
