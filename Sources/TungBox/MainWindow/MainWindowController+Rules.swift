@@ -69,6 +69,8 @@ extension MainWindowController {
         rulesTable.gridStyleMask = [.solidHorizontalGridLineMask]
         rulesTable.gridColor = MD3.outlineVariant
         rulesTable.menu = ruleContextMenu()
+        rulesTable.target = self
+        rulesTable.action = #selector(rulesTableClicked(_:))
         rulesTable.registerForDraggedTypes([.string])
         rulesTable.draggingDestinationFeedbackStyle = .gap
         rulesTable.addTableColumn(ruleColumn("enabled", title: "", width: 48))
@@ -519,9 +521,29 @@ extension MainWindowController {
     }
 
     @objc func toggleRuleEnabled(_ sender: MD3Checkbox) {
-        let idx = sender.tag
+        setCustomRuleEnabled(at: sender.tag, to: sender.state == .on)
+    }
+
+    /// Table-level fallback: a click landing in the 启用 column toggles that rule.
+    /// On selected rows the drag-tracking machinery can swallow the checkbox's own
+    /// mouseDown, so the click falls through to the table — this action catches it.
+    /// The two paths are mutually exclusive (the checkbox consumes its event when it
+    /// does receive it), so a single click never toggles twice.
+    @objc func rulesTableClicked(_ sender: NSTableView) {
+        let row = sender.clickedRow
+        let column = sender.clickedColumn
+        guard row >= 0, column >= 0,
+              sender.tableColumns[column].identifier.rawValue == "enabled" else { return }
+        let rows = filteredRuleRows()
+        guard rows.indices.contains(row),
+              let ruleID = rows[row].customRuleID,
+              let idx = customRules.firstIndex(where: { $0.id == ruleID }) else { return }
+        setCustomRuleEnabled(at: idx, to: !customRules[idx].enabled)
+    }
+
+    func setCustomRuleEnabled(at idx: Int, to enabled: Bool) {
         guard customRules.indices.contains(idx) else { return }
-        customRules[idx].enabled = (sender.state == .on)
+        customRules[idx].enabled = enabled
         store.saveCustomRules(customRules)
         appendLog("[规则] \(customRules[idx].type) \(customRules[idx].value) 已\(customRules[idx].enabled ? "启用" : "禁用")\n")
 
@@ -534,7 +556,6 @@ extension MainWindowController {
             } catch {
                 // Rollback
                 customRules[idx].enabled.toggle()
-                sender.state = customRules[idx].enabled ? .on : .off
                 store.saveCustomRules(customRules)
                 showError(error)
             }
