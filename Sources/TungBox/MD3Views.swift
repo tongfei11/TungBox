@@ -2619,6 +2619,17 @@ final class MD3Dialog: NSView, MD3Themeable {
 
 // MARK: - MD3 Checkbox
 
+/// NSTableView only lets a short allow-list of controls (NSButton etc.) receive the
+/// first click on a not-yet-selected row; custom NSControl subclasses like
+/// MD3Checkbox get swallowed by row selection instead, making in-cell checkboxes
+/// feel dead. Allow them explicitly so a click always reaches the checkbox.
+final class ControlFriendlyTableView: NSTableView {
+    override func validateProposedFirstResponder(_ responder: NSResponder, for event: NSEvent?) -> Bool {
+        if responder is MD3Checkbox { return true }
+        return super.validateProposedFirstResponder(responder, for: event)
+    }
+}
+
 final class MD3Checkbox: NSControl, MD3Themeable {
     var title: String = "" {
         didSet {

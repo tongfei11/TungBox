@@ -65,7 +65,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     let table = NSTableView()
     let subscriptionTable = NSTableView()
     let nodeTable = NSTableView()
-    let rulesTable = NSTableView()
+    let rulesTable = ControlFriendlyTableView()
     let connectionsTable = NSTableView()
     let nodeGroupsStack = NSStackView()
     let pages = NSTabView()
