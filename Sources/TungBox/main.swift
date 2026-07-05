@@ -224,16 +224,11 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         split.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(split)
 
-        let sidebar = NSView()
-        sidebar.translatesAutoresizingMaskIntoConstraints = false
-
-        let main = NSView()
-        main.translatesAutoresizingMaskIntoConstraints = false
+        let sidebar = NSView(frame: NSRect(x: 0, y: 0, width: 180, height: 720))
+        let main = NSView(frame: NSRect(x: 0, y: 0, width: 900, height: 720))
 
         split.addArrangedSubview(sidebar)
         split.addArrangedSubview(main)
-
-        sidebar.widthAnchor.constraint(equalToConstant: 180).isActive = true
 
         DispatchQueue.main.async { [weak self] in
             self?.split.setPosition(180, ofDividerAt: 0)
