@@ -78,6 +78,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     let customRuleValueField = MD3TextField()
     let customRuleNoteField = MD3TextField()
     weak var customRuleValueLabel: NSTextField?
+    weak var customRuleDescLabel: NSTextField?
     weak var customRuleAppPickerButton: NSButton?
     let ruleSetPrivateURLField = MD3TextField()
     let ruleSetCNURLField = MD3TextField()
@@ -513,6 +514,14 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 customRuleTypePopup.menu?.addItem(NSMenuItem.separator())
             }
             customRuleTypePopup.addItems(withTitles: section)
+        }
+        // Fire the type-change handler reliably on selection: attach the action to
+        // each item (the popup-level action was not firing consistently through the
+        // custom cell), so the value label / placeholder / description / app-picker
+        // all update when the user picks a different type.
+        for item in customRuleTypePopup.itemArray where !item.isSeparatorItem {
+            item.target = self
+            item.action = #selector(customRuleTypeChanged)
         }
         if let current, popup(customRuleTypePopup, contains: current) {
             customRuleTypePopup.selectItem(withTitle: current)

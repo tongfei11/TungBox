@@ -150,28 +150,28 @@ extension MainWindowController {
         refreshRulesFromEditor()
     }
 
-    /// Per-rule-type field label, input placeholder, and whether it's a process rule
-    /// (which offers the running-app picker).
-    func ruleTypeMeta(_ type: String) -> (label: String, placeholder: String, isProcess: Bool) {
+    /// Per-rule-type field label, input placeholder, a short description shown under
+    /// the type popup, and whether it's a process rule (offers the running-app picker).
+    func ruleTypeMeta(_ type: String) -> (label: String, placeholder: String, desc: String, isProcess: Bool) {
         switch type {
-        case "DOMAIN": return ("域名（完整匹配）", "example.com", false)
-        case "DOMAIN-SUFFIX": return ("域名后缀", "example.com", false)
-        case "DOMAIN-KEYWORD": return ("域名关键字", "google", false)
-        case "DOMAIN-WILDCARD": return ("通配域名", "*.example.com", false)
-        case "DOMAIN-REGEX": return ("域名正则", "^.*\\.example\\.com$", false)
-        case "RULE-SET": return ("规则集标签", "geosite-cn", false)
-        case "IP-CIDR": return ("IPv4 段（CIDR）", "192.168.0.0/16", false)
-        case "IP-CIDR6": return ("IPv6 段（CIDR）", "2001:db8::/32", false)
-        case "GEOIP": return ("国家/地区码", "cn", false)
-        case "IP-ASN": return ("AS 号", "13335", false)
-        case "SRC-IP": return ("来源 IP 段（CIDR）", "192.168.1.0/24", false)
-        case "PROCESS-NAME": return ("进程名（可从运行中的应用选择）", "WeChat", true)
-        case "URL-REGEX": return ("URL 正则（按域名正则近似匹配）", "^.*\\.example\\.com$", false)
-        case "IN-PORT": return ("入站端口（1-65535）", "7890", false)
-        case "DEST-PORT": return ("目标端口（1-65535）", "443", false)
-        case "PROTOCOL": return ("协议", "tls", false)
-        case "NETWORK": return ("网络（tcp / udp）", "tcp", false)
-        default: return ("规则值", "example.com", false)
+        case "DOMAIN": return ("域名", "example.com", "如果请求的域名完全匹配，执行该规则。", false)
+        case "DOMAIN-SUFFIX": return ("域名后缀", "example.com", "如果请求的域名以此后缀结尾（含子域名），执行该规则。", false)
+        case "DOMAIN-KEYWORD": return ("域名关键字", "google", "如果请求的域名包含该关键字，执行该规则。", false)
+        case "DOMAIN-WILDCARD": return ("通配域名", "*.example.com", "使用通配符匹配域名，* 匹配任意字符。", false)
+        case "DOMAIN-REGEX": return ("域名正则", "^.*\\.example\\.com$", "使用正则表达式匹配请求的域名。", false)
+        case "RULE-SET": return ("规则集标签", "geosite-cn", "引用配置中已有的规则集（geosite / geoip 标签）。", false)
+        case "IP-CIDR": return ("IP 范围", "IP CIDR 地址块（例如 192.168.1.0/24）", "当请求的目标 IP 属于指定段时匹配。(IPv4)", false)
+        case "IP-CIDR6": return ("IP 范围", "IPv6 CIDR（例如 2001:db8::/32）", "当请求的目标 IP 属于指定段时匹配。(IPv6)", false)
+        case "GEOIP": return ("国家/地区码", "cn", "当请求的目标 IP 属于指定国家 / 地区时匹配。", false)
+        case "IP-ASN": return ("AS 号", "13335", "当目标 IP 属于指定自治系统（AS）时匹配。", false)
+        case "SRC-IP": return ("来源 IP 范围", "192.168.1.0/24", "当请求的来源 IP 属于指定段时匹配。", false)
+        case "PROCESS-NAME": return ("进程名", "WeChat", "当发起请求的进程名匹配时执行该规则。可从运行中的应用选择。", true)
+        case "URL-REGEX": return ("URL 正则", "^.*\\.example\\.com$", "按域名正则近似匹配（sing-box 无完整 URL 匹配能力）。", false)
+        case "IN-PORT": return ("入站端口", "7890", "当本地入站端口匹配时执行该规则。", false)
+        case "DEST-PORT": return ("目标端口", "443", "当请求的目标端口匹配时执行该规则。", false)
+        case "PROTOCOL": return ("协议", "tls", "当嗅探到的应用层协议匹配时执行（如 tls、http、quic）。", false)
+        case "NETWORK": return ("网络", "tcp", "按传输层网络匹配，仅可填 tcp 或 udp。", false)
+        default: return ("规则值", "example.com", "", false)
         }
     }
 
@@ -209,6 +209,7 @@ extension MainWindowController {
         let meta = ruleTypeMeta(type)
         customRuleValueLabel?.stringValue = meta.label
         customRuleValueField.placeholderString = meta.placeholder
+        customRuleDescLabel?.stringValue = meta.desc
         customRuleAppPickerButton?.isHidden = !meta.isProcess
     }
 
@@ -333,6 +334,14 @@ extension MainWindowController {
         
         let sec1 = sectionHeadingLabel("规则")
         let f1 = fieldStack(typeLabel, customRuleTypePopup)
+        let descLabel = NSTextField(labelWithString: "")
+        descLabel.font = .systemFont(ofSize: 11)
+        descLabel.textColor = MD3.onSurfaceVariant
+        descLabel.lineBreakMode = .byWordWrapping
+        descLabel.maximumNumberOfLines = 0
+        descLabel.translatesAutoresizingMaskIntoConstraints = false
+        registerThemeObserver { [weak descLabel] in descLabel?.textColor = MD3.onSurfaceVariant }
+        customRuleDescLabel = descLabel
         let f2 = fieldStack(valueLabel, valueStack)
         let div1 = dividerLine()
         
@@ -345,6 +354,7 @@ extension MainWindowController {
         
         stack.addArrangedSubview(sec1)
         stack.addArrangedSubview(f1)
+        stack.addArrangedSubview(descLabel)
         stack.addArrangedSubview(f2)
         stack.addArrangedSubview(div1)
         stack.addArrangedSubview(sec2)
@@ -356,6 +366,8 @@ extension MainWindowController {
         NSLayoutConstraint.activate([
             f1.leadingAnchor.constraint(equalTo: stack.leadingAnchor),
             f1.trailingAnchor.constraint(equalTo: stack.trailingAnchor),
+            descLabel.leadingAnchor.constraint(equalTo: stack.leadingAnchor),
+            descLabel.trailingAnchor.constraint(equalTo: stack.trailingAnchor),
             f2.leadingAnchor.constraint(equalTo: stack.leadingAnchor),
             f2.trailingAnchor.constraint(equalTo: stack.trailingAnchor),
             div1.leadingAnchor.constraint(equalTo: stack.leadingAnchor),
@@ -369,7 +381,8 @@ extension MainWindowController {
         ])
         
         stack.setCustomSpacing(8, after: sec1)
-        stack.setCustomSpacing(12, after: f1)
+        stack.setCustomSpacing(6, after: f1)
+        stack.setCustomSpacing(12, after: descLabel)
         stack.setCustomSpacing(16, after: f2)
         stack.setCustomSpacing(16, after: div1)
         stack.setCustomSpacing(8, after: sec2)
