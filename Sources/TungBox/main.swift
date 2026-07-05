@@ -2643,6 +2643,17 @@ extension MainWindowController: NSSplitViewDelegate {
     func splitView(_ splitView: NSSplitView, shouldAdjustSizeOfSubview view: NSView) -> Bool {
         return view != splitView.subviews.first
     }
+    // Pin the sidebar at a fixed 180pt and never let it collapse, so it can't
+    // disappear regardless of resize / divider interactions.
+    func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
+        return 180
+    }
+    func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
+        return 180
+    }
+    func splitView(_ splitView: NSSplitView, canCollapseSubview subview: NSView) -> Bool {
+        return false
+    }
 }
 
 extension MainWindowController {
