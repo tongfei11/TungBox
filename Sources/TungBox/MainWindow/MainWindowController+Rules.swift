@@ -159,7 +159,7 @@ extension MainWindowController {
         case "DOMAIN-KEYWORD": return ("域名关键字", "google", "如果请求的域名包含该关键字，执行该规则。", false)
         case "DOMAIN-WILDCARD": return ("通配域名", "*.example.com", "使用通配符匹配域名，* 匹配任意字符。", false)
         case "DOMAIN-REGEX": return ("域名正则", "^.*\\.example\\.com$", "使用正则表达式匹配请求的域名。", false)
-        case "RULE-SET": return ("规则集标签", "geosite-cn", "引用配置中已有的规则集（geosite / geoip 标签）。", false)
+        case "RULE-SET": return ("规则集标签", "geosite-cn", "引用当前配置中已定义的规则集（geosite / geoip / 自定义 SRS）。可点下方按钮从已有规则集中选择，避免手输错标签。", false)
         case "IP-CIDR": return ("IP 范围", "IP CIDR 地址块（例如 192.168.1.0/24）", "当请求的目标 IP 属于指定段时匹配（IPv4）。默认不执行 DNS 解析（no-resolve），仅按已知 IP 匹配。", false)
         case "IP-CIDR6": return ("IP 范围", "IPv6 CIDR（例如 2001:db8::/32）", "当请求的目标 IP 属于指定段时匹配（IPv6）。默认不执行 DNS 解析（no-resolve），仅按已知 IP 匹配。", false)
         case "GEOIP": return ("国家/地区码", "cn", "当请求的目标 IP 属于指定国家 / 地区时匹配。默认不执行 DNS 解析（no-resolve），仅按已知 IP 匹配。", false)
@@ -173,6 +173,59 @@ extension MainWindowController {
         case "NETWORK": return ("网络", "tcp", "按传输层网络匹配，仅可填 tcp 或 udp。", false)
         default: return ("规则值", "example.com", "", false)
         }
+    }
+
+    /// Short Chinese name shown next to the English key in the type dropdown.
+    func ruleTypeChineseName(_ type: String) -> String {
+        switch type {
+        case "DOMAIN": return "域名"
+        case "DOMAIN-SUFFIX": return "域名后缀"
+        case "DOMAIN-KEYWORD": return "域名关键字"
+        case "DOMAIN-WILDCARD": return "通配域名"
+        case "DOMAIN-REGEX": return "域名正则"
+        case "RULE-SET": return "规则集"
+        case "IP-CIDR": return "IP 段"
+        case "IP-CIDR6": return "IPv6 段"
+        case "GEOIP": return "地区"
+        case "LAN": return "内网"
+        case "SRC-IP": return "来源 IP"
+        case "PROCESS-NAME": return "进程名"
+        case "PROCESS-PATH": return "进程路径"
+        case "URL-REGEX": return "URL 正则"
+        case "DEST-PORT": return "目标端口"
+        case "PROTOCOL": return "协议"
+        case "NETWORK": return "网络"
+        default: return ""
+        }
+    }
+
+    /// English key of the selected rule type. Each menu item stores its key in
+    /// representedObject so the visible title can carry Chinese without breaking
+    /// the type switches elsewhere.
+    var selectedRuleType: String {
+        (customRuleTypePopup.selectedItem?.representedObject as? String) ?? "DOMAIN"
+    }
+
+    /// Select the type item whose English key matches (used when editing a rule).
+    func selectRuleType(_ key: String) {
+        if let item = customRuleTypePopup.itemArray.first(where: { ($0.representedObject as? String) == key }) {
+            customRuleTypePopup.select(item)
+        }
+    }
+
+    /// "ENGLISH 中文" for the type dropdown, with the Chinese half greyed out so it
+    /// reads like a secondary hint rather than part of the identifier.
+    func ruleTypeAttributedTitle(_ key: String) -> NSAttributedString {
+        let name = ruleTypeChineseName(key)
+        let full = name.isEmpty ? key : "\(key)   \(name)"
+        let attr = NSMutableAttributedString(string: full, attributes: [
+            .font: NSFont.systemFont(ofSize: 13, weight: .medium),
+            .foregroundColor: MD3.onSurface
+        ])
+        if !name.isEmpty, let range = full.range(of: name) {
+            attr.addAttribute(.foregroundColor, value: MD3.onSurfaceVariant.withAlphaComponent(0.55), range: NSRange(range, in: full))
+        }
+        return attr
     }
 
     /// Friendly pre-save validation per rule type (the final config is still checked
@@ -205,16 +258,26 @@ extension MainWindowController {
     }
 
     @objc func customRuleTypeChanged() {
-        let type = customRuleTypePopup.titleOfSelectedItem ?? "DOMAIN"
+        let type = selectedRuleType
         let meta = ruleTypeMeta(type)
         customRuleValueLabel?.stringValue = meta.label
         customRuleValueField.placeholderString = meta.placeholder
         customRuleDescLabel?.stringValue = meta.desc
-        // Add/remove the app-picker button from the stack rather than toggling
-        // isHidden — a hidden arranged subview is not collapsed on macOS 26 and would
-        // overlap the value field, blocking clicks on its left half.
+        // Show a "pick from existing" button for the types that have a source to
+        // pick from (running apps for PROCESS-NAME, defined rule sets for RULE-SET).
+        // Add/remove it from the stack rather than toggling isHidden — a hidden
+        // arranged subview is not collapsed on macOS 26 and would overlap the value
+        // field, blocking clicks on its left half.
         if let button = customRuleAppPickerButton, let stack = customRuleValueStack {
-            if meta.isProcess {
+            let picker: (title: String, action: Selector)?
+            switch type {
+            case "PROCESS-NAME": picker = ("从运行中的应用选择…", #selector(pickRunningAppForRule(_:)))
+            case "RULE-SET": picker = ("从已有规则集选择…", #selector(pickRuleSetForRule(_:)))
+            default: picker = nil
+            }
+            if let picker {
+                button.title = picker.title
+                button.action = picker.action
                 if button.superview == nil { stack.addArrangedSubview(button) }
             } else if button.superview != nil {
                 stack.removeArrangedSubview(button)
@@ -225,7 +288,7 @@ extension MainWindowController {
 
     @objc func pickRunningAppForRule(_ sender: NSButton) {
         // Only meaningful for PROCESS-NAME; ignore for any other type.
-        guard customRuleTypePopup.titleOfSelectedItem == "PROCESS-NAME" else { return }
+        guard selectedRuleType == "PROCESS-NAME" else { return }
         let menu = NSMenu()
         let apps = NSWorkspace.shared.runningApplications
             .filter { $0.activationPolicy == .regular }
@@ -249,6 +312,29 @@ extension MainWindowController {
     @objc func runningAppPicked(_ sender: NSMenuItem) {
         guard let process = sender.representedObject as? String else { return }
         customRuleValueField.stringValue = process
+    }
+
+    @objc func pickRuleSetForRule(_ sender: NSButton) {
+        // Only meaningful for RULE-SET; list the rule sets actually defined in the
+        // current config so the user can't reference a non-existent tag.
+        guard selectedRuleType == "RULE-SET" else { return }
+        let tags = currentRouteRuleSets().compactMap { $0["tag"] as? String }
+        let menu = NSMenu()
+        if tags.isEmpty {
+            menu.addItem(withTitle: "当前配置没有规则集", action: nil, keyEquivalent: "")
+        }
+        for tag in tags {
+            let item = NSMenuItem(title: tag, action: #selector(ruleSetPicked(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = tag
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 4), in: sender)
+    }
+
+    @objc func ruleSetPicked(_ sender: NSMenuItem) {
+        guard let tag = sender.representedObject as? String else { return }
+        customRuleValueField.stringValue = tag
     }
 
     @objc func showAddCustomRuleDialog() {
@@ -442,7 +528,7 @@ extension MainWindowController {
     private func addCustomRuleFromDialog() {
         do {
             let value = customRuleValueField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            let type = customRuleTypePopup.titleOfSelectedItem ?? "DOMAIN"
+            let type = selectedRuleType
             try validateRuleValue(type: type, value: value)
             guard let subscription = currentSubscription() else {
                 throw NSError.user("请先选择一个订阅。自定义规则会按订阅单独保存。")
@@ -540,7 +626,7 @@ extension MainWindowController {
         }
         // Pre-fill dialog with existing values
         showAddCustomRuleDialog()
-        customRuleTypePopup.selectItem(withTitle: rule.type)
+        selectRuleType(rule.type)
         customRuleStrategyPopup.selectItem(withTitle: rule.strategy)
         customRuleValueField.stringValue = rule.value
         customRuleNoteField.stringValue = rule.note

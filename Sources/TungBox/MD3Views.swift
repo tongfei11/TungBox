@@ -2915,15 +2915,28 @@ final class MD3PopUpButton: NSPopUpButton, MD3Themeable {
             .paragraphStyle: paragraphStyle
         ]
         
-        let titleString = titleOfSelectedItem ?? ""
-        let titleSize = titleString.size(withAttributes: attrs)
-        let titleRect = NSRect(
-            x: 12,
-            y: (bounds.height - titleSize.height) / 2,
-            width: bounds.width - 36,
-            height: titleSize.height
-        )
-        titleString.draw(in: titleRect, withAttributes: attrs)
+        // Prefer the selected item's attributed title (the rule-type popup uses it to
+        // grey the Chinese half); fall back to the plain title for other popups.
+        if let attributed = selectedItem?.attributedTitle, attributed.length > 0 {
+            let size = attributed.size()
+            let rect = NSRect(
+                x: 12,
+                y: (bounds.height - size.height) / 2,
+                width: bounds.width - 36,
+                height: size.height
+            )
+            attributed.draw(in: rect)
+        } else {
+            let titleString = titleOfSelectedItem ?? ""
+            let titleSize = titleString.size(withAttributes: attrs)
+            let titleRect = NSRect(
+                x: 12,
+                y: (bounds.height - titleSize.height) / 2,
+                width: bounds.width - 36,
+                height: titleSize.height
+            )
+            titleString.draw(in: titleRect, withAttributes: attrs)
+        }
         
         // Draw custom chevron arrow
         let isFlipped = self.isFlipped

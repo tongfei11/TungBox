@@ -499,30 +499,38 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         ])
     }
     func populateRuleTypePopup() {
-        let current = customRuleTypePopup.titleOfSelectedItem
+        let currentKey = customRuleTypePopup.selectedItem?.representedObject as? String
         customRuleTypePopup.removeAllItems()
         let sections = [
-            ["DOMAIN", "DOMAIN-SUFFIX", "DOMAIN-KEYWORD", "DOMAIN-WILDCARD", "DOMAIN-REGEX", "RULE-SET"],
-            ["IP-CIDR", "IP-CIDR6", "GEOIP", "LAN", "SRC-IP"],
+            ["DOMAIN", "DOMAIN-SUFFIX", "DOMAIN-KEYWORD", "DOMAIN-WILDCARD", "DOMAIN-REGEX"],
+            ["IP-CIDR", "IP-CIDR6", "GEOIP", "SRC-IP"],
             ["PROCESS-NAME", "PROCESS-PATH", "URL-REGEX"],
-            ["DEST-PORT", "PROTOCOL", "NETWORK"]
+            ["DEST-PORT", "PROTOCOL", "NETWORK"],
+            ["RULE-SET", "LAN"]
         ]
         for (index, section) in sections.enumerated() {
             if index > 0 {
                 customRuleTypePopup.menu?.addItem(NSMenuItem.separator())
             }
-            customRuleTypePopup.addItems(withTitles: section)
+            for key in section {
+                // Show "ENGLISH 中文" (Chinese greyed) but keep the English key in
+                // representedObject so the type switches elsewhere read a stable
+                // identifier, not the label. The per-item action fires the type-change
+                // handler reliably (the popup-level action was inconsistent through
+                // the custom cell).
+                let item = NSMenuItem(
+                    title: key,
+                    action: #selector(customRuleTypeChanged),
+                    keyEquivalent: ""
+                )
+                item.attributedTitle = ruleTypeAttributedTitle(key)
+                item.target = self
+                item.representedObject = key
+                customRuleTypePopup.menu?.addItem(item)
+            }
         }
-        // Fire the type-change handler reliably on selection: attach the action to
-        // each item (the popup-level action was not firing consistently through the
-        // custom cell), so the value label / placeholder / description / app-picker
-        // all update when the user picks a different type.
-        for item in customRuleTypePopup.itemArray where !item.isSeparatorItem {
-            item.target = self
-            item.action = #selector(customRuleTypeChanged)
-        }
-        if let current, popup(customRuleTypePopup, contains: current) {
-            customRuleTypePopup.selectItem(withTitle: current)
+        if let currentKey {
+            selectRuleType(currentKey)
         }
     }
 
