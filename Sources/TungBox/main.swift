@@ -79,7 +79,10 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     let customRuleNoteField = MD3TextField()
     weak var customRuleValueLabel: NSTextField?
     weak var customRuleDescLabel: NSTextField?
-    weak var customRuleAppPickerButton: NSButton?
+    // Strong: this button is detached from the view hierarchy for non-PROCESS types,
+    // so nothing else retains it while it's out of the stack.
+    var customRuleAppPickerButton: NSButton?
+    weak var customRuleValueStack: NSStackView?
     let ruleSetPrivateURLField = MD3TextField()
     let ruleSetCNURLField = MD3TextField()
     let ruleSetGeoIPCNURLField = MD3TextField()
@@ -500,9 +503,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         customRuleTypePopup.removeAllItems()
         let sections = [
             ["DOMAIN", "DOMAIN-SUFFIX", "DOMAIN-KEYWORD", "DOMAIN-WILDCARD", "DOMAIN-REGEX", "RULE-SET"],
-            ["IP-CIDR", "IP-CIDR6", "GEOIP", "IP-ASN", "SRC-IP"],
-            ["PROCESS-NAME", "URL-REGEX"],
-            ["IN-PORT", "DEST-PORT", "PROTOCOL", "NETWORK"]
+            ["IP-CIDR", "IP-CIDR6", "GEOIP", "LAN", "SRC-IP"],
+            ["PROCESS-NAME", "PROCESS-PATH", "URL-REGEX"],
+            ["DEST-PORT", "PROTOCOL", "NETWORK"]
         ]
         for (index, section) in sections.enumerated() {
             if index > 0 {

@@ -160,14 +160,14 @@ extension MainWindowController {
         case "DOMAIN-WILDCARD": return ("通配域名", "*.example.com", "使用通配符匹配域名，* 匹配任意字符。", false)
         case "DOMAIN-REGEX": return ("域名正则", "^.*\\.example\\.com$", "使用正则表达式匹配请求的域名。", false)
         case "RULE-SET": return ("规则集标签", "geosite-cn", "引用配置中已有的规则集（geosite / geoip 标签）。", false)
-        case "IP-CIDR": return ("IP 范围", "IP CIDR 地址块（例如 192.168.1.0/24）", "当请求的目标 IP 属于指定段时匹配。(IPv4)", false)
-        case "IP-CIDR6": return ("IP 范围", "IPv6 CIDR（例如 2001:db8::/32）", "当请求的目标 IP 属于指定段时匹配。(IPv6)", false)
-        case "GEOIP": return ("国家/地区码", "cn", "当请求的目标 IP 属于指定国家 / 地区时匹配。", false)
-        case "IP-ASN": return ("AS 号", "13335", "当目标 IP 属于指定自治系统（AS）时匹配。", false)
+        case "IP-CIDR": return ("IP 范围", "IP CIDR 地址块（例如 192.168.1.0/24）", "当请求的目标 IP 属于指定段时匹配（IPv4）。默认不执行 DNS 解析（no-resolve），仅按已知 IP 匹配。", false)
+        case "IP-CIDR6": return ("IP 范围", "IPv6 CIDR（例如 2001:db8::/32）", "当请求的目标 IP 属于指定段时匹配（IPv6）。默认不执行 DNS 解析（no-resolve），仅按已知 IP 匹配。", false)
+        case "GEOIP": return ("国家/地区码", "cn", "当请求的目标 IP 属于指定国家 / 地区时匹配。默认不执行 DNS 解析（no-resolve），仅按已知 IP 匹配。", false)
+        case "LAN": return ("匹配值（可留空）", "无需填写", "匹配所有目标为内网 / 私有地址的流量（10./172.16./192.168./fc00 等），一条顶多条 IP-CIDR。此类型无需填写匹配值。", false)
         case "SRC-IP": return ("来源 IP 范围", "192.168.1.0/24", "当请求的来源 IP 属于指定段时匹配。", false)
         case "PROCESS-NAME": return ("进程名", "WeChat", "当发起请求的进程名匹配时执行该规则。可从运行中的应用选择。", true)
+        case "PROCESS-PATH": return ("进程路径", "/Applications/WeChat.app/Contents/MacOS/WeChat", "按发起请求进程的可执行文件完整路径匹配，比进程名更精确（可区分同名进程）。", false)
         case "URL-REGEX": return ("URL 正则", "^.*\\.example\\.com$", "按域名正则近似匹配（sing-box 无完整 URL 匹配能力）。", false)
-        case "IN-PORT": return ("入站端口", "7890", "当本地入站端口匹配时执行该规则。", false)
         case "DEST-PORT": return ("目标端口", "443", "当请求的目标端口匹配时执行该规则。", false)
         case "PROTOCOL": return ("协议", "tls", "当嗅探到的应用层协议匹配时执行（如 tls、http、quic）。", false)
         case "NETWORK": return ("网络", "tcp", "按传输层网络匹配，仅可填 tcp 或 udp。", false)
@@ -179,14 +179,14 @@ extension MainWindowController {
     /// by sing-box, but this catches obvious mistakes with a clear message).
     func validateRuleValue(type: String, value: String) throws {
         let v = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        // LAN matches all private-address traffic and takes no value.
+        if type == "LAN" { return }
         guard !v.isEmpty else { throw NSError.user("请输入规则值") }
         switch type {
-        case "IN-PORT", "DEST-PORT":
+        case "DEST-PORT":
             guard let p = Int(v), (1...65535).contains(p) else {
                 throw NSError.user("端口需为 1-65535 之间的数字")
             }
-        case "IP-ASN":
-            guard Int(v) != nil else { throw NSError.user("AS 号需为数字，例如 13335") }
         case "IP-CIDR", "IP-CIDR6", "SRC-IP":
             guard v.contains("/") else {
                 throw NSError.user("请使用 CIDR 写法，例如 192.168.0.0/16（单个 IP 用 /32 或 /128）")
@@ -210,7 +210,17 @@ extension MainWindowController {
         customRuleValueLabel?.stringValue = meta.label
         customRuleValueField.placeholderString = meta.placeholder
         customRuleDescLabel?.stringValue = meta.desc
-        customRuleAppPickerButton?.isHidden = !meta.isProcess
+        // Add/remove the app-picker button from the stack rather than toggling
+        // isHidden — a hidden arranged subview is not collapsed on macOS 26 and would
+        // overlap the value field, blocking clicks on its left half.
+        if let button = customRuleAppPickerButton, let stack = customRuleValueStack {
+            if meta.isProcess {
+                if button.superview == nil { stack.addArrangedSubview(button) }
+            } else if button.superview != nil {
+                stack.removeArrangedSubview(button)
+                button.removeFromSuperview()
+            }
+        }
     }
 
     @objc func pickRunningAppForRule(_ sender: NSButton) {
@@ -277,11 +287,17 @@ extension MainWindowController {
         appPickerButton.translatesAutoresizingMaskIntoConstraints = false
         appPickerButton.heightAnchor.constraint(equalToConstant: 32).isActive = true
         customRuleAppPickerButton = appPickerButton
-        let valueStack = NSStackView(views: [customRuleValueField, appPickerButton])
+        // The picker button is added to / removed from the stack on demand in
+        // customRuleTypeChanged(). We must NOT rely on isHidden here: on macOS 26
+        // NSStackView no longer collapses a hidden arranged subview, so the hidden
+        // button stays laid out on top of the value field's left half and swallows
+        // its clicks (they fall through to the table behind the dialog).
+        let valueStack = NSStackView(views: [customRuleValueField])
         valueStack.orientation = .vertical
         valueStack.spacing = 8
         valueStack.alignment = .leading
         valueStack.translatesAutoresizingMaskIntoConstraints = false
+        customRuleValueStack = valueStack
         customRuleValueField.leadingAnchor.constraint(equalTo: valueStack.leadingAnchor).isActive = true
         customRuleValueField.trailingAnchor.constraint(equalTo: valueStack.trailingAnchor).isActive = true
 
@@ -736,6 +752,9 @@ extension MainWindowController {
             if let cidr = rule["ip_cidr"] {
                 append("IP-CIDR", compactDescription(cidr), strategy, "IP 段")
             }
+            if let priv = rule["ip_is_private"] as? Bool, priv {
+                append("LAN", "内网 / 私有地址", strategy, "内网")
+            }
             if let domains = rule["domain"] {
                 appendEachRuleValue(type: "DOMAIN", values: domains, strategy: strategy, note: "显式域名", append: append)
             }
@@ -751,14 +770,11 @@ extension MainWindowController {
             if let sourceCIDR = rule["source_ip_cidr"] {
                 appendEachRuleValue(type: "SRC-IP", values: sourceCIDR, strategy: strategy, note: "源 IP", append: append)
             }
-            if let asn = rule["ip_asn"] {
-                appendEachRuleValue(type: "IP-ASN", values: asn, strategy: strategy, note: "ASN", append: append)
-            }
             if let processName = rule["process_name"] {
                 appendEachRuleValue(type: "PROCESS-NAME", values: processName, strategy: strategy, note: "进程", append: append)
             }
-            if let userAgent = rule["user_agent"] {
-                appendEachRuleValue(type: "USER-AGENT", values: userAgent, strategy: strategy, note: "User-Agent", append: append)
+            if let processPath = rule["process_path"] {
+                appendEachRuleValue(type: "PROCESS-PATH", values: processPath, strategy: strategy, note: "进程路径", append: append)
             }
             if let port = rule["port"] {
                 appendEachRuleValue(type: "DEST-PORT", values: port, strategy: strategy, note: "端口", append: append)
@@ -863,7 +879,6 @@ extension MainWindowController {
             appendRuleSetValues(type: "IP-CIDR", key: "ip_cidr", from: rule, to: &entries)
             appendRuleSetValues(type: "SRC-IP", key: "source_ip_cidr", from: rule, to: &entries)
             appendRuleSetValues(type: "PROCESS-NAME", key: "process_name", from: rule, to: &entries)
-            appendRuleSetValues(type: "USER-AGENT", key: "user_agent", from: rule, to: &entries)
         }
         return entries
     }
@@ -928,18 +943,15 @@ extension MainWindowController {
             return ["ip_cidr": normalizedValue, "outbound": outbound]
         case "GEOIP":
             return ["rule_set": normalizedValue.hasPrefix("geoip-") ? normalizedValue : "geoip-\(normalizedValue.lowercased())", "outbound": outbound]
-        case "IP-ASN":
-            if let asn = Int(normalizedValue) {
-                return ["ip_asn": asn, "outbound": outbound]
-            }
-            return ["ip_asn": normalizedValue, "outbound": outbound]
+        case "LAN":
+            return ["ip_is_private": true, "outbound": outbound]
         case "SRC-IP":
             return ["source_ip_cidr": normalizedValue, "outbound": outbound]
         case "PROCESS-NAME":
             return ["process_name": normalizedValue, "outbound": outbound]
-        case "USER-AGENT":
-            return ["user_agent": normalizedValue, "outbound": outbound]
-        case "IN-PORT", "DEST-PORT":
+        case "PROCESS-PATH":
+            return ["process_path": normalizedValue, "outbound": outbound]
+        case "DEST-PORT":
             if let port = Int(normalizedValue) {
                 return ["port": port, "outbound": outbound]
             }
