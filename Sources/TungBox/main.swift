@@ -1102,7 +1102,14 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         table.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
         let url = store.configURL(for: profiles[index])
         let rawConfig = (try? String(contentsOf: url)) ?? ""
-        editor.string = normalizeLatencyTestURLs(inConfigText: rawConfig) ?? rawConfig
+        var loaded = normalizeLatencyTestURLs(inConfigText: rawConfig) ?? rawConfig
+        // Repair a stale/dangling default_domain_resolver (e.g. an old "dns-cn" no
+        // longer defined) so the profile passes sing-box check, and persist the fix.
+        if let repaired = repairDefaultDomainResolver(inConfigText: loaded) {
+            loaded = repaired
+            try? loaded.write(to: url, atomically: true, encoding: .utf8)
+        }
+        editor.string = loaded
         refreshNodesFromEditor()
         refreshModeFromEditor()
         refreshRulesFromEditor()
@@ -2086,6 +2093,25 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         return (clashAPI?["default_mode"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Rule"
     }
 
+    /// Repair a dangling `route.default_domain_resolver` that points at a DNS server
+    /// tag no longer present in `dns.servers` (a stale reference left over from an
+    /// older config, e.g. "dns-cn"). Returns the repaired config text, or nil if no
+    /// change was needed.
+    func repairDefaultDomainResolver(inConfigText text: String) -> String? {
+        guard var config = parseConfigObject(from: text),
+              var route = config["route"] as? [String: Any],
+              let dns = config["dns"] as? [String: Any],
+              let servers = dns["servers"] as? [[String: Any]],
+              let firstTag = servers.first?["tag"] as? String else { return nil }
+        let definedTags = Set(servers.compactMap { $0["tag"] as? String })
+        let resolver = route["default_domain_resolver"]
+        let resolverTag = (resolver as? String) ?? (resolver as? [String: Any])?["server"] as? String
+        guard let tag = resolverTag, !definedTags.contains(tag) else { return nil }
+        route["default_domain_resolver"] = firstTag
+        config["route"] = route
+        return try? renderConfig(config)
+    }
+
     func ensureModeSupport(in config: [String: Any], mode: Mode) -> [String: Any] {
         var config = config
         var experimental = config["experimental"] as? [String: Any] ?? [:]
@@ -2121,11 +2147,17 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         ] + rules
         route["rules"] = rules
         // sing-box 1.12+: outbound dials that chain to domain-based routing require a
-        // default domain resolver. Without this, sing-box warns now and will FATAL in 1.14.
-        if route["default_domain_resolver"] == nil {
-            if let dns = config["dns"] as? [String: Any],
-               let servers = dns["servers"] as? [[String: Any]],
-               let firstTag = servers.first?["tag"] as? String {
+        // default domain resolver pointing at a *defined* DNS server. A nil value — or
+        // a dangling reference (e.g. a stale "dns-cn" no longer present in dns.servers,
+        // left over from an older config) — makes sing-box FATAL. Repoint it to the
+        // first available server.
+        if let dns = config["dns"] as? [String: Any],
+           let servers = dns["servers"] as? [[String: Any]],
+           let firstTag = servers.first?["tag"] as? String {
+            let definedTags = Set(servers.compactMap { $0["tag"] as? String })
+            let resolver = route["default_domain_resolver"]
+            let resolverTag = (resolver as? String) ?? (resolver as? [String: Any])?["server"] as? String
+            if resolverTag == nil || !definedTags.contains(resolverTag!) {
                 route["default_domain_resolver"] = firstTag
             }
         }
