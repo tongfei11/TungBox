@@ -47,7 +47,15 @@ extension MainWindowController {
         addRuleButton.translatesAutoresizingMaskIntoConstraints = false
         addRuleButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
 
-        let ruleToolbar = NSStackView(views: [ruleSearchField, addRuleButton])
+        let addRuleSetButton = MD3Button()
+        addRuleSetButton.title = "添加规则集"
+        addRuleSetButton.style = .outlined
+        addRuleSetButton.target = self
+        addRuleSetButton.action = #selector(showAddRuleSetDialog)
+        addRuleSetButton.translatesAutoresizingMaskIntoConstraints = false
+        addRuleSetButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
+
+        let ruleToolbar = NSStackView(views: [ruleSearchField, addRuleSetButton, addRuleButton])
         ruleToolbar.orientation = .horizontal
         ruleToolbar.spacing = 12
         ruleToolbar.alignment = .centerY
@@ -128,10 +136,7 @@ extension MainWindowController {
 
     private func ruleContextMenu() -> NSMenu {
         let menu = NSMenu()
-        menu.delegate = self
-        menu.addItem(NSMenuItem(title: "编辑自定义规则", action: #selector(editCustomRuleClicked), keyEquivalent: ""))
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "删除自定义规则", action: #selector(deleteCustomRuleClicked), keyEquivalent: ""))
+        menu.delegate = self   // items are built dynamically in menuWillOpen
         return menu
     }
 
@@ -141,9 +146,68 @@ extension MainWindowController {
         if row >= 0 {
             rulesTable.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
         }
+        menu.removeAllItems()
         let rows = filteredRuleRows()
-        let isCustom = rows.indices.contains(rulesTable.selectedRow) && rows[rulesTable.selectedRow].customRuleID != nil
-        menu.items.forEach { $0.isEnabled = isCustom }
+        guard rows.indices.contains(rulesTable.selectedRow) else { return }
+        let selected = rows[rulesTable.selectedRow]
+
+        func add(_ title: String, _ action: Selector) {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            menu.addItem(item)
+        }
+
+        if selected.customRuleID != nil {
+            add("编辑自定义规则", #selector(editCustomRuleClicked))
+            menu.addItem(.separator())
+            add("删除自定义规则", #selector(deleteCustomRuleClicked))
+        } else if let setID = selected.ruleSetID, let set = customRuleSets.first(where: { $0.id == setID }) {
+            add("编辑规则集", #selector(editRuleSetClicked))
+            add(set.enabled ? "停用规则集" : "启用规则集", #selector(toggleRuleSetEnabledClicked))
+            menu.addItem(.separator())
+            add("删除规则集", #selector(deleteRuleSetClicked))
+        } else if selected.ruleSetInvalidURL != nil {
+            add("在访达中显示", #selector(revealInvalidRuleSetClicked))
+            menu.addItem(.separator())
+            add("删除无效规则集文件", #selector(deleteInvalidRuleSetClicked))
+        }
+    }
+
+    /// The rule set for the currently-selected rule-set row, if any.
+    func selectedRuleSet() -> CustomRuleSet? {
+        let rows = filteredRuleRows()
+        guard rows.indices.contains(rulesTable.selectedRow),
+              let id = rows[rulesTable.selectedRow].ruleSetID else { return nil }
+        return customRuleSets.first { $0.id == id }
+    }
+
+    func selectedInvalidRuleSet() -> InvalidRuleSet? {
+        let rows = filteredRuleRows()
+        guard rows.indices.contains(rulesTable.selectedRow),
+              let url = rows[rulesTable.selectedRow].ruleSetInvalidURL else { return nil }
+        return invalidRuleSets.first { $0.fileURL == url }
+    }
+
+    @objc func editRuleSetClicked() {
+        if let set = selectedRuleSet() { editRuleSet(set) }
+    }
+
+    @objc func toggleRuleSetEnabledClicked() {
+        if let set = selectedRuleSet() { setRuleSetEnabled(set, to: !set.enabled) }
+    }
+
+    @objc func deleteRuleSetClicked() {
+        if let set = selectedRuleSet() { deleteRuleSet(set) }
+    }
+
+    @objc func revealInvalidRuleSetClicked() {
+        if let invalid = selectedInvalidRuleSet() {
+            NSWorkspace.shared.activateFileViewerSelecting([invalid.fileURL])
+        }
+    }
+
+    @objc func deleteInvalidRuleSetClicked() {
+        if let invalid = selectedInvalidRuleSet() { deleteInvalidRuleSet(invalid) }
     }
 
     @objc func refreshRulesClicked() {
@@ -679,6 +743,7 @@ extension MainWindowController {
     }
 
     func refreshRulesFromEditor() {
+        loadRuleSetsForCurrentSubscription()
         ruleRows = buildRuleRows(from: editor.string)
         rulesTable.reloadData()
         refreshRuleSetCachesIfNeeded()
@@ -723,28 +788,51 @@ extension MainWindowController {
             .sorted { $0.createdAt < $1.createdAt }
     }
 
+    /// Flattened (type, value, strategy) specs to inject as route rules for a
+    /// subscription: enabled single custom rules first, then each enabled+valid rule
+    /// set expanded line-by-line to its chosen outbound. Rule sets are read from disk
+    /// (the source of truth); invalid rule sets are excluded so a broken hand-edited
+    /// file can never break the generated config.
+    func outboundRuleSpecs(subscriptionID: UUID) -> [(type: String, value: String, strategy: String)] {
+        var specs: [(type: String, value: String, strategy: String)] = []
+        let singleRules = customRules
+            .filter { $0.subscriptionID == subscriptionID && $0.enabled }
+            .sorted { $0.createdAt < $1.createdAt }
+        for rule in singleRules {
+            specs.append((rule.type, rule.value, rule.strategy))
+        }
+        let sets = store.loadRuleSets(for: subscriptionID).valid
+            .filter { $0.enabled }
+            .sorted { $0.createdAt < $1.createdAt }
+        for set in sets {
+            for entry in set.rules {
+                specs.append((entry.type, entry.value, set.outbound))
+            }
+        }
+        return specs
+    }
+
     func applyCustomRules(to text: String, subscriptionID: UUID) throws -> [String: Any] {
         guard var config = parseConfigObject(from: text) else {
             throw NSError.user("当前配置不是有效 JSON")
         }
-        let rulesForSubscription = customRules
-            .filter { $0.subscriptionID == subscriptionID && $0.enabled }
-            .sorted { $0.createdAt < $1.createdAt }
-        guard !rulesForSubscription.isEmpty else { return config }
+        let specs = outboundRuleSpecs(subscriptionID: subscriptionID)
+        guard !specs.isEmpty else { return config }
 
-        for rule in rulesForSubscription {
-            config = ensureOutboundSupport(in: config, strategy: rule.strategy)
+        for spec in specs {
+            config = ensureOutboundSupport(in: config, strategy: spec.strategy)
         }
 
         var route = config["route"] as? [String: Any] ?? [:]
         var routeRules = route["rules"] as? [[String: Any]] ?? []
-        routeRules.removeAll { existing in
-            rulesForSubscription.contains { customRuleMatches($0, existing) }
-        }
-        let insertIndex = customRuleInsertIndex(in: routeRules)
-        let generatedRules = rulesForSubscription.map {
+        let generatedRules = specs.map {
             customRouteRule(type: $0.type, value: $0.value, strategy: $0.strategy)
         }
+        // Idempotency: drop any previously-injected identical rule before re-inserting.
+        routeRules.removeAll { existing in
+            generatedRules.contains { NSDictionary(dictionary: $0).isEqual(to: existing) }
+        }
+        let insertIndex = customRuleInsertIndex(in: routeRules)
         routeRules.insert(contentsOf: generatedRules, at: insertIndex)
         route["rules"] = routeRules
         config["route"] = route
@@ -816,11 +904,56 @@ extension MainWindowController {
             }
         }
 
+        // 规则集（分流方案）
+        let sets = ruleSetsForCurrentSubscription()
+        if !sets.isEmpty || !invalidRuleSets.isEmpty {
+            rows.append(sectionRule("规则集"))
+            for set in sets {
+                rows.append(RuleInfo(
+                    customRuleID: nil,
+                    enabled: set.enabled,
+                    id: "\(nextID)",
+                    type: "规则集",
+                    value: set.name,
+                    strategy: displayStrategy(outboundForStrategy(set.outbound)),
+                    count: "\(set.rules.count) 条",
+                    note: set.enabled ? "自定义规则集" : "已停用",
+                    isSection: false,
+                    ruleSetID: set.id
+                ))
+                nextID += 1
+            }
+            for invalid in invalidRuleSets {
+                rows.append(RuleInfo(
+                    customRuleID: nil,
+                    enabled: false,
+                    id: "\(nextID)",
+                    type: "规则集",
+                    value: invalid.name,
+                    strategy: "—",
+                    count: "!",
+                    note: "⚠️ \(invalid.reason)",
+                    isSection: false,
+                    ruleSetInvalidURL: invalid.fileURL
+                ))
+                nextID += 1
+            }
+        }
+
+        // Route rules injected by enabled rule sets — hidden from "当前配置规则" so they
+        // don't duplicate the rule-set section above.
+        let ruleSetGenerated: [[String: Any]] = sets.filter { $0.enabled }.flatMap { set in
+            set.rules.map { customRouteRule(type: $0.type, value: $0.value, strategy: set.outbound) }
+        }
+
         let route = config["route"] as? [String: Any] ?? [:]
         let rules = route["rules"] as? [[String: Any]] ?? []
         rows.append(sectionRule("当前配置规则"))
         for rule in rules {
             if currentCustomRules.contains(where: { customRuleMatches($0, rule) }) {
+                continue
+            }
+            if ruleSetGenerated.contains(where: { NSDictionary(dictionary: $0).isEqual(to: rule) }) {
                 continue
             }
             if let action = rule["action"] as? String {

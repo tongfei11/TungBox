@@ -47,6 +47,11 @@ struct RuleInfo {
     var count: String
     var note: String
     var isSection: Bool
+    /// Set when this row represents a custom rule set (managed via context menu /
+    /// edit dialog, not the inline checkbox).
+    var ruleSetID: UUID? = nil
+    /// Set when this row represents a rule-set file that failed to load.
+    var ruleSetInvalidURL: URL? = nil
 }
 
 struct CustomRule: Codable, Equatable {
@@ -58,6 +63,32 @@ struct CustomRule: Codable, Equatable {
     var note: String
     var enabled: Bool
     var createdAt: Date
+}
+
+/// One line of a rule set's rule list, e.g. `DOMAIN-SUFFIX, openai.com`.
+struct RuleSetEntry: Codable, Equatable {
+    var type: String
+    var value: String
+}
+
+/// A named bundle of rules ("分流方案") that all route to one outbound. Persisted
+/// per-subscription as a YAML file under custom-rulesets/<subscriptionID>/.
+struct CustomRuleSet: Codable, Equatable {
+    var id: UUID
+    var subscriptionID: UUID
+    var name: String
+    var outbound: String        // strategy or node/group tag, same values as the strategy popup
+    var rules: [RuleSetEntry]
+    var enabled: Bool
+    var createdAt: Date
+}
+
+/// A rule-set YAML file that failed to load/validate (e.g. hand-edited into an
+/// invalid state). Surfaced in the UI as an error and excluded from config generation.
+struct InvalidRuleSet: Equatable {
+    var fileURL: URL
+    var name: String
+    var reason: String
 }
 
 struct ConnectionInfo {
@@ -116,6 +147,8 @@ enum TungBoxConfig {
         ruleSetGeolocationNotCN: "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-!cn.srs",
         ruleSetGeoIPCN: "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs"
     ]
+
+    static let customRuleSetWikiURL = "https://github.com/tongfei11/TungBox/wiki/自定义规则集"
 
     static let urlTestURL = "https://www.gstatic.com/generate_204"
     static let clashAPIListen = "127.0.0.1:9090"

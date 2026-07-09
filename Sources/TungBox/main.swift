@@ -29,6 +29,14 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var profiles: [ConfigProfile] = []
     var subscriptions: [Subscription] = []
     var customRules: [CustomRule] = []
+    /// Valid rule sets for the current subscription (loaded from disk).
+    var customRuleSets: [CustomRuleSet] = []
+    /// Rule-set files for the current subscription that failed to load/validate.
+    var invalidRuleSets: [InvalidRuleSet] = []
+    /// Rule set being edited (nil when adding a new one).
+    var editingRuleSetID: UUID?
+    /// The open rule-set dialog's multi-line rules editor, for the AI-preset button.
+    weak var ruleSetRulesTextView: NSTextView?
     var nodes: [NodeInfo] = []
     var nodeGroups: [NodeGroupInfo] = []
     var ruleRows: [RuleInfo] = []
@@ -567,6 +575,23 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     
 
     func makeRuleCell(for rule: RuleInfo, columnID: String) -> NSView {
+        // Rule-set rows are managed via right-click / edit dialog, not the inline
+        // checkbox — show a read-only status mark in the 启用 column instead.
+        if columnID == "enabled" && !rule.isSection && (rule.ruleSetID != nil || rule.ruleSetInvalidURL != nil) {
+            let mark = rule.ruleSetInvalidURL != nil ? "⚠" : (rule.enabled ? "●" : "○")
+            let label = NSTextField(labelWithString: mark)
+            label.font = .systemFont(ofSize: 13)
+            label.textColor = rule.ruleSetInvalidURL != nil ? .systemRed : (rule.enabled ? MD3.primary : MD3.onSurfaceVariant)
+            label.alignment = .center
+            label.translatesAutoresizingMaskIntoConstraints = false
+            let container = NSView()
+            container.addSubview(label)
+            NSLayoutConstraint.activate([
+                label.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+                label.centerYAnchor.constraint(equalTo: container.centerYAnchor)
+            ])
+            return container
+        }
         if columnID == "enabled" && !rule.isSection {
             let button = MD3Checkbox(checkboxWithTitle: "", target: nil, action: nil)
             button.state = rule.enabled ? .on : .off

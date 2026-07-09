@@ -33,6 +33,9 @@ final class Store: @unchecked Sendable {
     let subscriptionsURL: URL
     let customRulesURL: URL
     let ruleSetsURL: URL
+    /// Root for user-authored rule sets, one folder per subscription. Distinct from
+    /// `ruleSetsURL` (which caches downloaded SRS rule sets).
+    let customRuleSetsURL: URL
     let coreURL: URL
     let coreBinaryURL: URL
     let tunRequestConfigURL: URL
@@ -48,6 +51,7 @@ final class Store: @unchecked Sendable {
         subscriptionsURL = baseURL.appendingPathComponent("subscriptions.json")
         customRulesURL = baseURL.appendingPathComponent("custom-rules.json")
         ruleSetsURL = baseURL.appendingPathComponent("rule-sets", isDirectory: true)
+        customRuleSetsURL = baseURL.appendingPathComponent("custom-rulesets", isDirectory: true)
         coreURL = baseURL.appendingPathComponent("core", isDirectory: true)
         coreBinaryURL = coreURL.appendingPathComponent("sing-box")
         tunRequestConfigURL = baseURL.appendingPathComponent("tun-request.json")
@@ -92,5 +96,72 @@ final class Store: @unchecked Sendable {
 
     func configURL(for profile: ConfigProfile) -> URL {
         baseURL.appendingPathComponent(profile.fileName)
+    }
+
+    // MARK: - Custom rule sets (per subscription, one YAML file each)
+
+    private func ruleSetsFolder(for subscriptionID: UUID) -> URL {
+        customRuleSetsURL.appendingPathComponent(subscriptionID.uuidString, isDirectory: true)
+    }
+
+    private func ruleSetFileURL(for set: CustomRuleSet) -> URL {
+        ruleSetsFolder(for: set.subscriptionID).appendingPathComponent("\(set.id.uuidString).yml")
+    }
+
+    /// Load every rule set for a subscription. Files that fail to parse/validate are
+    /// returned separately so the UI can flag them and config generation can skip them.
+    func loadRuleSets(for subscriptionID: UUID) -> (valid: [CustomRuleSet], invalid: [InvalidRuleSet]) {
+        let folder = ruleSetsFolder(for: subscriptionID)
+        guard let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else {
+            return ([], [])
+        }
+        var valid: [CustomRuleSet] = []
+        var invalid: [InvalidRuleSet] = []
+        for file in files where file.pathExtension.lowercased() == "yml" {
+            guard let text = try? String(contentsOf: file, encoding: .utf8) else {
+                invalid.append(InvalidRuleSet(fileURL: file, name: file.deletingPathExtension().lastPathComponent, reason: "无法读取文件"))
+                continue
+            }
+            switch RuleSetFormat.deserialize(text, subscriptionID: subscriptionID) {
+            case .success(let set):
+                valid.append(set)
+            case .failure(let error):
+                let name = nameHint(in: text) ?? file.deletingPathExtension().lastPathComponent
+                invalid.append(InvalidRuleSet(fileURL: file, name: name, reason: error.message))
+            }
+        }
+        valid.sort { $0.createdAt < $1.createdAt }
+        return (valid, invalid)
+    }
+
+    func saveRuleSet(_ set: CustomRuleSet) {
+        let folder = ruleSetsFolder(for: set.subscriptionID)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try? RuleSetFormat.serialize(set).data(using: .utf8)?.write(to: ruleSetFileURL(for: set), options: .atomic)
+    }
+
+    func deleteRuleSet(_ set: CustomRuleSet) {
+        try? FileManager.default.removeItem(at: ruleSetFileURL(for: set))
+    }
+
+    func deleteRuleSetFile(at url: URL) {
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    /// Remove a subscription's entire rule-set folder (used when the subscription is deleted).
+    func deleteRuleSetsFolder(for subscriptionID: UUID) {
+        try? FileManager.default.removeItem(at: ruleSetsFolder(for: subscriptionID))
+    }
+
+    /// Best-effort name lookup for an invalid file, so the UI can still label it.
+    private func nameHint(in yaml: String) -> String? {
+        for line in yaml.components(separatedBy: .newlines) {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            if t.hasPrefix("name:") {
+                let v = t.dropFirst("name:".count).trimmingCharacters(in: .whitespaces)
+                return v.replacingOccurrences(of: "\"", with: "")
+            }
+        }
+        return nil
     }
 }

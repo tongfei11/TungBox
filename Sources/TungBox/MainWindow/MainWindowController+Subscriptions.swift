@@ -308,7 +308,8 @@ extension MainWindowController {
 
     @objc func deleteSubscriptionClicked() {
         guard let index = selectedSubscriptionIndex, subscriptions.indices.contains(index) else { return }
-        subscriptions.remove(at: index)
+        let removed = subscriptions.remove(at: index)
+        store.deleteRuleSetsFolder(for: removed.id)   // drop this subscription's rule sets
         selectSubscription(at: nil)
         store.saveSubscriptions(subscriptions)
     }
