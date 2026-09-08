@@ -56,7 +56,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         }
     }
 
-    let split = MD3SplitView()
+    let split = FixedSidebarLayout()
     let currentNodeNameLabel = NSTextField(labelWithString: "未连接")
     let currentNodeDelayLabel = NSTextField(labelWithString: "—")
     var totalUploadBytes = 0
@@ -229,21 +229,10 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             content?.layer?.backgroundColor = MD3.background.cgColor
         }
 
-        split.isVertical = true
-        split.dividerStyle = .thin
-        split.delegate = self
         split.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(split)
-
-        let sidebar = NSView(frame: NSRect(x: 0, y: 0, width: 180, height: 720))
-        let main = NSView(frame: NSRect(x: 0, y: 0, width: 900, height: 720))
-
-        split.addArrangedSubview(sidebar)
-        split.addArrangedSubview(main)
-
-        DispatchQueue.main.async { [weak self] in
-            self?.split.setPosition(180, ofDividerAt: 0)
-        }
+        let sidebar = split.sidebar
+        let main = split.mainContent
 
         NSLayoutConstraint.activate([
             split.leadingAnchor.constraint(equalTo: content.leadingAnchor),
@@ -1295,6 +1284,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         guard var config = parseConfigObject(from: configText) else {
             throw NSError.user("当前配置不是有效 JSON")
         }
+
+        config = ConfigCompatibilityChecker.autoFix(config: config).config
 
         // 确保配置中有 direct outbound（即使原始配置没有）
         var outbounds = config["outbounds"] as? [[String: Any]] ?? []
@@ -2696,26 +2687,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         }
         
         return 7890
-    }
-}
-
-extension MainWindowController: NSSplitViewDelegate {
-    func splitView(_ splitView: NSSplitView, effectiveRect: NSRect, forDrawnRect drawnRect: NSRect, ofDividerAt dividerIndex: Int) -> NSRect {
-        return .zero
-    }
-    func splitView(_ splitView: NSSplitView, shouldAdjustSizeOfSubview view: NSView) -> Bool {
-        return view != splitView.subviews.first
-    }
-    // Pin the sidebar at a fixed 180pt and never let it collapse, so it can't
-    // disappear regardless of resize / divider interactions.
-    func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
-        return 180
-    }
-    func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
-        return 180
-    }
-    func splitView(_ splitView: NSSplitView, canCollapseSubview subview: NSView) -> Bool {
-        return false
     }
 }
 

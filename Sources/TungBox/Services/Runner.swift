@@ -331,41 +331,40 @@ final class Runner: @unchecked Sendable {
     }
 
     private func preprocessConfig(at url: URL, allowTun: Bool = false) -> URL {
-        if getuid() == 0 || allowTun {
-            return url
-        }
-        
         guard let data = try? Data(contentsOf: url),
               var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return url
         }
         
         // Auto-fix any compatibility issues (like network: grpc) on the fly
-        let (fixedJson, _) = ConfigCompatibilityChecker.autoFix(config: json)
+        let (fixedJson, fixes) = ConfigCompatibilityChecker.autoFix(config: json)
         json = fixedJson
-        
+
         var inbounds = json["inbounds"] as? [[String: Any]] ?? []
         let hasTun = inbounds.contains { ($0["type"] as? String) == "tun" }
-        if !hasTun {
-            return url
+        let removeTun = hasTun && getuid() != 0 && !allowTun
+        if !removeTun && fixes.isEmpty { return url }
+
+        if removeTun {
+            inbounds = inbounds.filter { ($0["type"] as? String) != "tun" }
+            if inbounds.isEmpty {
+                inbounds.append([
+                    "type": "mixed",
+                    "tag": "mixed-in",
+                    "listen": "127.0.0.1",
+                    "listen_port": 7890
+                ])
+            }
+            json["inbounds"] = inbounds
         }
-        
-        inbounds = inbounds.filter { ($0["type"] as? String) != "tun" }
-        if inbounds.isEmpty {
-            inbounds.append([
-                "type": "mixed",
-                "tag": "mixed-in",
-                "listen": "127.0.0.1",
-                "listen_port": 7890
-            ])
-        }
-        json["inbounds"] = inbounds
-        
+
         let tempURL = url.deletingLastPathComponent().appendingPathComponent("run_" + url.lastPathComponent)
         if let outData = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys]) {
-            try? outData.write(to: tempURL)
-            DispatchQueue.main.async { [weak self] in
-                self?.onOutput?("[TungBox] 检测到当前运行非管理员权限，已自动将配置中的 TUN 模式转换为本地混合代理模式运行。\n")
+            guard (try? outData.write(to: tempURL, options: .atomic)) != nil else { return url }
+            if removeTun {
+                DispatchQueue.main.async { [weak self] in
+                    self?.onOutput?("[TungBox] 检测到当前运行非管理员权限，已自动将配置中的 TUN 模式转换为本地混合代理模式运行。\n")
+                }
             }
             return tempURL
         }
