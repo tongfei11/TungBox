@@ -22,14 +22,9 @@ enum ConfigCompatibilityChecker {
     static func check(config: [String: Any]) -> [Issue] {
         var issues: [Issue] = []
 
-        // --- 1.12.0: route.default_domain_resolver → deprecated, removed in 1.14 ---
-        if let route = config["route"] as? [String: Any], route["default_domain_resolver"] != nil {
-            issues.append(Issue(
-                severity: .error,
-                path: "route.default_domain_resolver",
-                message: "已弃用，将在 sing-box 1.14.0 中被移除。请改用各 outbound 的 dial.domain_resolver 字段。",
-                autoFixed: true
-            ))
+        if let dns = config["dns"] as? [String: Any], dns["fakeip"] != nil {
+            issues.append(Issue(severity: .error, path: "dns.fakeip",
+                message: "旧版 FakeIP 配置已弃用，将迁移为 type: fakeip DNS 服务器。", autoFixed: true))
         }
 
         // --- 1.12.0: domain_strategy in dial fields → domain_resolver ---
@@ -189,12 +184,25 @@ enum ConfigCompatibilityChecker {
         var c = config
         var fixed: [String] = []
 
-        // 1. Remove route.default_domain_resolver
-        if var route = c["route"] as? [String: Any], route["default_domain_resolver"] != nil {
-            let oldValue = route["default_domain_resolver"]
-            route.removeValue(forKey: "default_domain_resolver")
-            c["route"] = route
-            fixed.append("移除 route.default_domain_resolver = \(oldValue ?? "nil")")
+        // default_domain_resolver is a supported route field; preserve it.
+        // Move legacy FakeIP ranges to the server without changing tags or rules.
+        if var dns = c["dns"] as? [String: Any] {
+            let legacy = dns.removeValue(forKey: "fakeip") as? [String: Any]
+            if var servers = dns["servers"] as? [[String: Any]] {
+                for i in servers.indices where servers[i]["address"] as? String == "fakeip" {
+                    servers[i].removeValue(forKey: "address")
+                    servers[i]["type"] = "fakeip"
+                    for key in ["inet4_range", "inet6_range"] {
+                        if servers[i][key] == nil, let range = legacy?[key] {
+                            servers[i][key] = range
+                        }
+                    }
+                    fixed.append("dns.servers[\(i)]: 旧版 FakeIP → type: fakeip")
+                }
+                dns["servers"] = servers
+            }
+            if legacy != nil { fixed.append("移除旧版 dns.fakeip 配置") }
+            c["dns"] = dns
         }
 
         // 2. Migrate domain_strategy → domain_resolver in outbound dial fields
@@ -239,6 +247,12 @@ enum ConfigCompatibilityChecker {
            let servers = dns["servers"] as? [[String: Any]] {
             var newServers = servers
             for i in servers.indices {
+                if let addr = newServers[i]["address"] as? String, addr == "local" || (!addr.contains("://") && addr != "fakeip") {
+                    newServers[i].removeValue(forKey: "address")
+                    newServers[i]["type"] = addr == "local" ? "local" : "udp"
+                    if addr != "local" { newServers[i]["server"] = addr }
+                    fixed.append("dns.servers[\(i)]: 旧版 DNS 地址 → 类型化服务器")
+                }
                 if let addr = newServers[i]["address"] as? String, addr.contains("://") {
                     let parsed = parseDNSAddress(addr)
                     var updated = newServers[i]

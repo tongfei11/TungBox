@@ -48,7 +48,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         }
     }
 
-    let split = MD3SplitView()
+    let split = FixedSidebarLayout()
     let currentNodeNameLabel = NSTextField(labelWithString: "未连接")
     let currentNodeAutoBadge = NSTextField(labelWithString: "自动")
     let currentNodeDelayLabel = NSTextField(labelWithString: "—")
@@ -249,21 +249,10 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             content?.layer?.backgroundColor = MD3.background.cgColor
         }
 
-        split.isVertical = true
-        split.dividerStyle = .thin
-        split.delegate = self
         split.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(split)
-
-        let sidebar = NSView(frame: NSRect(x: 0, y: 0, width: 180, height: 720))
-        let main = NSView(frame: NSRect(x: 0, y: 0, width: 900, height: 720))
-
-        split.addArrangedSubview(sidebar)
-        split.addArrangedSubview(main)
-
-        DispatchQueue.main.async { [weak self] in
-            self?.split.setPosition(180, ofDividerAt: 0)
-        }
+        let sidebar = split.sidebar
+        let main = split.mainContent
 
         NSLayoutConstraint.activate([
             split.leadingAnchor.constraint(equalTo: content.leadingAnchor),
@@ -1542,6 +1531,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         guard var config = parseConfigObject(from: configText) else {
             throw NSError.user("当前配置不是有效 JSON")
         }
+
+        config = ConfigCompatibilityChecker.autoFix(config: config).config
 
         // 确保配置中有 direct outbound（即使原始配置没有）
         var outbounds = config["outbounds"] as? [[String: Any]] ?? []
@@ -2980,15 +2971,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         }
         
         return 7890
-    }
-}
-
-extension MainWindowController: NSSplitViewDelegate {
-    func splitView(_ splitView: NSSplitView, effectiveRect: NSRect, forDrawnRect drawnRect: NSRect, ofDividerAt dividerIndex: Int) -> NSRect {
-        return .zero
-    }
-    func splitView(_ splitView: NSSplitView, shouldAdjustSizeOfSubview view: NSView) -> Bool {
-        return view != splitView.subviews.first
     }
 }
 

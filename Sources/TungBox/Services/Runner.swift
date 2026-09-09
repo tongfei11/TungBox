@@ -416,20 +416,17 @@ final class Runner: @unchecked Sendable {
     }
 
     private func preprocessConfig(at url: URL, allowTun: Bool = false) -> URL {
-        if getuid() == 0 || allowTun {
-            return url
-        }
-
         guard let data = try? Data(contentsOf: url),
               var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return url
         }
 
         // Auto-fix any compatibility issues (like network: grpc) on the fly
-        let (fixedJson, _) = ConfigCompatibilityChecker.autoFix(config: json)
+        let (fixedJson, fixes) = ConfigCompatibilityChecker.autoFix(config: json)
         json = fixedJson
 
-        var changed = false
+        var changed = !fixes.isEmpty
+        let userMode = getuid() != 0 && !allowTun
         var convertedTun = false
 
         // The user (non-root) instance must NEVER use the daemon's root-owned
@@ -438,7 +435,7 @@ final class Runner: @unchecked Sendable {
         // 7890 never comes up. Drop that path so sing-box falls back to a writable
         // cache in its own working directory. (A stale TUN config can carry this path
         // into the user runner during a fast switch; sanitize defensively.)
-        if var experimental = json["experimental"] as? [String: Any],
+        if userMode, var experimental = json["experimental"] as? [String: Any],
            var cacheFile = experimental["cache_file"] as? [String: Any],
            (cacheFile["path"] as? String) == TunServiceManager.cachePath {
             cacheFile.removeValue(forKey: "path")
@@ -450,7 +447,7 @@ final class Runner: @unchecked Sendable {
         // Strip any TUN inbound — TUN requires root; the user instance serves a local
         // mixed proxy instead. Keep an existing local inbound if present.
         var inbounds = json["inbounds"] as? [[String: Any]] ?? []
-        if inbounds.contains(where: { ($0["type"] as? String) == "tun" }) {
+        if userMode, inbounds.contains(where: { ($0["type"] as? String) == "tun" }) {
             inbounds = inbounds.filter { ($0["type"] as? String) != "tun" }
             let localTypes: Set<String> = ["mixed", "socks", "http"]
             if !inbounds.contains(where: { localTypes.contains(($0["type"] as? String) ?? "") }) {
@@ -472,7 +469,7 @@ final class Runner: @unchecked Sendable {
 
         let tempURL = url.deletingLastPathComponent().appendingPathComponent("run_" + url.lastPathComponent)
         if let outData = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys]) {
-            try? outData.write(to: tempURL)
+            guard (try? outData.write(to: tempURL, options: .atomic)) != nil else { return url }
             if convertedTun {
                 DispatchQueue.main.async { [weak self] in
                     self?.onOutput?("[TungBox] 检测到当前运行非管理员权限，已自动将配置中的 TUN 模式转换为本地混合代理模式运行。\n")
