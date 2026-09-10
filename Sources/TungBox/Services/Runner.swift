@@ -2,6 +2,7 @@ import Foundation
 
 final class Runner: @unchecked Sendable {
     private var process: Process?
+    private(set) var runningConfigData: Data?
     private var outputPipe: Pipe?
     private var elevatedPID: Int32?
     private let store: Store
@@ -143,6 +144,7 @@ final class Runner: @unchecked Sendable {
         }
 
         let actualConfig = preprocessConfig(at: config, allowTun: false)
+        let configData = try Data(contentsOf: actualConfig)
 
         let process = Process()
         process.currentDirectoryURL = store.baseURL
@@ -169,6 +171,7 @@ final class Runner: @unchecked Sendable {
 
         try process.run()
         self.process = process
+        runningConfigData = configData
         outputPipe = pipe
     }
 

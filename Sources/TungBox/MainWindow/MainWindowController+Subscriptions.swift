@@ -308,8 +308,10 @@ extension MainWindowController {
 
     @objc func deleteSubscriptionClicked() {
         guard let index = selectedSubscriptionIndex, subscriptions.indices.contains(index) else { return }
-        let removed = subscriptions.remove(at: index)
-        store.deleteRuleSetsFolder(for: removed.id)   // drop this subscription's rule sets
+        let removed = subscriptions[index]
+        do { try store.deleteRuleSetsFolder(for: removed.id) }
+        catch { showError(error); return }
+        subscriptions.remove(at: index)
         selectSubscription(at: nil)
         store.saveSubscriptions(subscriptions)
     }
@@ -497,28 +499,42 @@ extension MainWindowController {
         var subscription = subscriptions[index]
         let profileName = "订阅 - \(subscription.name)"
 
-        let mergedConfig: String
+        let existingIndex = subscription.profileID.flatMap { id in profiles.firstIndex { $0.id == id } }
+        var profile = existingIndex.map { profiles[$0] } ?? ConfigProfile(id: UUID(), name: profileName, fileName: "\(UUID().uuidString).json", updatedAt: Date())
+        let configURL = store.configURL(for: profile)
+        let baseURL = store.ruleBaseURL(for: subscription.id)
+        let projectionURL = store.ruleProjectionURL(for: subscription.id)
+        var snapshots: [(URL, Data?)] = []
         do {
-            mergedConfig = try renderConfig(try applyCustomRules(to: config, subscriptionID: subscription.id))
+            for url in [configURL, baseURL, projectionURL] {
+                snapshots.append((url, FileManager.default.fileExists(atPath: url.path) ? try Data(contentsOf: url) : nil))
+            }
+            if let previous = snapshots.first?.1 {
+                let backup = store.baseURL.appendingPathComponent("before-refresh-\(UUID().uuidString).json")
+                try previous.write(to: backup, options: .atomic)
+            }
+            try store.saveRuleBase(config, for: subscription.id)
+            let merged = try renderConfig(try applyCustomRules(to: config, subscriptionID: subscription.id, freshSubscription: true))
+            try checkRuleSetConfig(merged)
+            try Data(merged.utf8).write(to: configURL, options: .atomic)
+            try store.saveRuleProjection(merged, for: subscription.id)
         } catch {
+            do {
+                for (url, data) in snapshots {
+                    if let data { try data.write(to: url, options: .atomic) }
+                    else if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+                }
+            } catch let restoreError { showError(NSError.user("刷新失败且恢复失败：\(restoreError.localizedDescription)")) }
+            pendingRuleProjection = nil
             showError(error)
             return
         }
-
-        if let profileID = subscription.profileID,
-           let profileIndex = profiles.firstIndex(where: { $0.id == profileID }) {
-            profiles[profileIndex].name = profileName
-            profiles[profileIndex].updatedAt = Date()
-            try? mergedConfig.write(to: store.configURL(for: profiles[profileIndex]), atomically: true, encoding: .utf8)
-            selectedIndex = profileIndex
-        } else {
-            let profile = ConfigProfile(id: UUID(), name: profileName, fileName: "\(UUID().uuidString).json", updatedAt: Date())
-            profiles.append(profile)
-            subscription.profileID = profile.id
-            try? mergedConfig.write(to: store.configURL(for: profile), atomically: true, encoding: .utf8)
-            selectedIndex = profiles.count - 1
-        }
-
+        pendingRuleProjection = nil
+        profile.name = profileName
+        profile.updatedAt = Date()
+        if let existingIndex { profiles[existingIndex] = profile; selectedIndex = existingIndex }
+        else { profiles.append(profile); selectedIndex = profiles.count - 1 }
+        subscription.profileID = profile.id
         subscription.updatedAt = Date()
         subscriptions[index] = subscription
         store.saveProfiles(profiles)

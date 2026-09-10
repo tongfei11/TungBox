@@ -31,6 +31,13 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var customRules: [CustomRule] = []
     /// Valid rule sets for the current subscription (loaded from disk).
     var customRuleSets: [CustomRuleSet] = []
+    var pendingRuleProjection: (UUID, [[String: Any]])?
+    var ruleSetApplyStatus = "已保存，待应用"
+    var isApplyingRuleSets = false
+    var ruleSetWatchTimer: Timer?
+    var ruleSetFileSignature: [String: Data]?
+    var ruleSetWatchSubscriptionID: UUID?
+
     /// Rule-set files for the current subscription that failed to load/validate.
     var invalidRuleSets: [InvalidRuleSet] = []
     /// Rule set being edited (nil when adding a new one).
@@ -1128,7 +1135,14 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         profiles[index].updatedAt = Date()
         let url = store.configURL(for: profiles[index])
         try editor.string.write(to: url, atomically: true, encoding: .utf8)
+        if let (id, rules) = pendingRuleProjection,
+           let obj = parseConfigObject(from: editor.string),
+           NSArray(array: (obj["route"] as? [String: Any])?["rules"] as? [[String: Any]] ?? []).isEqual(to: rules) {
+            try store.saveRuleProjection(editor.string, for: id)
+            pendingRuleProjection = nil
+        }
         store.saveProfiles(profiles)
+        ruleSetFileSignature = nil
         table.reloadData()
         refreshNodesFromEditor()
         refreshRulesFromEditor()

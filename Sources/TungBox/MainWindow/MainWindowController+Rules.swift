@@ -4,6 +4,7 @@ import Foundation
 extension MainWindowController {
     
     func makeRulesView() -> NSView {
+        startRuleSetWatching()
         let view = NSView()
         view.wantsLayer = true
         view.layer?.backgroundColor = MD3.background.cgColor
@@ -295,30 +296,8 @@ extension MainWindowController {
     /// Friendly pre-save validation per rule type (the final config is still checked
     /// by sing-box, but this catches obvious mistakes with a clear message).
     func validateRuleValue(type: String, value: String) throws {
-        let v = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        // LAN matches all private-address traffic and takes no value.
-        if type == "LAN" { return }
-        guard !v.isEmpty else { throw NSError.user("请输入规则值") }
-        switch type {
-        case "DEST-PORT":
-            guard let p = Int(v), (1...65535).contains(p) else {
-                throw NSError.user("端口需为 1-65535 之间的数字")
-            }
-        case "IP-CIDR", "IP-CIDR6", "SRC-IP":
-            guard v.contains("/") else {
-                throw NSError.user("请使用 CIDR 写法，例如 192.168.0.0/16（单个 IP 用 /32 或 /128）")
-            }
-        case "GEOIP":
-            guard v.range(of: "^[A-Za-z][A-Za-z-]*$", options: .regularExpression) != nil else {
-                throw NSError.user("国家/地区码示例：cn、us、hk")
-            }
-        case "NETWORK":
-            guard ["tcp", "udp"].contains(v.lowercased()) else {
-                throw NSError.user("网络只能填 tcp 或 udp")
-            }
-        default:
-            break
-        }
+        do { try RuleSetFormat.validate(type: type, value: value) }
+        catch { throw NSError.user((error as? RuleSetFormat.FormatError)?.message ?? error.localizedDescription) }
     }
 
     @objc func customRuleTypeChanged() {
@@ -788,54 +767,32 @@ extension MainWindowController {
             .sorted { $0.createdAt < $1.createdAt }
     }
 
-    /// Flattened (type, value, strategy) specs to inject as route rules for a
-    /// subscription: enabled single custom rules first, then each enabled+valid rule
-    /// set expanded line-by-line to its chosen outbound. Rule sets are read from disk
-    /// (the source of truth); invalid rule sets are excluded so a broken hand-edited
-    /// file can never break the generated config.
-    func outboundRuleSpecs(subscriptionID: UUID) -> [(type: String, value: String, strategy: String)] {
-        var specs: [(type: String, value: String, strategy: String)] = []
-        let singleRules = customRules
-            .filter { $0.subscriptionID == subscriptionID && $0.enabled }
-            .sorted { $0.createdAt < $1.createdAt }
-        for rule in singleRules {
-            specs.append((rule.type, rule.value, rule.strategy))
+    func applyCustomRules(to text: String, subscriptionID: UUID, freshSubscription: Bool = false) throws -> [String: Any] {
+        guard var config = parseConfigObject(from: text) else { throw NSError.user("当前配置不是有效 JSON") }
+        let base = try store.baseRouteRules(for: subscriptionID)
+        if !freshSubscription {
+            try store.verifyRuleProjection((config["route"] as? [String: Any])?["rules"] as? [[String: Any]] ?? [], for: subscriptionID)
         }
-        let sets = store.loadRuleSets(for: subscriptionID).valid
-            .filter { $0.enabled }
-            .sorted { $0.createdAt < $1.createdAt }
+        let sets = store.loadRuleSets(for: subscriptionID).valid.filter { $0.enabled }
+        var specs = customRules.filter { $0.subscriptionID == subscriptionID && $0.enabled }
+            .sorted { $0.createdAt == $1.createdAt ? $0.id.uuidString < $1.id.uuidString : $0.createdAt < $1.createdAt }
+            .map { (type: $0.type, value: $0.value, strategy: $0.strategy) }
+        // Exclude a whole set if any dependency has disappeared.
         for set in sets {
-            for entry in set.rules {
-                specs.append((entry.type, entry.value, set.outbound))
-            }
+            if ruleSetReferenceError(set, config: config) != nil { continue }
+            specs += set.rules.map { (type: $0.type, value: $0.value, strategy: set.outbound) }
         }
-        return specs
-    }
-
-    func applyCustomRules(to text: String, subscriptionID: UUID) throws -> [String: Any] {
-        guard var config = parseConfigObject(from: text) else {
-            throw NSError.user("当前配置不是有效 JSON")
-        }
-        let specs = outboundRuleSpecs(subscriptionID: subscriptionID)
-        guard !specs.isEmpty else { return config }
-
+        var generated: [[String: Any]] = []
         for spec in specs {
-            config = ensureOutboundSupport(in: config, strategy: spec.strategy)
+            try RuleSetFormat.validate(type: spec.type, value: spec.value)
+            if RuleRouting.referenceError(type: spec.type, value: spec.value, strategy: spec.strategy, config: config) != nil { continue }
+            if spec.strategy != "REJECT" { config = ensureOutboundSupport(in: config, strategy: spec.strategy) }
+            generated.append(customRouteRule(type: spec.type, value: spec.value, strategy: spec.strategy))
         }
-
         var route = config["route"] as? [String: Any] ?? [:]
-        var routeRules = route["rules"] as? [[String: Any]] ?? []
-        let generatedRules = specs.map {
-            customRouteRule(type: $0.type, value: $0.value, strategy: $0.strategy)
-        }
-        // Idempotency: drop any previously-injected identical rule before re-inserting.
-        routeRules.removeAll { existing in
-            generatedRules.contains { NSDictionary(dictionary: $0).isEqual(to: existing) }
-        }
-        let insertIndex = customRuleInsertIndex(in: routeRules)
-        routeRules.insert(contentsOf: generatedRules, at: insertIndex)
-        route["rules"] = routeRules
+        route["rules"] = RuleRouting.rebuild(base: base, generated: generated)
         config["route"] = route
+        pendingRuleProjection = (subscriptionID, route["rules"] as? [[String: Any]] ?? [])
         return config
     }
 
@@ -845,15 +802,8 @@ extension MainWindowController {
     }
 
     func removeCustomRule(_ customRule: CustomRule, from text: String) throws -> String {
-        guard var config = parseConfigObject(from: text) else {
-            throw NSError.user("当前配置不是有效 JSON")
-        }
-        var route = config["route"] as? [String: Any] ?? [:]
-        var routeRules = route["rules"] as? [[String: Any]] ?? []
-        routeRules.removeAll { customRuleMatches(customRule, $0) }
-        route["rules"] = routeRules
-        config["route"] = route
-        return try renderConfig(config)
+        // Rebuild uses the independent base; content equality cannot identify ownership.
+        return text
     }
 
     func buildRuleRows(from text: String) -> [RuleInfo] {
@@ -911,13 +861,13 @@ extension MainWindowController {
             for set in sets {
                 rows.append(RuleInfo(
                     customRuleID: nil,
-                    enabled: set.enabled,
+                    enabled: set.enabled && ruleSetReferenceError(set, config: config) == nil,
                     id: "\(nextID)",
                     type: "规则集",
                     value: set.name,
                     strategy: displayStrategy(outboundForStrategy(set.outbound)),
                     count: "\(set.rules.count) 条",
-                    note: set.enabled ? "自定义规则集" : "已停用",
+                    note: ruleSetReferenceError(set, config: config) ?? (set.enabled ? ruleSetApplyStatus : "已停用"),
                     isSection: false,
                     ruleSetID: set.id
                 ))
@@ -1141,92 +1091,14 @@ extension MainWindowController {
     }
 
     func customRouteRule(type: String, value: String, strategy: String) -> [String: Any] {
-        let outbound = outboundForStrategy(strategy)
-        let normalizedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        switch type {
-        case "DOMAIN":
-            return ["domain": normalizedValue, "outbound": outbound]
-        case "DOMAIN-SUFFIX":
-            return ["domain_suffix": normalizedValue, "outbound": outbound]
-        case "DOMAIN-KEYWORD":
-            return ["domain_keyword": normalizedValue, "outbound": outbound]
-        case "DOMAIN-WILDCARD":
-            return ["domain_regex": wildcardRegex(from: normalizedValue), "outbound": outbound]
-        case "DOMAIN-REGEX", "URL-REGEX":
-            return ["domain_regex": normalizedValue, "outbound": outbound]
-        case "RULE-SET":
-            return ["rule_set": normalizedValue, "outbound": outbound]
-        case "IP-CIDR":
-            return ["ip_cidr": normalizedValue, "outbound": outbound]
-        case "IP-CIDR6":
-            return ["ip_cidr": normalizedValue, "outbound": outbound]
-        case "GEOIP":
-            return ["rule_set": normalizedValue.hasPrefix("geoip-") ? normalizedValue : "geoip-\(normalizedValue.lowercased())", "outbound": outbound]
-        case "LAN":
-            return ["ip_is_private": true, "outbound": outbound]
-        case "SRC-IP":
-            return ["source_ip_cidr": normalizedValue, "outbound": outbound]
-        case "PROCESS-NAME":
-            return ["process_name": normalizedValue, "outbound": outbound]
-        case "PROCESS-PATH":
-            return ["process_path": normalizedValue, "outbound": outbound]
-        case "DEST-PORT":
-            if let port = Int(normalizedValue) {
-                return ["port": port, "outbound": outbound]
-            }
-            return ["port": normalizedValue, "outbound": outbound]
-        case "PROTOCOL":
-            return ["protocol": normalizedValue.lowercased(), "outbound": outbound]
-        case "NETWORK":
-            return ["network": normalizedValue.lowercased(), "outbound": outbound]
-        default:
-            return ["domain": normalizedValue, "outbound": outbound]
-        }
+        RuleRouting.customRouteRule(type: type, value: value, strategy: strategy)
     }
 
-    func outboundForStrategy(_ strategy: String) -> String {
-        switch strategy {
-        case "DIRECT": return TungBoxConfig.tagDirect
-        case "REJECT": return TungBoxConfig.tagBlock
-        case "AUTO": return TungBoxConfig.tagAuto
-        case "Proxy": return TungBoxConfig.tagManual
-        default: return strategy
-        }
-    }
-
-    private func wildcardRegex(from value: String) -> String {
-        let escaped = NSRegularExpression.escapedPattern(for: value)
-            .replacingOccurrences(of: "\\*", with: ".*")
-        return "^\(escaped)$"
-    }
-
+    func outboundForStrategy(_ strategy: String) -> String { RuleRouting.outboundForStrategy(strategy) }
     func ensureOutboundSupport(in config: [String: Any], strategy: String) -> [String: Any] {
-        var config = config
-        var outbounds = config["outbounds"] as? [[String: Any]] ?? []
-        let requiredTag = outboundForStrategy(strategy)
-        if !outbounds.contains(where: { ($0["tag"] as? String) == requiredTag }) {
-            guard [TungBoxConfig.tagDirect, TungBoxConfig.tagBlock].contains(requiredTag) else {
-                return config
-            }
-            let type = requiredTag == TungBoxConfig.tagBlock ? "block" : "direct"
-            outbounds.append(["type": type, "tag": requiredTag])
-            config["outbounds"] = outbounds
-        }
-        return config
+        RuleRouting.ensureOutboundSupport(in: config, strategy: strategy)
     }
-
-    func customRuleInsertIndex(in rules: [[String: Any]]) -> Int {
-        var index = 0
-        while index < rules.count {
-            let rule = rules[index]
-            if rule["action"] != nil || rule["clash_mode"] != nil {
-                index += 1
-            } else {
-                break
-            }
-        }
-        return index
-    }
+    func customRuleInsertIndex(in rules: [[String: Any]]) -> Int { RuleRouting.customRuleInsertIndex(in: rules) }
 
     func ruleSetSRSURL(for tag: String) -> URL {
         store.ruleSetsURL.appendingPathComponent(safeFileName(tag)).appendingPathExtension("srs")

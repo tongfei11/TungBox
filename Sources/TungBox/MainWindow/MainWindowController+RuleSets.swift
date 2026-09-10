@@ -35,32 +35,192 @@ extension MainWindowController {
     }
 
     func ruleSetsForCurrentSubscription() -> [CustomRuleSet] {
-        customRuleSets.sorted { $0.createdAt < $1.createdAt }
+        customRuleSets.sorted { $0.createdAt == $1.createdAt ? $0.id.uuidString < $1.id.uuidString : $0.createdAt < $1.createdAt }
     }
 
     // MARK: - Config regeneration
 
-    /// Remove every route rule that a rule set (in its current on-disk form) would
-    /// generate, so a change can be re-applied cleanly. Returns rendered config text.
-    func removeRuleSetRules(_ set: CustomRuleSet, from text: String) throws -> String {
-        guard var config = parseConfigObject(from: text) else {
-            throw NSError.user("当前配置不是有效 JSON")
-        }
-        var route = config["route"] as? [String: Any] ?? [:]
-        var routeRules = route["rules"] as? [[String: Any]] ?? []
-        let generated = set.rules.map { customRouteRule(type: $0.type, value: $0.value, strategy: set.outbound) }
-        routeRules.removeAll { existing in
-            generated.contains { NSDictionary(dictionary: $0).isEqual(to: existing) }
-        }
-        route["rules"] = routeRules
-        config["route"] = route
-        return try renderConfig(config)
+    func ruleSetReferenceError(_ set: CustomRuleSet, config: [String: Any]) -> String? {
+        if let error = RuleRouting.referenceError(type: "LAN", value: "", strategy: set.outbound, config: config) { return error }
+        return set.rules.compactMap { RuleRouting.referenceError(type: $0.type, value: $0.value, strategy: set.outbound, config: config) }.first
     }
 
-    /// Re-apply all custom rules + rule sets onto a base config and persist.
-    private func regenerate(from base: String, subscription: Subscription) throws {
-        editor.string = try renderConfig(try applyCustomRules(to: base, subscriptionID: subscription.id))
-        _ = try saveCurrent()
+    func checkRuleSetConfig(_ text: String) throws {
+        let url = store.baseURL.appendingPathComponent("rules-check-\(UUID().uuidString).json")
+        defer {
+            try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: url.deletingLastPathComponent().appendingPathComponent("run_" + url.lastPathComponent))
+        }
+        try Data(text.utf8).write(to: url, options: .atomic)
+        _ = try runner.check(config: url)
+    }
+
+    /// File operations and core validation share a rollback boundary. A failed write
+    /// or check never becomes a successful UI operation.
+    private func changeRuleSetFile(at file: URL, mutation: () throws -> Void) throws {
+        guard !isApplyingRuleSets else { throw NSError.user("规则正在应用，请稍后重试") }
+        guard let sub = currentSubscription(), let index = selectedIndex,
+              profiles.indices.contains(index), sub.profileID == profiles[index].id else {
+            throw NSError.user("请先选择该订阅的配置")
+        }
+        _ = try store.baseRouteRules(for: sub.id)
+        let oldFile = FileManager.default.fileExists(atPath: file.path) ? try Data(contentsOf: file) : nil
+        let oldEditor = editor.string
+        let configURL = store.configURL(for: profiles[index])
+        let oldConfig = try Data(contentsOf: configURL)
+        let projectionURL = store.ruleProjectionURL(for: sub.id)
+        let oldProjection = FileManager.default.fileExists(atPath: projectionURL.path) ? try Data(contentsOf: projectionURL) : nil
+        do {
+            try mutation()
+            let candidate = try renderConfig(try applyCustomRules(to: oldEditor, subscriptionID: sub.id))
+            try checkRuleSetConfig(candidate)
+            editor.string = candidate
+            _ = try saveCurrent()
+            try applyRuleSetRuntime(candidate, previous: oldConfig, configURL: configURL)
+            ruleSetFileSignature = try? ruleSetFiles(for: sub.id)
+        } catch {
+            editor.string = oldEditor
+            do {
+                if let oldFile { try oldFile.write(to: file, options: .atomic) }
+                else if FileManager.default.fileExists(atPath: file.path) { try FileManager.default.removeItem(at: file) }
+                try oldConfig.write(to: configURL, options: .atomic)
+                if let oldProjection { try oldProjection.write(to: projectionURL, options: .atomic) }
+                else if FileManager.default.fileExists(atPath: projectionURL.path) { try FileManager.default.removeItem(at: projectionURL) }
+                pendingRuleProjection = nil
+            } catch let restoreError {
+                throw NSError.user("操作失败：\(error.localizedDescription)；恢复文件失败：\(restoreError.localizedDescription)")
+            }
+            loadRuleSetsForCurrentSubscription()
+            throw error
+        }
+        refreshRulesFromEditor()
+        showToast(ruleSetApplyStatus)
+    }
+
+    private func applyRuleSetRuntime(_ text: String, previous: Data, configURL: URL) throws {
+        if isTunEnabled && TunServiceManager.activeSingBoxPID(store: store) != nil {
+            let prepared = try preparedTunConfigText(from: text)
+            let oldRequest = try Data(contentsOf: store.tunRequestConfigURL)
+            let oldPID = TunServiceManager.activeSingBoxPID(store: store)
+            try Data(prepared.utf8).write(to: store.tunRequestConfigURL, options: .atomic)
+            TunServiceManager.refreshRequestHeartbeat(store: store)
+            isApplyingRuleSets = true
+            ruleSetApplyStatus = "已保存，正在应用"
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                defer { self.isApplyingRuleSets = false; self.refreshRulesFromEditor() }
+                for _ in 0..<30 {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    guard self.isTunEnabled else {
+                        self.ruleSetApplyStatus = "已保存，待启动应用"
+                        return
+                    }
+                    if let latest = try? Data(contentsOf: self.store.tunRequestConfigURL), latest != Data(prepared.utf8) {
+                        self.ruleSetApplyStatus = "应用请求已被新的配置替换"
+                        return
+                    }
+                    if let pid = TunServiceManager.activeSingBoxPID(store: self.store), pid != oldPID,
+                       TunServiceManager.tunInterfaceIsActive() {
+                        try? await Task.sleep(for: .seconds(1))
+                        if self.isTunEnabled, TunServiceManager.activeSingBoxPID(store: self.store) == pid,
+                           TunServiceManager.tunInterfaceIsActive() {
+                            self.ruleSetApplyStatus = "已生效"
+                            return
+                        }
+                    }
+                }
+                do {
+                    guard self.isTunEnabled else { return }
+                    try oldRequest.write(to: self.store.tunRequestConfigURL, options: .atomic)
+                    try Data().write(to: self.store.tunRequestFlagURL, options: .atomic)
+                    self.startTunRequestHeartbeat()
+                    TunServiceManager.refreshRequestHeartbeat(store: self.store)
+                    self.ruleSetApplyStatus = "已保存，应用失败；已请求恢复旧配置"
+                } catch {
+                    self.ruleSetApplyStatus = "应用失败，恢复失败：\(error.localizedDescription)"
+                }
+                self.showError(NSError.user(self.ruleSetApplyStatus))
+            }
+        } else if runner.isRunning {
+            let runningSnapshot = runner.runningConfigData ?? previous
+            runner.stop()
+            do {
+                try startNormalProxy(config: configURL, port: getMixedProxyPort(), reason: "规则更新")
+                ruleSetApplyStatus = "已生效（现有连接已重建）"
+            } catch {
+                let applyError = error
+                runner.stop()
+                do {
+                    try runningSnapshot.write(to: configURL, options: .atomic)
+                    try startNormalProxy(config: configURL, port: getMixedProxyPort(), reason: "规则应用失败后恢复")
+                } catch {
+                    ruleSetApplyStatus = "应用及恢复失败"
+                    throw NSError.user("规则应用失败：\(applyError.localizedDescription)；恢复失败：\(error.localizedDescription)")
+                }
+                ruleSetApplyStatus = "应用失败，已恢复旧配置"
+                throw applyError
+            }
+        } else { ruleSetApplyStatus = "已保存，待启动应用" }
+    }
+
+    private func ruleSetFiles(for id: UUID) throws -> [String: Data] {
+        let folder = store.ruleSetsFolder(for: id)
+        guard FileManager.default.fileExists(atPath: folder.path) else { return [:] }
+        let files = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+        return try Dictionary(uniqueKeysWithValues: files.filter { $0.pathExtension == "yml" }.map { ($0.path, try Data(contentsOf: $0)) })
+    }
+
+    func startRuleSetWatching() {
+        guard ruleSetWatchTimer == nil else { return }
+        ruleSetWatchTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.refreshExternalRuleSetChanges() }
+        }
+    }
+
+    func refreshExternalRuleSetChanges() {
+        guard !isApplyingRuleSets, let sub = currentSubscription(), let index = selectedIndex,
+              profiles.indices.contains(index), sub.profileID == profiles[index].id else { return }
+        do {
+            let files = try ruleSetFiles(for: sub.id)
+            if ruleSetWatchSubscriptionID != sub.id {
+                ruleSetWatchSubscriptionID = sub.id
+                ruleSetFileSignature = nil
+            }
+            guard files != ruleSetFileSignature else { return }
+            // Do not overwrite an open dialog or unsaved config edits.
+            guard ruleSetRulesTextView?.window?.isVisible != true else { return }
+            let url = store.configURL(for: profiles[index])
+            let saved = try Data(contentsOf: url)
+            let projectionURL = store.ruleProjectionURL(for: sub.id)
+            let projection = FileManager.default.fileExists(atPath: projectionURL.path) ? try Data(contentsOf: projectionURL) : nil
+            guard Data(editor.string.utf8) == saved else {
+                ruleSetApplyStatus = "文件已变化，请先保存配置编辑内容"
+                return
+            }
+            let candidate = try renderConfig(try applyCustomRules(to: editor.string, subscriptionID: sub.id))
+            if candidate != editor.string {
+                try checkRuleSetConfig(candidate)
+                editor.string = candidate
+                do {
+                    _ = try saveCurrent()
+                    try applyRuleSetRuntime(candidate, previous: saved, configURL: url)
+                } catch {
+                    editor.string = String(decoding: saved, as: UTF8.self)
+                    try saved.write(to: url, options: .atomic)
+                    if let projection { try projection.write(to: projectionURL, options: .atomic) }
+                    pendingRuleProjection = nil
+                    throw error
+                }
+            }
+            ruleSetFileSignature = files
+            refreshRulesFromEditor()
+        } catch {
+            // Report once per revision instead of continuously attempting a bad update.
+            ruleSetFileSignature = try? ruleSetFiles(for: sub.id)
+            ruleSetApplyStatus = "未应用：\(error.localizedDescription)"
+            appendLog("[规则集] \(ruleSetApplyStatus)\n")
+            refreshRulesFromEditor()
+        }
     }
 
     // MARK: - Actions
@@ -76,44 +236,28 @@ extension MainWindowController {
     }
 
     func deleteRuleSet(_ set: CustomRuleSet) {
-        guard let sub = currentSubscription() else { return }
         do {
-            let base = try removeRuleSetRules(set, from: editor.string)
-            store.deleteRuleSet(set)
-            loadRuleSetsForCurrentSubscription()
-            try regenerate(from: base, subscription: sub)
+            try changeRuleSetFile(at: store.ruleSetFileURL(for: set)) { try store.deleteRuleSet(set) }
             appendLog("[规则集] 已删除「\(set.name)」\n")
-        } catch {
-            store.saveRuleSet(set)   // rollback file if regen failed
-            loadRuleSetsForCurrentSubscription()
-            showError(error)
-        }
-        refreshRulesFromEditor()
+        } catch { showError(error) }
     }
 
     func setRuleSetEnabled(_ set: CustomRuleSet, to enabled: Bool) {
-        guard let sub = currentSubscription() else { return }
         var updated = set
         updated.enabled = enabled
         do {
-            let base = try removeRuleSetRules(set, from: editor.string)
-            store.saveRuleSet(updated)
-            loadRuleSetsForCurrentSubscription()
-            try regenerate(from: base, subscription: sub)
-            appendLog("[规则集]「\(set.name)」已\(enabled ? "启用" : "停用")\n")
-        } catch {
-            store.saveRuleSet(set)
-            loadRuleSetsForCurrentSubscription()
-            showError(error)
-        }
-        refreshRulesFromEditor()
+            if enabled, let config = parseConfigObject(from: editor.string), let error = ruleSetReferenceError(updated, config: config) {
+                throw NSError.user(error)
+            }
+            try changeRuleSetFile(at: store.ruleSetFileURL(for: set)) { try store.saveRuleSet(updated) }
+        } catch { showError(error) }
     }
 
     func deleteInvalidRuleSet(_ invalid: InvalidRuleSet) {
-        store.deleteRuleSetFile(at: invalid.fileURL)
-        loadRuleSetsForCurrentSubscription()
-        refreshRulesFromEditor()
-        showToast("已删除无效规则集文件")
+        do {
+            try changeRuleSetFile(at: invalid.fileURL) { try store.deleteRuleSetFile(at: invalid.fileURL) }
+            showToast("已删除无效规则集文件")
+        } catch { showError(error) }
     }
 
     @objc func openRuleSetWiki() {
@@ -150,6 +294,9 @@ extension MainWindowController {
             popup.addItems(withTitles: nodeTags)
         }
         if let selected, popup.itemArray.contains(where: { $0.title == selected }) {
+            popup.selectItem(withTitle: selected)
+        } else if let selected {
+            popup.addItem(withTitle: selected)
             popup.selectItem(withTitle: selected)
         } else {
             popup.selectItem(withTitle: "Proxy")
@@ -308,20 +455,12 @@ extension MainWindowController {
         )
 
         do {
-            let base: String
-            if let editing {
-                base = try removeRuleSetRules(editing, from: editor.string)
-            } else {
-                base = editor.string
-            }
-            store.saveRuleSet(set)
-            loadRuleSetsForCurrentSubscription()
-            try regenerate(from: base, subscription: sub)
-            appendLog("[规则集] 已保存「\(set.name)」→ \(set.outbound)（\(entries.count) 条）\n")
+            guard let config = parseConfigObject(from: editor.string) else { throw NSError.user("配置 JSON 无效") }
+            if let error = ruleSetReferenceError(set, config: config) { throw NSError.user(error) }
+            try changeRuleSetFile(at: store.ruleSetFileURL(for: set)) { try store.saveRuleSet(set) }
+            appendLog("[规则集] 已保存「\(set.name)」：\(ruleSetApplyStatus)\n")
         } catch {
             showError(error)
-            // Leave the file as-is; reload to reflect actual state.
-            loadRuleSetsForCurrentSubscription()
             return false
         }
         refreshRulesFromEditor()
