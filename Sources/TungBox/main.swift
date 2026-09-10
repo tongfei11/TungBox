@@ -236,6 +236,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
         guard let content = window?.contentView else { return }
 
+        normalizeMainWindowFrame()
+
         content.wantsLayer = true
         content.layer?.backgroundColor = MD3.background.cgColor
         registerThemeObserver { [weak content] in
@@ -326,6 +328,32 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
         checkSingBoxInstall(showAlert: true)
         refreshSubscriptionBadge()
+    }
+
+    /// macOS can restore an obsolete autosaved frame after a page with a wide
+    /// intrinsic layout was selected. Keep the app usable on the current screen
+    /// and persist the corrected frame for the next launch.
+    func normalizeMainWindowFrame() {
+        guard let window, let screen = window.screen ?? NSScreen.main else { return }
+        let visible = screen.visibleFrame
+        var frame = window.frame
+        let maxWidth = min(visible.width, 1400)
+        let maxHeight = visible.height
+        var changed = false
+        if frame.width > maxWidth {
+            frame.size.width = min(1080, maxWidth)
+            changed = true
+        }
+        if frame.height > maxHeight {
+            frame.size.height = min(720, maxHeight)
+            changed = true
+        }
+        if changed {
+            frame.origin.x = visible.midX - frame.width / 2
+            frame.origin.y = visible.midY - frame.height / 2
+            window.setFrame(frame, display: true)
+        }
+        window.saveFrame(usingName: "TungBoxMainWindow")
     }
 
     func normalizeProxyPreferences() {
@@ -710,8 +738,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             DispatchQueue.main.async {
                 guard window.isVisible else { return }
                 var frame = window.frame
-                frame.size = stableWindowSize
+                frame.size = NSSize(width: min(stableWindowSize.width, 1400), height: stableWindowSize.height)
                 window.setFrame(frame, display: true)
+                self.normalizeMainWindowFrame()
             }
         }
     }
