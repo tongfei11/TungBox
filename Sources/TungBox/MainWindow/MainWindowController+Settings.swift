@@ -1234,6 +1234,9 @@ extension MainWindowController {
         cancelTitle: String = "取消"
     ) -> MD3Dialog {
         guard let contentView = window?.contentView else { fatalError("No content view") }
+        if let activeDialog, activeDialog.isActiveModal {
+            activeDialog.dismiss()
+        }
         let dialog = MD3Dialog(
             title: title,
             message: message,
@@ -1243,6 +1246,7 @@ extension MainWindowController {
         )
         dialog.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(dialog)
+        activeDialog = dialog
         
         NSLayoutConstraint.activate([
             dialog.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),

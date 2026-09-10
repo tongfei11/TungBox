@@ -11,6 +11,11 @@ final class FixedSidebarLayout: NSView {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
+        // Page content may have a large intrinsic width (tables, text editors,
+        // settings grids). It must compress inside the existing window instead of
+        // asking NSWindow to resize whenever NSTabView selects another page.
+        mainContent.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        mainContent.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         NSLayoutConstraint.activate([
             sidebar.leadingAnchor.constraint(equalTo: leadingAnchor),
             sidebar.topAnchor.constraint(equalTo: topAnchor),

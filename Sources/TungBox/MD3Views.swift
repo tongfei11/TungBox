@@ -2566,6 +2566,7 @@ final class MD3Dialog: NSView, MD3Themeable {
         } else {
             constraints.append(buttonStack.topAnchor.constraint(equalTo: messageLabel.bottomAnchor, constant: 24))
         }
+        constraints.append(card.heightAnchor.constraint(greaterThanOrEqualToConstant: 176))
         
         NSLayoutConstraint.activate(constraints)
         
@@ -2597,6 +2598,7 @@ final class MD3Dialog: NSView, MD3Themeable {
     }
     
     func dismiss() {
+        guard superview != nil else { return }
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.15
             context.timingFunction = CAMediaTimingFunction(name: .easeIn)
@@ -2607,6 +2609,11 @@ final class MD3Dialog: NSView, MD3Themeable {
             }
         }
     }
+
+    // The scrim is a real modal barrier. Never allow a click to reach the page
+    // underneath while an animation or table selection is in progress.
+    override func mouseDown(with event: NSEvent) { }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     
     func updateColors() {
         scrimView.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.4).cgColor
@@ -3137,4 +3144,3 @@ final class MD3RadioButton: NSControl, MD3Themeable {
         invalidateIntrinsicContentSize()
     }
 }
-
