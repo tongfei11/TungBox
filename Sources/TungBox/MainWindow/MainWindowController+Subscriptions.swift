@@ -82,18 +82,27 @@ extension MainWindowController {
         let subColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("subscription"))
         subColumn.resizingMask = .autoresizingMask
         subscriptionTable.addTableColumn(subColumn)
-        subscriptionTable.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        // The single column must follow the scroll view. Calling
+        // `sizeLastColumnToFit()` before the table has a real width measures the
+        // long subscription URL and gives NSTabView an enormous intrinsic width,
+        // which in turn expands the main window when this page is selected.
+        subscriptionTable.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
+        subscriptionTable.autosaveTableColumns = false
+        subscriptionTable.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        subscriptionTable.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        scroll.hasHorizontalScroller = false
         
         subscriptionTable.headerView = nil
         subscriptionTable.delegate = self
         subscriptionTable.dataSource = self
         subscriptionTable.rowHeight = 88
         scroll.documentView = subscriptionTable
-        subscriptionTable.sizeLastColumnToFit()
 
         let panel = MD3Panel()
         panel.type = .filled
         panel.translatesAutoresizingMaskIntoConstraints = false
+        panel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        panel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         panel.addSubview(scroll)
 
         view.addSubview(title)
