@@ -55,6 +55,30 @@ extension MainWindowController {
         _ = try runner.check(config: url)
     }
 
+    /// Import configurations created before the independent rule-source file was
+    /// introduced. The current editor is the only available baseline; remove the
+    /// known generated rule-set entries and persist the resulting snapshot once.
+    private func ensureRuleBase(for subscription: Subscription) throws {
+        do {
+            _ = try store.baseRouteRules(for: subscription.id)
+            return
+        } catch { }
+        guard var config = parseConfigObject(from: editor.string) else {
+            throw NSError.user("当前配置不是有效 JSON，无法迁移旧规则")
+        }
+        var route = config["route"] as? [String: Any] ?? [:]
+        var routeRules = route["rules"] as? [[String: Any]] ?? []
+        for set in store.loadRuleSets(for: subscription.id).valid {
+            let generated = set.rules.map { RuleRouting.customRouteRule(type: $0.type, value: $0.value, strategy: set.outbound) }
+            routeRules.removeAll { existing in generated.contains { NSDictionary(dictionary: $0).isEqual(to: existing) } }
+        }
+        route["rules"] = routeRules
+        config["route"] = route
+        let baseline = try renderConfig(config)
+        try store.saveRuleBase(baseline, for: subscription.id)
+        appendLog("[规则集] 已将旧配置迁移为独立规则来源\n")
+    }
+
     /// File operations and core validation share a rollback boundary. A failed write
     /// or check never becomes a successful UI operation.
     private func changeRuleSetFile(at file: URL, mutation: () throws -> Void) throws {
@@ -63,7 +87,7 @@ extension MainWindowController {
               profiles.indices.contains(index), sub.profileID == profiles[index].id else {
             throw NSError.user("请先选择该订阅的配置")
         }
-        _ = try store.baseRouteRules(for: sub.id)
+        try ensureRuleBase(for: sub)
         let oldFile = FileManager.default.fileExists(atPath: file.path) ? try Data(contentsOf: file) : nil
         let oldEditor = editor.string
         let configURL = store.configURL(for: profiles[index])
