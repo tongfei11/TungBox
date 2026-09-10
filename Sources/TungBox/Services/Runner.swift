@@ -203,9 +203,18 @@ final class Runner: @unchecked Sendable {
     /// core binary and runs as the user, so it can never touch the root TUN daemon
     /// (which runs a different binary path and is owned by root).
     func reapStrayUserProcesses() {
-        let binary = store.coreBinaryURL.path
-        guard !binary.isEmpty else { return }
-        _ = runAndWait("/usr/bin/pkill", ["-9", "-f", binary])
+        let binaries = knownCoreBinaryPaths()
+        for binary in binaries {
+            _ = runAndWait("/usr/bin/pkill", ["-9", "-f", binary])
+        }
+    }
+
+    private func knownCoreBinaryPaths() -> [String] {
+        [
+            store.coreBinaryURL.path,
+            Bundle.main.resourceURL?.appendingPathComponent("sing-box").path,
+            Bundle.main.resourceURL?.appendingPathComponent("Core/sing-box").path
+        ].compactMap { $0 }.filter { !$0.isEmpty }
     }
 
     func stop() {
@@ -223,12 +232,27 @@ final class Runner: @unchecked Sendable {
         elevatedPID = nil
     }
 
+    /// Stop the current process and wait briefly before a replacement is started.
+    /// Process.terminate() is asynchronous; starting immediately can leave the
+    /// old process holding ports and cache locks, causing the new config to be
+    /// silently bypassed by the still-running core.
+    func stopAndWait(timeout: TimeInterval = 3.0) {
+        stop()
+        let deadline = Date().addingTimeInterval(timeout)
+        while isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if isRunning {
+            reapStrayUserProcesses()
+        }
+    }
+
     func stopStaleUserProcesses() {
-        let binary = store.coreBinaryURL.path
+        let binaries = knownCoreBinaryPaths()
         let configDirectory = store.baseURL.path
         let output = runAndWait("/bin/ps", ["-axo", "pid=,command="], timeoutSeconds: 2).output
         for line in output.components(separatedBy: .newlines) {
-            guard line.contains(binary),
+            guard binaries.contains(where: { line.contains($0) }),
                   line.contains(" run "),
                   line.contains(" -c "),
                   line.contains(configDirectory),

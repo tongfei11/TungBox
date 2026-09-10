@@ -875,6 +875,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         // "initialize cache-file: timeout" or a port-in-use bind error and 7890
         // never comes up. Then wait for both ports to actually free, then start.
         let clashPort = 9090
+        runner.stopAndWait()
         runner.reapStrayUserProcesses()
         _ = waitForLocalTCPPortFree(port, timeout: 4.0)
         _ = waitForLocalTCPPortFree(clashPort, timeout: 4.0)
@@ -884,13 +885,13 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             return
         }
         appendLog("[TungBox] 端口 \(port) 未在首次启动内监听，重试一次...\n")
-        runner.stop()
+        runner.stopAndWait()
         runner.reapStrayUserProcesses()
         _ = waitForLocalTCPPortFree(port, timeout: 4.0)
         _ = waitForLocalTCPPortFree(clashPort, timeout: 4.0)
         try runner.start(config: config, elevated: false)
         guard waitForLocalTCPPort(port, timeout: 6.0) else {
-            runner.stop()
+            runner.stopAndWait()
             throw NSError.user("普通代理启动失败：本地端口 \(port) 未开始监听，系统代理没有切换到空端口。请查看日志中的 sing-box 退出原因。")
         }
         appendLog("[TungBox] \(reason)完成（重试后），本地代理端口 \(port) 已监听\n")
