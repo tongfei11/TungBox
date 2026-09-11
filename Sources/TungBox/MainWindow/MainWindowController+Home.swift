@@ -558,9 +558,9 @@ extension MainWindowController {
                     }
                 }
 
-                // Sync delays and active node from Clash API
+                // Sync active node from Clash API. Delay values are updated only by
+                // the explicit automatic/all-node delay test, not by this poll.
                 self.lastProxiesObj = proxiesObj
-                self.syncNodeDelaysFromClashAPI(proxiesObj: proxiesObj)
                 let activeNodeInfo = self.resolveActiveOutbound(proxiesObj: proxiesObj)
                 self.currentNodeNameLabel.stringValue = activeNodeInfo.name.isEmpty ? "（选择中…）" : activeNodeInfo.name
                 self.currentNodeAutoBadge.isHidden = !activeNodeInfo.isAuto
