@@ -199,6 +199,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     let downloadValueLabel = NSTextField(labelWithString: "0 KB/s")
     var currentUploadSpeed = 0
     var currentDownloadSpeed = 0
+    var lastTrayPresentation: String?
     var wasTunActiveInThisSession = false
     var wasProxyActiveInThisSession = false
     var lastTrayActiveState: Bool? = nil

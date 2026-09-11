@@ -197,9 +197,16 @@ extension MainWindowController {
 
     func configureStatusButton(_ button: NSStatusBarButton?) {
         guard let button, let statusItem = self.statusItem else { return }
-        let (imageView, label) = getOrCreateTraySubviews(in: button)
-        
         let style = TrayIconStyle.current
+        let active = isProxyServiceActiveOrRequested()
+        let delay = nodes.first(where: { $0.tag == resolveActiveOutbound(proxiesObj: lastProxiesObj).name })?.delay ?? ""
+        let presentation = "\(style.rawValue)|\(active)|\(currentUploadSpeed)|\(currentDownloadSpeed)|\(delay)"
+        if lastTrayPresentation == presentation, trayImageView != nil, traySpeedLabel != nil {
+            return
+        }
+        lastTrayPresentation = presentation
+        let (imageView, label) = getOrCreateTraySubviews(in: button)
+
         let shouldShowIcon = style != .speedOnly
         let shouldShowSpeed = style != .iconOnly
         
