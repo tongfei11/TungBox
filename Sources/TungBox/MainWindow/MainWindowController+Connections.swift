@@ -134,6 +134,28 @@ extension MainWindowController {
         }
     }
 
+    /// Polling still maintains traffic totals in the background; only paint a visible table.
+    func refreshConnectionsTable() {
+        guard window?.isVisible == true, window?.isMiniaturized == false,
+              isConnectionsPageSelected() else { return }
+        let rows = filteredConnections()
+        guard rows != displayedConnections else { return }
+        let sameOrder = rows.map(\.id) == displayedConnections.map(\.id)
+        displayedConnections = rows
+        if !sameOrder {
+            connectionsTable.reloadData()
+            return
+        }
+        // Retain cells and selection, including AppKit's prepared off-screen rows.
+        connectionsTable.enumerateAvailableRowViews { rowView, row in
+            guard rows.indices.contains(row) else { return }
+            for (column, definition) in self.connectionsTable.tableColumns.enumerated() {
+                guard let cell = rowView.view(atColumn: column) as? ConnectionTextCell else { continue }
+                cell.update(text: self.connectionCellText(for: rows[row], columnID: definition.identifier.rawValue))
+            }
+        }
+    }
+
     func connectionContextMenu() -> NSMenu {
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "关闭此连接", action: #selector(closeSingleConnectionClicked(_:)), keyEquivalent: ""))
@@ -141,7 +163,7 @@ extension MainWindowController {
     }
 
     @objc func connectionFilterChanged() {
-        connectionsTable.reloadData()
+        refreshConnectionsTable()
     }
 
     func startConnectionsRefreshTimer() {
@@ -170,7 +192,7 @@ extension MainWindowController {
         prevConnections.removeAll()
         prevTrafficTotals.removeAll()   // sing-box 重启时基准会归零，下次重新算
         connectionRefreshTime = .distantPast
-        connectionsTable.reloadData()
+        refreshConnectionsTable()
         updateConnectionsCard(value: "0", detail: "服务未运行")
     }
 
@@ -219,14 +241,14 @@ extension MainWindowController {
         // 每个 connection 的瞬时速率（仅用于显示连接表的"上传速度"列）。
         // ⚠️ 这里只算速率，**不再用于流量累计** —— per-connection delta 会丢掉
         // 短连接关闭后的字节（典型：YouTube QUIC 流），流量累计走 totals 路径。
+        var previousByID: [String: ConnectionInfo] = [:]
+        for previous in prevConnections { previousByID[previous.id] = previous }
         var speedMap: [String: (up: Int, down: Int)] = [:]
-        for prev in prevConnections {
-            if let curr = list.first(where: { $0.id == prev.id }) {
-                let upSpeed = max(0, curr.upload - prev.upload)
-                let downSpeed = max(0, curr.download - prev.download)
+        for curr in list {
+            if let prev = previousByID[curr.id] {
                 speedMap[curr.id] = (
-                    Int(Double(upSpeed) / elapsed),
-                    Int(Double(downSpeed) / elapsed)
+                    Int(Double(max(0, curr.upload - prev.upload)) / elapsed),
+                    Int(Double(max(0, curr.download - prev.download)) / elapsed)
                 )
             }
         }
@@ -240,7 +262,7 @@ extension MainWindowController {
 
         prevConnections = list
         connectionRefreshTime = now
-        connectionsTable.reloadData()
+        refreshConnectionsTable()
         updateConnectionsCard(value: "\(connections.count)", detail: detail)
     }
 
@@ -293,7 +315,7 @@ extension MainWindowController {
     @objc func closeSingleConnectionClicked(_ sender: Any) {
         let row = connectionsTable.clickedRow
         guard row >= 0 else { return }
-        let conns = filteredConnections()
+        let conns = displayedConnections
         guard conns.indices.contains(row) else { return }
         let conn = conns[row]
 
@@ -303,7 +325,7 @@ extension MainWindowController {
                 await MainActor.run {
                     // Remove from the unfiltered list too
                     connections.removeAll { $0.id == conn.id }
-                    connectionsTable.reloadData()
+                    refreshConnectionsTable()
                     appendLog("[连接] 已关闭 \(conn.destination)\n")
                 }
             } catch {
@@ -322,7 +344,7 @@ extension MainWindowController {
             do {
                 _ = try await ClashAPI.closeConnections()
                 connections.removeAll()
-                connectionsTable.reloadData()
+                refreshConnectionsTable()
                 appendLog("[连接] 已关闭全部连接\n")
             } catch {
                 showError(error)
@@ -330,7 +352,7 @@ extension MainWindowController {
         }
     }
 
-    func makeConnectionCell(for connection: ConnectionInfo, columnID: String) -> NSView {
+    func connectionCellText(for connection: ConnectionInfo, columnID: String) -> String {
         let text: String
         switch columnID {
         case "network": text = connection.network
@@ -348,20 +370,16 @@ extension MainWindowController {
         default: text = ""
         }
 
-        let label = NSTextField(labelWithString: text)
-        label.font = .systemFont(ofSize: 12)
-        label.textColor = MD3.onSurface
-        label.lineBreakMode = .byTruncatingTail
-        label.maximumNumberOfLines = 1
-        label.translatesAutoresizingMaskIntoConstraints = false
+        return text
+    }
 
-        let container = NSView()
-        container.addSubview(label)
-        NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
-            label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
-            label.centerYAnchor.constraint(equalTo: container.centerYAnchor)
-        ])
-        return container
+    func makeConnectionCell(for connection: ConnectionInfo, columnID: String) -> NSView {
+        let text = connectionCellText(for: connection, columnID: columnID)
+        let identifier = NSUserInterfaceItemIdentifier("Connection-" + columnID)
+        let cell = connectionsTable.makeView(withIdentifier: identifier, owner: nil) as? ConnectionTextCell
+            ?? ConnectionTextCell()
+        cell.identifier = identifier
+        cell.update(text: text)
+        return cell
     }
 }

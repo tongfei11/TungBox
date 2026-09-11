@@ -48,6 +48,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var nodeGroups: [NodeGroupInfo] = []
     var ruleRows: [RuleInfo] = []
     var connections: [ConnectionInfo] = []
+    var displayedConnections: [ConnectionInfo] = []
     var ruleSetDownloads = Set<String>()
     var nodeTileActions: [Int: (group: String, node: String)] = [:]
     var groupTestActions: [Int: String] = [:]
@@ -727,6 +728,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             checkSingBoxInstall(showAlert: false)
         }
         if index == 4 {
+            refreshConnectionsTable()
             startConnectionsRefreshTimer()
             refreshConnections(showErrors: false)
         } else {
@@ -3079,6 +3081,7 @@ extension MainWindowController {
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         window?.orderFrontRegardless()
+        refreshConnectionsTable()
         NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
         NSApp.activate(ignoringOtherApps: true)
         checkAppUpdateInBackground()

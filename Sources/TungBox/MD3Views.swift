@@ -3581,3 +3581,34 @@ final class MD3RadioButton: NSControl, MD3Themeable {
         invalidateIntrinsicContentSize()
     }
 }
+
+/// Reusable connection text; unchanged values do not invalidate AppKit drawing/layout.
+final class ConnectionTextCell: NSTableCellView, MD3Themeable {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        let label = NSTextField(labelWithString: "")
+        label.font = .systemFont(ofSize: 12)
+        label.lineBreakMode = .byTruncatingTail
+        label.maximumNumberOfLines = 1
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        textField = label
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func themeChanged() {
+        textField?.textColor = MD3.onSurface
+    }
+
+    func update(text: String) {
+        if textField?.stringValue != text { textField?.stringValue = text }
+        if textField?.textColor != MD3.onSurface { textField?.textColor = MD3.onSurface }
+    }
+}

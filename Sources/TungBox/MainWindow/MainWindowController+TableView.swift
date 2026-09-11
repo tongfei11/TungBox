@@ -7,7 +7,7 @@ extension MainWindowController {
         if tableView == subscriptionTable { return (subscriptions.count + 1) / 2 }
         if tableView == nodeTable { return nodes.count }
         if tableView == rulesTable { return filteredRuleRows().count }
-        if tableView == connectionsTable { return filteredConnections().count }
+        if tableView == connectionsTable { return displayedConnections.count }
         return profiles.count
     }
 
@@ -60,7 +60,7 @@ extension MainWindowController {
             guard rows.indices.contains(row), let columnID = tableColumn?.identifier.rawValue else { return nil }
             return makeRuleCell(for: rows[row], columnID: columnID)
         } else if tableView == connectionsTable {
-            let rows = filteredConnections()
+            let rows = displayedConnections
             guard rows.indices.contains(row), let columnID = tableColumn?.identifier.rawValue else { return nil }
             return makeConnectionCell(for: rows[row], columnID: columnID)
         } else {

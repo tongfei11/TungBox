@@ -97,7 +97,7 @@ struct InvalidRuleSet: Equatable {
     var reason: String
 }
 
-struct ConnectionInfo {
+struct ConnectionInfo: Equatable {
     var id: String
     var network: String
     var status: String
