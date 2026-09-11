@@ -27,11 +27,21 @@ TungBox 是 [sing-box](https://github.com/SagerNet/sing-box) 的 macOS 原生客
 
 > 系统代理与 TUN 模式为两个独立开关，可同时开启；切换出站模式（直连 / 全局 / 规则）实时生效。
 
-> Release 版本 **0.2.0** · 当前编译版本 **0.2.0(0125)**
+> Release 版本 **0.2.1** · 当前编译版本 **0.2.1(0160)**
+
+## 开发
+
+```bash
+swift build              # 构建
+./script/test.sh         # 跑所有单元测试（DNS/TUN 配置覆盖 41 个用例）
+./script/test.sh DNSConfigTests   # 指定 suite
+```
+
+> 测试脚本会强制 `DEVELOPER_DIR` 指向 `/Applications/Xcode.app`，绕过系统 `xcode-select` 默认指着 CommandLineTools（没 XCTest）的问题。
 
 ## 安装
 
-从 [Releases](https://github.com/tongfei11/TungBox/releases/latest) 下载 `TungBox-x.x.x-macos-arm64.dmg`，挂载后将 `TungBox.app` 拖入 `/Applications`。
+从 [Releases](https://github.com/tongfei11/TungBox/releases/latest) 下载安装包。优先使用通用包 `TungBox-x.x.x-macos-universal.dmg`；如果单独分发，也可按机型选择 `TungBox-x.x.x-macos-arm64.dmg` 或 `TungBox-x.x.x-macos-x86_64.dmg`。挂载后将 `TungBox.app` 拖入 `/Applications`。
 
 首次打开时，macOS Gatekeeper 可能提示"无法验证开发者"。请在 **系统设置 → 隐私与安全性** 中点击"仍要打开"。
 
@@ -108,7 +118,7 @@ TungBox 是 [sing-box](https://github.com/SagerNet/sing-box) 的 macOS 原生客
 - 流量统计持久化
 - 订阅配置兼容性检查
 - Clash YAML 订阅识别转换
-- 设置页分为常规 / Core / TUN 设置 / 规则集 / 外观
+- 设置页分为常规 / Core / TUN 设置 / DNS / 规则集 / 外观
 
 ## 许可
 

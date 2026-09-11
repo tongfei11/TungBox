@@ -39,10 +39,10 @@ extension MainWindowController {
         topBar.distribution = .fill
         topBar.translatesAutoresizingMaskIntoConstraints = false
 
-        let scroll = NSScrollView()
+        let scroll = MD3ScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.hasVerticalScroller = true
-        scroll.drawsBackground = false
+        scroll.applyThinOverlayScroller()
 
         nodeGroupsStack.orientation = .vertical
         nodeGroupsStack.spacing = 16
@@ -52,24 +52,21 @@ extension MainWindowController {
         let document = FlippedView()
         document.translatesAutoresizingMaskIntoConstraints = false
         document.addSubview(nodeGroupsStack)
+        // 节点分组 stack 直接贴 document（不再内缩 8pt），卡片左右缘和上方按钮齐
         NSLayoutConstraint.activate([
-            nodeGroupsStack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 8),
-            nodeGroupsStack.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -8),
-            nodeGroupsStack.topAnchor.constraint(equalTo: document.topAnchor, constant: 8),
+            nodeGroupsStack.leadingAnchor.constraint(equalTo: document.leadingAnchor),
+            nodeGroupsStack.trailingAnchor.constraint(equalTo: document.trailingAnchor),
+            nodeGroupsStack.topAnchor.constraint(equalTo: document.topAnchor),
             nodeGroupsStack.bottomAnchor.constraint(lessThanOrEqualTo: document.bottomAnchor, constant: -8)
         ])
         scroll.documentView = document
         document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor).isActive = true
 
-        let panel = MD3Panel()
-        panel.type = .filled
-        panel.translatesAutoresizingMaskIntoConstraints = false
-        panel.addSubview(scroll)
-
+        // 不再用有底色的 MD3Panel 包裹，scroll 直接贴 view，卡片左缘和标题/工具栏对齐
         let view = NSView()
         view.addSubview(title)
         view.addSubview(topBar)
-        view.addSubview(panel)
+        view.addSubview(scroll)
 
         NSLayoutConstraint.activate([
             title.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
@@ -81,15 +78,10 @@ extension MainWindowController {
             topBar.heightAnchor.constraint(equalToConstant: 42),
             nodesModeControl.widthAnchor.constraint(equalToConstant: 520),
 
-            panel.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            panel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
-            panel.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 16),
-            panel.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -24),
-            
-            scroll.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 8),
-            scroll.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -8),
-            scroll.topAnchor.constraint(equalTo: panel.topAnchor, constant: 8),
-            scroll.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -8)
+            scroll.leadingAnchor.constraint(equalTo: title.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
+            scroll.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 12),
+            scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -24)
         ])
 
         refreshNodeGroupsView()
@@ -168,6 +160,10 @@ extension MainWindowController {
             rowStack.alignment = .top
             rowStack.translatesAutoresizingMaskIntoConstraints = false
             
+            if i + 1 < sortedGroups.count {
+                first.heightAnchor.constraint(equalTo: second.heightAnchor).isActive = true
+            }
+            
             nodeGroupsStack.addArrangedSubview(rowStack)
             NSLayoutConstraint.activate([
                 rowStack.leadingAnchor.constraint(equalTo: nodeGroupsStack.leadingAnchor),
@@ -240,10 +236,15 @@ extension MainWindowController {
             rowStack.spacing = 8
             rowStack.distribution = .fillEqually
             rowStack.translatesAutoresizingMaskIntoConstraints = false
-            
+
             grid.addArrangedSubview(rowStack)
             rowStack.leadingAnchor.constraint(equalTo: grid.leadingAnchor).isActive = true
             rowStack.trailingAnchor.constraint(equalTo: grid.trailingAnchor).isActive = true
+            // 硬约束等宽：fillEqually 在 cell 有 intrinsicContentSize 差时会被
+            // 内容强度推到不等宽。显式同宽约束确保 2 列宽度永远一致。
+            if row.count == 2 {
+                row[0].widthAnchor.constraint(equalTo: row[1].widthAnchor).isActive = true
+            }
         }
 
         card.addSubview(titleLabel)
@@ -429,6 +430,13 @@ extension MainWindowController {
     }
 
     func testGroupNodes(_ group: NodeGroupInfo) {
+        // 切换订阅/启停代理过渡期间禁止测速：此时 sing-box 实例可能正在销毁/重建，
+        // 用过渡中的状态去 ClashAPI 测速会拿到"旧实例 + 新节点 tag"的混合错误
+        // （典型表现：FATAL initialize outbound[N]: TLS required）。
+        if isProxyServiceTransitioning {
+            showToast("正在切换运行状态，请稍后再测")
+            return
+        }
         do {
             let config = try saveCurrent()
             let testURL = nodeTestURLField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -438,47 +446,87 @@ extension MainWindowController {
             guard !members.isEmpty else { return }
             
             appendLog("[节点] 开始测试分组 \(group.tag) 中的 \(members.count) 个节点\n")
-            
+
             for tag in members {
                 if let idx = nodes.firstIndex(where: { $0.tag == tag }) {
                     nodes[idx].delay = "测试中"
                 }
             }
             refreshNodeGroupsView()
-            
+
             let runner = runner
+            let apiPort = delayAPIPort()
             let runtimeRunning = isProxyRuntimeRunning()
-            for tag in members {
-                Task.detached { [weak self, runner, runtimeRunning] in
-                    let result: String
-                    do {
-                        if runtimeRunning {
-                            let ms = try await ClashAPI.delay(node: tag, url: finalURL)
-                            result = "\(ms) ms"
-                        } else {
-                            result = try await runner.urlTest(config: config, outbound: tag, testURL: finalURL)
+            let groupName = group.tag
+            // 关代理时用 TCP 直拨 → 不启动 sing-box，几十 ms 完成（接近竞品速度）。
+            // 提前把每个 tag 对应的 server:port 拷贝出来，detached 任务能直接读。
+            let serverByTag = Dictionary(uniqueKeysWithValues: nodes.map { ($0.tag, $0.server) })
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await withTaskGroup(of: (String, String).self) { tg in
+                    for tag in members {
+                        let server = serverByTag[tag]
+                        tg.addTask { @Sendable in
+                            if runtimeRunning {
+                                do {
+                                    let ms = try await ClashAPI.delay(node: tag, url: finalURL, port: apiPort)
+                                    return (tag, "\(ms) ms")
+                                } catch {
+                                    return (tag, error.localizedDescription.contains("超时") ? "超时" : "失败")
+                                }
+                            }
+                            return (tag, await MainWindowController.fastDelayProbe(serverHostPort: server, runner: runner, config: config, outbound: tag, testURL: finalURL))
                         }
-                    } catch {
-                        let msg = error.localizedDescription
-                        await MainActor.run { [weak self] in
-                            self?.appendLog("[节点] 测试 \(tag) 失败原因: \(msg)\n")
-                        }
-                        result = msg.contains("超时") ? "超时" : "失败"
                     }
-                    
-                    await MainActor.run { [weak self] in
-                        guard let self = self else { return }
+                    for await (tag, result) in tg {
                         if let idx = self.nodes.firstIndex(where: { $0.tag == tag }) {
                             self.nodes[idx].delay = result
                         }
-                        self.updateURLTestSelectionsFromMeasuredDelays()
-                        self.refreshNodeGroupsView()
+                        if result == "失败" || result == "超时" {
+                            self.appendLog("[节点] 测试 \(tag): \(result)\n")
+                        }
                     }
                 }
+                self.updateURLTestSelectionsFromMeasuredDelays()
+                self.refreshNodeGroupsView()
+                let summary = self.delayTestSummary(memberTags: members)
+                self.showToast("\(groupName) 测速完成（\(summary)）", style: summary.contains("可用 0") ? .warning : .success)
             }
         } catch {
             showError(error)
         }
+    }
+
+    /// 关代理时的快速测速：先 TCP 直拨节点 server:port（几十 ms 完成），
+    /// 失败/不可达则回退到 sing-box fetch（UDP-only 节点如 hy2/tuic 需要）。
+    nonisolated static func fastDelayProbe(serverHostPort: String?, runner: Runner, config: URL, outbound: String, testURL: String) async -> String {
+        if let hp = serverHostPort, !hp.isEmpty, !hp.hasSuffix(":") {
+            if let ms = await Runner.tcpDialDelayMs(serverHostPort: hp, timeout: 3.0) {
+                return "\(ms) ms"
+            }
+        }
+        do {
+            return try await runner.urlTest(config: config, outbound: outbound, testURL: testURL)
+        } catch {
+            return error.localizedDescription.contains("超时") ? "超时" : "失败"
+        }
+    }
+
+    /// 统计指定节点们的"可用 X / 共 N · 最快 Yms"概要。
+    func delayTestSummary(memberTags: [String]) -> String {
+        let total = memberTags.count
+        var ok = 0
+        var fastest = Int.max
+        for t in memberTags {
+            guard let n = nodes.first(where: { $0.tag == t }) else { continue }
+            let v = n.delay.replacingOccurrences(of: " ms", with: "")
+            if let ms = Int(v) {
+                ok += 1
+                fastest = min(fastest, ms)
+            }
+        }
+        if ok == 0 { return "可用 0 / 共 \(total)" }
+        return "可用 \(ok) / 共 \(total) · 最快 \(fastest)ms"
     }
 
     @objc func groupTestClicked(_ sender: NSButton) {
@@ -488,6 +536,10 @@ extension MainWindowController {
     }
 
     func testSingleNode(tag: String) {
+        if isProxyServiceTransitioning {
+            showToast("正在切换运行状态，请稍后再测")
+            return
+        }
         do {
             let config = try saveCurrent()
             let testURL = nodeTestURLField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -499,24 +551,24 @@ extension MainWindowController {
             }
             
             let runner = runner
+            let apiPort = delayAPIPort()
             let runtimeRunning = isProxyRuntimeRunning()
-            Task.detached { [weak self, runner, runtimeRunning] in
+            let server = nodes.first(where: { $0.tag == tag })?.server
+            Task.detached { [weak self, runner, apiPort, runtimeRunning, server] in
                 let result: String
-                do {
-                    if runtimeRunning {
-                        let ms = try await ClashAPI.delay(node: tag, url: finalURL)
+                if runtimeRunning {
+                    do {
+                        let ms = try await ClashAPI.delay(node: tag, url: finalURL, port: apiPort)
                         result = "\(ms) ms"
-                    } else {
-                        result = try await runner.urlTest(config: config, outbound: tag, testURL: finalURL)
+                    } catch {
+                        let msg = error.localizedDescription
+                        await MainActor.run { [weak self] in self?.appendLog("[节点] 测试 \(tag) 失败原因: \(msg)\n") }
+                        result = msg.contains("超时") ? "超时" : "失败"
                     }
-                } catch {
-                    let msg = error.localizedDescription
-                    await MainActor.run { [weak self] in
-                        self?.appendLog("[节点] 测试 \(tag) 失败原因: \(msg)\n")
-                    }
-                    result = "失败"
+                } else {
+                    result = await MainWindowController.fastDelayProbe(serverHostPort: server, runner: runner, config: config, outbound: tag, testURL: finalURL)
                 }
-                
+
                 await MainActor.run { [weak self] in
                     guard let self = self else { return }
                     if let idx = self.nodes.firstIndex(where: { $0.tag == tag }) {
@@ -532,6 +584,10 @@ extension MainWindowController {
     }
 
     @objc func testAllNodesClicked() {
+        if isProxyServiceTransitioning {
+            showToast("正在切换运行状态，请稍后再测")
+            return
+        }
         do {
             let config = try saveCurrent()
             refreshNodesFromEditor()
@@ -553,38 +609,42 @@ extension MainWindowController {
             refreshNodeGroupsView()
 
             let runner = runner
+            let apiPort = delayAPIPort()
             let runtimeRunning = isProxyRuntimeRunning()
             let tags = nodes.map(\.tag)
-            Task.detached { [weak self, runner, runtimeRunning] in
-                for (index, tag) in tags.enumerated() {
-                    let result: String
-                    do {
-                        if runtimeRunning {
-                            let ms = try await ClashAPI.delay(node: tag, url: testURL)
-                            result = "\(ms) ms"
-                        } else {
-                            result = try await runner.urlTest(config: config, outbound: tag, testURL: testURL)
+            let serverByTag = Dictionary(uniqueKeysWithValues: nodes.map { ($0.tag, $0.server) })
+            // 全部并发测速：关代理时 TCP 直拨 + 开代理时 ClashAPI。30 节点几秒搞定。
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await withTaskGroup(of: (String, String).self) { tg in
+                    for tag in tags {
+                        let server = serverByTag[tag]
+                        tg.addTask { @Sendable in
+                            if runtimeRunning {
+                                do {
+                                    let ms = try await ClashAPI.delay(node: tag, url: testURL, port: apiPort)
+                                    return (tag, "\(ms) ms")
+                                } catch {
+                                    return (tag, error.localizedDescription.contains("超时") ? "超时" : "失败")
+                                }
+                            }
+                            return (tag, await MainWindowController.fastDelayProbe(serverHostPort: server, runner: runner, config: config, outbound: tag, testURL: testURL))
                         }
-                    } catch {
-                        let msg = error.localizedDescription
-                        await MainActor.run { [weak self] in
-                            self?.appendLog("[节点] 测试 \(tag) 失败原因: \(msg)\n")
-                        }
-                        result = msg.contains("超时") ? "超时" : "失败"
                     }
-                    await MainActor.run { [weak self] in
-                        guard let self, self.nodes.indices.contains(index), self.nodes[index].tag == tag else { return }
-                        self.nodes[index].delay = result
-                        self.nodeTable.reloadData()
-                        self.refreshNodeGroupsView()
+                    for await (tag, result) in tg {
+                        if let idx = self.nodes.firstIndex(where: { $0.tag == tag }) {
+                            self.nodes[idx].delay = result
+                            self.nodeTable.reloadData()
+                            self.refreshNodeGroupsView()
+                        }
                     }
                 }
-                await MainActor.run { [weak self] in
-                    self?.updateURLTestSelectionsFromMeasuredDelays()
-                    self?.refreshNodeGroupsView()
-                    self?.nodeTestStatusLabel.stringValue = "节点 URLTest：已完成，\(tags.count) 个节点"
-                    self?.appendLog("[节点] 测试完成\n")
-                }
+                self.updateURLTestSelectionsFromMeasuredDelays()
+                self.refreshNodeGroupsView()
+                self.nodeTestStatusLabel.stringValue = "节点 URLTest：已完成，\(tags.count) 个节点"
+                self.appendLog("[节点] 测试完成\n")
+                let summary = self.delayTestSummary(memberTags: tags)
+                self.showToast("全部节点测速完成（\(summary)）", style: summary.contains("可用 0") ? .warning : .success)
             }
         } catch {
             showError(error)
@@ -596,6 +656,7 @@ extension MainWindowController {
         nodesModeControl.selectedSegment = modeControl.selectedSegment
         do {
             try applySelectedMode()
+            showToast("出站模式：\(selectedMode().displayName)", style: .info)
         } catch {
             refreshModeFromEditor()
             showError(error)
@@ -606,6 +667,7 @@ extension MainWindowController {
         modeControl.selectedSegment = nodesModeControl.selectedSegment
         do {
             try applySelectedMode()
+            showToast("出站模式：\(selectedMode().displayName)", style: .info)
         } catch {
             refreshModeFromEditor()
             showError(error)
@@ -637,5 +699,6 @@ extension MainWindowController {
 
     @objc func refreshNodesClicked() {
         refreshNodesFromEditor()
+        showToast("节点列表已刷新（\(nodes.count) 个）", style: .info)
     }
 }

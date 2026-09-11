@@ -11,9 +11,66 @@ CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 CORE_DIR="$RESOURCES_DIR/Core"
+TARGET_ARCH="${1:-${TARGET_ARCH:-$(uname -m)}}"
+
+case "$TARGET_ARCH" in
+  arm64)
+    ARCH_SUFFIX="arm64"
+    TARGET_ARCHS=(arm64)
+    ;;
+  x86_64|amd64)
+    TARGET_ARCH="x86_64"
+    ARCH_SUFFIX="x86_64"
+    TARGET_ARCHS=(x86_64)
+    ;;
+  universal)
+    ARCH_SUFFIX="universal"
+    TARGET_ARCHS=(arm64 x86_64)
+    ;;
+  *)
+    echo "Unsupported target architecture: $TARGET_ARCH" >&2
+    echo "Supported values: arm64, x86_64, universal" >&2
+    exit 1
+    ;;
+esac
 
 RELEASE_VERSION="$(awk -F'"' '/static let release/ { print $2; exit }' Sources/TungBox/Core/AppMetadata.swift)"
 BUILD_NUMBER="$(awk -F'"' '/static let build/ { print $2; exit }' Sources/TungBox/Core/AppMetadata.swift)"
+WORK_DIR="$(mktemp -d)"
+trap 'rm -rf "$WORK_DIR"' EXIT
+
+binary_supports_arch() {
+  local binary="$1"
+  local expected_arch="$2"
+  local archs
+
+  archs="$(lipo -archs "$binary" 2>/dev/null || true)"
+  [[ -n "$archs" ]] && grep -qw "$expected_arch" <<<"$archs"
+}
+
+binary_supports_target() {
+  local binary="$1"
+  local arch
+
+  for arch in "${TARGET_ARCHS[@]}"; do
+    if ! binary_supports_arch "$binary" "$arch"; then
+      return 1
+    fi
+  done
+}
+
+go_arch_for() {
+  local target_arch="$1"
+
+  case "$target_arch" in
+    arm64) echo "arm64" ;;
+    x86_64) echo "amd64" ;;
+    *)
+      echo "Unsupported Go target architecture: $target_arch" >&2
+      return 1
+      ;;
+  esac
+}
 
 clear_finder_info() {
   command -v xattr >/dev/null 2>&1 || return 0
@@ -72,16 +129,27 @@ sign_app() {
 }
 
 build_core() {
+  local target_arch="$1"
+  local go_arch
+  go_arch="$(go_arch_for "$target_arch")"
+
   if [[ -n "${TUNGBOX_CORE_PATH:-}" && -x "$TUNGBOX_CORE_PATH" ]]; then
+    if ! binary_supports_arch "$TUNGBOX_CORE_PATH" "$target_arch"; then
+      echo "Provided TUNGBOX_CORE_PATH does not contain architecture: $target_arch" >&2
+      return 1
+    fi
     printf '%s\n' "$TUNGBOX_CORE_PATH"
     return 0
   fi
 
   local patched_core="$ROOT_DIR/.build/patched-core/sing-box"
   if [[ -x "$patched_core" ]]; then
-    echo "Using local patched sing-box Core: $patched_core" >&2
-    printf '%s\n' "$patched_core"
-    return 0
+    if binary_supports_arch "$patched_core" "$target_arch"; then
+      echo "Using local patched sing-box Core: $patched_core" >&2
+      printf '%s\n' "$patched_core"
+      return 0
+    fi
+    echo "Skipping local patched sing-box Core because it does not contain architecture: $target_arch" >&2
   fi
 
   if ! command -v go >/dev/null 2>&1; then
@@ -91,6 +159,8 @@ build_core() {
 
   local gopath
   gopath="$(go env GOPATH)"
+  local host_goarch
+  host_goarch="$(go env GOARCH)"
 
   # Resolve latest sing-box version for version injection
   local core_version
@@ -103,13 +173,24 @@ build_core() {
 
   local tags="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale"
   local ldflags="-X 'github.com/sagernet/sing-box/constant.Version=${core_version}' -s -w -buildid="
-  echo "Building stripped sing-box core (tags: ${tags}, version: ${core_version})..." >&2
-  env CGO_ENABLED=0 go install -ldflags="$ldflags" -tags "$tags" \
-    github.com/sagernet/sing-box/cmd/sing-box@latest
+  local output_dir="$ROOT_DIR/.build/core/${target_arch}"
+  local binary="$output_dir/sing-box"
+  local installed_binary="$gopath/bin/sing-box"
+  if [[ "$go_arch" != "$host_goarch" ]]; then
+    installed_binary="$gopath/bin/darwin_${go_arch}/sing-box"
+  fi
+  mkdir -p "$output_dir"
 
-  local binary="$gopath/bin/sing-box"
+  echo "Building stripped sing-box core for ${target_arch} (tags: ${tags}, version: ${core_version})..." >&2
+  env CGO_ENABLED=0 GOOS=darwin GOARCH="$go_arch" go install \
+    -trimpath -ldflags="$ldflags" -tags "$tags" github.com/sagernet/sing-box/cmd/sing-box@latest
 
-  if [[ -x "$binary" ]]; then
+  if [[ -x "$installed_binary" ]]; then
+    cp "$installed_binary" "$binary"
+    chmod +x "$binary"
+  fi
+
+  if [[ -x "$binary" ]] && binary_supports_arch "$binary" "$target_arch"; then
     printf '%s\n' "$binary"
     return 0
   fi
@@ -146,30 +227,88 @@ generate_app_icon() {
   return 1
 }
 
-echo "Building ${PRODUCT} ${RELEASE_VERSION}(${BUILD_NUMBER})..."
-swift build -c release --product "$PRODUCT"
-BIN_DIR="$(swift build -c release --show-bin-path)"
-BINARY_PATH="$BIN_DIR/$PRODUCT"
-RESOURCE_BUNDLE="$BIN_DIR/${PRODUCT}_${PRODUCT}.bundle"
+build_app_binary() {
+  local target_arch="$1"
+
+  echo "Building ${PRODUCT} ${RELEASE_VERSION}(${BUILD_NUMBER}) for ${target_arch}..."
+  swift build -c release --arch "$target_arch" --product "$PRODUCT"
+  LAST_BIN_DIR="$(swift build -c release --arch "$target_arch" --show-bin-path)"
+  LAST_BINARY_PATH="$LAST_BIN_DIR/$PRODUCT"
+  LAST_RESOURCE_BUNDLE="$LAST_BIN_DIR/${PRODUCT}_${PRODUCT}.bundle"
+
+  if ! binary_supports_arch "$LAST_BINARY_PATH" "$target_arch"; then
+    echo "Built app binary does not contain architecture: $target_arch" >&2
+    exit 1
+  fi
+}
+
+prepare_app_binary() {
+  local resource_bundle_source=""
+
+  if [[ "$TARGET_ARCH" == "universal" ]]; then
+    local arm_binary="$WORK_DIR/${PRODUCT}-arm64"
+    local x86_binary="$WORK_DIR/${PRODUCT}-x86_64"
+    local universal_binary="$WORK_DIR/${PRODUCT}-universal"
+
+    build_app_binary arm64
+    cp "$LAST_BINARY_PATH" "$arm_binary"
+    resource_bundle_source="$LAST_RESOURCE_BUNDLE"
+
+    build_app_binary x86_64
+    cp "$LAST_BINARY_PATH" "$x86_binary"
+
+    lipo -create -output "$universal_binary" "$arm_binary" "$x86_binary"
+    cp "$universal_binary" "$MACOS_DIR/$PRODUCT"
+  else
+    build_app_binary "$TARGET_ARCH"
+    resource_bundle_source="$LAST_RESOURCE_BUNDLE"
+    cp "$LAST_BINARY_PATH" "$MACOS_DIR/$PRODUCT"
+  fi
+
+  chmod +x "$MACOS_DIR/$PRODUCT"
+
+  if ! binary_supports_target "$MACOS_DIR/$PRODUCT"; then
+    echo "Built app binary does not contain expected architectures: ${TARGET_ARCHS[*]}" >&2
+    exit 1
+  fi
+
+  if [[ -d "$resource_bundle_source" ]]; then
+    cp -R "$resource_bundle_source" "$RESOURCES_DIR/"
+  fi
+}
+
+prepare_core() {
+  if [[ "$TARGET_ARCH" == "universal" ]]; then
+    local arm_core
+    local x86_core
+    local universal_core="$WORK_DIR/sing-box-universal"
+
+    arm_core="$(build_core arm64)"
+    x86_core="$(build_core x86_64)"
+    lipo -create -output "$universal_core" "$arm_core" "$x86_core"
+    cp "$universal_core" "$CORE_DIR/sing-box"
+  else
+    local core_path
+    core_path="$(build_core "$TARGET_ARCH")"
+    cp "$core_path" "$CORE_DIR/sing-box"
+    echo "Bundled sing-box Core: $core_path"
+  fi
+
+  chmod +x "$CORE_DIR/sing-box"
+
+  if ! binary_supports_target "$CORE_DIR/sing-box"; then
+    echo "Bundled sing-box Core does not contain expected architectures: ${TARGET_ARCHS[*]}" >&2
+    exit 1
+  fi
+
+  echo "Bundled sing-box Core: $CORE_DIR/sing-box"
+}
 
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR" "$CORE_DIR"
 
-cp "$BINARY_PATH" "$MACOS_DIR/$PRODUCT"
-chmod +x "$MACOS_DIR/$PRODUCT"
-
-if [[ -d "$RESOURCE_BUNDLE" ]]; then
-  cp -R "$RESOURCE_BUNDLE" "$RESOURCES_DIR/"
-fi
-
-if CORE_PATH="$(build_core)"; then
-  cp "$CORE_PATH" "$CORE_DIR/sing-box"
-  chmod +x "$CORE_DIR/sing-box"
-  echo "Bundled sing-box Core: $CORE_PATH"
-else
-  echo "Missing sing-box Core. Set TUNGBOX_CORE_PATH to a pre-built binary, or install Go toolchain." >&2
-  exit 1
-fi
+prepare_app_binary
+prepare_core
 
 generate_app_icon
 
@@ -211,7 +350,7 @@ clear_finder_info
 sign_app
 verify_signature
 
-DMG_NAME="${PRODUCT}-${RELEASE_VERSION}-macos-arm64"
+DMG_NAME="${PRODUCT}-${RELEASE_VERSION}-macos-${ARCH_SUFFIX}"
 DMG_PATH="$ROOT_DIR/dist/${DMG_NAME}.dmg"
 
 echo "Creating DMG: ${DMG_NAME}.dmg..."

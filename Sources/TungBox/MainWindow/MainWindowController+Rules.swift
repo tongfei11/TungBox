@@ -63,10 +63,10 @@ extension MainWindowController {
         ruleToolbar.translatesAutoresizingMaskIntoConstraints = false
         ruleSearchField.widthAnchor.constraint(equalToConstant: 320).isActive = true
 
-        let scroll = NSScrollView()
+        let scroll = MD3ScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.hasVerticalScroller = true
-        scroll.drawsBackground = false
+        scroll.applyThinOverlayScroller()
         scroll.documentView = rulesTable
 
         rulesTable.backgroundColor = .clear
@@ -213,6 +213,7 @@ extension MainWindowController {
 
     @objc func refreshRulesClicked() {
         refreshRulesFromEditor()
+        showToast("规则列表已刷新", style: .info)
     }
 
     /// Per-rule-type field label, input placeholder, a short description shown under
@@ -602,6 +603,7 @@ extension MainWindowController {
                 }
                 editingRuleID = nil
                 appendLog("[规则] 已更新自定义规则\n")
+                showToast("已更新自定义规则", style: .success)
             } else {
                 // Add new rule
                 let newRule = CustomRule(id: UUID(), subscriptionID: subscription.id, type: type, value: value, strategy: strategy, note: note, enabled: true, createdAt: Date())
@@ -619,6 +621,7 @@ extension MainWindowController {
                     throw error
                 }
                 appendLog("[规则] 已添加 \(type) \(value) -> \(strategy)\(note.isEmpty ? "" : "，备注：\(note)")\n")
+                showToast("已添加自定义规则", style: .success)
             }
 
             customRuleValueField.stringValue = ""
@@ -661,6 +664,7 @@ extension MainWindowController {
             }
             appendLog("[规则] 已删除选中的自定义规则\n")
             refreshRulesFromEditor()
+            showToast("已删除自定义规则", style: .success)
         } catch {
             showError(error)
         }
@@ -742,22 +746,22 @@ extension MainWindowController {
 
     @objc func refreshRuleSetsManuallyClicked() {
         let sets = currentRouteRuleSets()
-        guard !sets.isEmpty else { showToast("当前配置没有规则集"); return }
+        guard !sets.isEmpty else { showToast("当前配置没有规则集", style: .warning); return }
         ruleSetDownloads.removeAll()
         appendLog("[规则集] 手动刷新 \(sets.count) 个规则集\n")
         refreshRuleSetCachesIfNeeded()
-        showToast("正在刷新 \(sets.count) 个规则集")
+        showToast("正在刷新 \(sets.count) 个规则集", style: .info)
     }
 
     @objc func clearRuleSetCacheClicked() {
         let dir = store.ruleSetsURL
-        guard FileManager.default.fileExists(atPath: dir.path) else { showToast("缓存为空"); return }
+        guard FileManager.default.fileExists(atPath: dir.path) else { showToast("缓存为空", style: .info); return }
         let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
         var n = 0
         for f in files { try? FileManager.default.removeItem(at: f); n += 1 }
         ruleSetDownloads.removeAll()
         appendLog("[规则集] 已清空缓存（\(n) 个文件）\n")
-        showToast("已清空 \(n) 个规则集缓存")
+        showToast("已清空 \(n) 个规则集缓存", style: .success)
     }
 
     func filteredRuleRows() -> [RuleInfo] {

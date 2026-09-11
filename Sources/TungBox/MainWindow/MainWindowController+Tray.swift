@@ -25,22 +25,15 @@ extension MainWindowController {
         menu.addItem(NSMenuItem(title: "\(TungBoxVersion.display) \(status)", action: nil, keyEquivalent: ""))
         menu.addItem(.separator())
 
-        let proxyService = NSMenuItem(title: "代理服务", action: #selector(toggleProxyServiceFromTray), keyEquivalent: "")
-        proxyService.target = self
-        proxyService.state = isProxyServiceActiveOrRequested() ? .on : .off
-        menu.addItem(proxyService)
+        let systemProxyItem = NSMenuItem(title: "系统代理", action: #selector(toggleProxyServiceFromTray), keyEquivalent: "")
+        systemProxyItem.target = self
+        systemProxyItem.state = isSystemProxyEnabled ? .on : .off
+        menu.addItem(systemProxyItem)
 
-        let captureMenu = NSMenu()
-        for (title, useTun) in [("系统代理", false), ("TUN 模式", true)] {
-            let item = NSMenuItem(title: title, action: #selector(captureModeFromTray(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = useTun
-            item.state = isTunEnabled == useTun ? .on : .off
-            captureMenu.addItem(item)
-        }
-        let captureRoot = NSMenuItem(title: "接管方式", action: nil, keyEquivalent: "")
-        captureRoot.submenu = captureMenu
-        menu.addItem(captureRoot)
+        let tunItem = NSMenuItem(title: "TUN 模式", action: #selector(toggleTunFromTray), keyEquivalent: "")
+        tunItem.target = self
+        tunItem.state = isTunEnabled ? .on : .off
+        menu.addItem(tunItem)
 
         menu.addItem(.separator())
 
@@ -152,25 +145,7 @@ extension MainWindowController {
         ])
         
         if let delayStr = delayStr {
-            let delayColor: NSColor
-            let cleaned = delayStr.replacingOccurrences(of: " ms", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-            let isDark = MD3.isDark
-            if let ms = Int(cleaned) {
-                if ms < 400 {
-                    delayColor = MD3.onSuccessContainer
-                } else if ms < 800 {
-                    delayColor = isDark ? NSColor(calibratedRed: 0.99, green: 0.80, blue: 0.40, alpha: 1) : NSColor(calibratedRed: 0.60, green: 0.40, blue: 0.00, alpha: 1)
-                } else {
-                    delayColor = isDark ? NSColor(calibratedRed: 0.95, green: 0.70, blue: 0.70, alpha: 1) : NSColor(calibratedRed: 0.70, green: 0.05, blue: 0.05, alpha: 1)
-                }
-            } else if cleaned == "失败" || cleaned == "超时" {
-                delayColor = isDark ? NSColor(calibratedRed: 0.95, green: 0.70, blue: 0.70, alpha: 1) : NSColor(calibratedRed: 0.70, green: 0.05, blue: 0.05, alpha: 1)
-            } else if cleaned == "测试中" {
-                delayColor = MD3.onPrimaryContainer
-            } else {
-                delayColor = MD3.onSurfaceVariant
-            }
-            
+            let delayColor = MD3.latencyTextColor(delayStr)
             let suffix = " (\(delayStr))"
             let suffixAttr = NSAttributedString(string: suffix, attributes: [
                 .font: font,
@@ -292,21 +267,17 @@ extension MainWindowController {
     }
 
     @objc func toggleProxyServiceFromTray() {
-        // Independent system-proxy toggle (does not touch TUN).
         isSystemProxyEnabled.toggle()
         UserDefaults.standard.set(isSystemProxyEnabled, forKey: "systemProxyEnabled")
-        if isSystemProxyEnabled { isProxyServiceTransitioning = true }
+        beginFeatureTransition(systemProxy: isSystemProxyEnabled ? .starting : .stopping)
         syncProxyPreferenceControls()
         refreshTrayIcon()
         appendLog("[托盘] 系统代理已\(isSystemProxyEnabled ? "开启" : "关闭")\n")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-            self?.reconcileRuntime(reason: "托盘系统代理")
-        }
+        reconcileRuntime(reason: "托盘系统代理")
     }
 
-    @objc func captureModeFromTray(_ sender: NSMenuItem) {
-        guard let useTun = sender.representedObject as? Bool else { return }
-        setCaptureMode(tunEnabled: useTun, source: "托盘")
+    @objc func toggleTunFromTray() {
+        setCaptureMode(tunEnabled: !isTunEnabled, source: "托盘")
     }
 
     @objc func showConsoleFromTray() {

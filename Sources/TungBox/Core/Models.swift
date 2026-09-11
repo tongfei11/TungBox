@@ -14,6 +14,12 @@ struct Subscription: Codable, Equatable {
     var profileID: UUID?
     var updatedAt: Date?
     var lastError: String?
+    /// 标准 `subscription-userinfo` 响应头里的流量信息（字节数）。
+    var upload: Int64?
+    var download: Int64?
+    var total: Int64?
+    /// 套餐到期时间（来自 expire= unix 时间戳）。
+    var expiresAt: Date?
 }
 
 struct NodeInfo {
@@ -151,9 +157,39 @@ enum TungBoxConfig {
     static let customRuleSetWikiURL = "https://github.com/tongfei11/TungBox/wiki/自定义规则集"
 
     static let urlTestURL = "https://www.gstatic.com/generate_204"
+
+    // urltest 组的自动测速参数。订阅刷新时把这两个值塞进生成的 outbound：
+    // - interval：多久重新测一次（分钟）。sing-box 收的是 duration 字符串 "3m"。
+    // - tolerance：当前节点比最快节点慢多少毫秒之内不切换（避免来回抖动）。
+    // 改动只影响下次订阅刷新生成的配置，旧 profile 不动。
+    static let urlTestIntervalDefaultMinutes = 3
+    static let urlTestToleranceDefaultMs = 50
+    static let urlTestIntervalOptionsMinutes: [Int] = [1, 3, 5, 10, 30]
+    static let urlTestToleranceOptionsMs: [Int] = [0, 30, 50, 100, 150, 300]
+
+    static var urlTestIntervalMinutes: Int {
+        let stored = UserDefaults.standard.integer(forKey: "urlTestIntervalMinutes")
+        return stored > 0 ? stored : urlTestIntervalDefaultMinutes
+    }
+
+    static var urlTestIntervalString: String {
+        "\(urlTestIntervalMinutes)m"
+    }
+
+    static var urlTestTolerance: Int {
+        // object(forKey:) so 0 is a valid stored value (默认 50，但用户选 0 也应保留)
+        if let stored = UserDefaults.standard.object(forKey: "urlTestToleranceMs") as? Int {
+            return stored
+        }
+        return urlTestToleranceDefaultMs
+    }
+
     static let clashAPIListen = "127.0.0.1:9090"
     static let clashAPIURL = "http://127.0.0.1:9090"
     static let mixedPort = 7890
+    // The TUN daemon runs as an independent process; it keeps a clash_api for mode
+    // routing but on a dedicated port so it never collides with the user proxy's 9090.
+    static let tunDaemonClashPort = 9091
 
     static func ruleSetURL(for tag: String) -> String {
         let stored = UserDefaults.standard.string(forKey: ruleSetURLKey(tag))?.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -75,10 +75,10 @@ extension MainWindowController {
         // Store level buttons for later querying
         logLevelButtons = levelButtons
 
-        let logScroll = NSScrollView()
+        let logScroll = MD3ScrollView()
         logScroll.translatesAutoresizingMaskIntoConstraints = false
         logScroll.hasVerticalScroller = true
-        logScroll.drawsBackground = false
+        logScroll.applyThinOverlayScroller()
         logScroll.documentView = logs
 
         logs.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
@@ -191,29 +191,55 @@ extension MainWindowController {
         logLineCount = 0
         logs.string = ""
         logCountLabel.stringValue = "显示 0 条"
+        // Also wipe the on-disk log so "清空" actually frees space — otherwise the
+        // file keeps growing and the user has no way to truncate it from the UI.
+        try? FileManager.default.removeItem(at: store.appLogURL)
+        try? FileManager.default.removeItem(at: store.appLogURL.appendingPathExtension("old"))
         refreshHomeFeatureStatus()
+        showToast("日志已清空", style: .info)
     }
 
     @objc func copyLogsClicked() {
         let text = logs.string
         guard !text.isEmpty else {
-            showToast("日志为空")
+            showToast("日志为空", style: .warning)
             return
         }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
-        showToast("日志已复制到剪贴板（\(text.components(separatedBy: .newlines).filter { !$0.isEmpty }.count) 行）")
+        showToast("日志已复制到剪贴板（\(text.components(separatedBy: .newlines).filter { !$0.isEmpty }.count) 行）", style: .success)
     }
 
     func appendLog(_ text: String) {
         logBuffer += text
+        trimLogBufferIfNeeded()
         logLineCount += text.components(separatedBy: .newlines).filter { !$0.isEmpty }.count
         logStatusLabel.stringValue = "日志：\(logLineCount) 行"
         appendPersistentLog(text)
         scheduleLogRefresh()
     }
 
+    /// Keep `logBuffer` from growing unbounded over long sessions. We bound the
+    /// raw character count (cheap) rather than line count (would require splitting
+    /// the whole string on every append). When over the cap, drop the oldest half
+    /// at the nearest newline so what's left is still well-formed lines.
+    private func trimLogBufferIfNeeded() {
+        let maxChars = 800_000   // ~ a few MB of UTF-8; UI filter still snappy
+        let trimTo  = 400_000
+        guard logBuffer.count > maxChars else { return }
+        let dropCount = logBuffer.count - trimTo
+        let dropIndex = logBuffer.index(logBuffer.startIndex, offsetBy: dropCount)
+        if let newlineRange = logBuffer.range(of: "\n", range: dropIndex..<logBuffer.endIndex) {
+            logBuffer = String(logBuffer[newlineRange.upperBound...])
+        } else {
+            logBuffer = String(logBuffer[dropIndex...])
+        }
+    }
+
     func appendPersistentLog(_ text: String) {
+        // Rotate FIRST so a single multi-MB burst can't blow past the cap before
+        // we ever look. 2 MiB threshold → at most ~4 MiB on disk (current + .old).
+        Store.rotateIfNeeded(at: store.appLogURL, maxBytes: 2 * 1_048_576)
         guard let data = text.data(using: .utf8) else { return }
         if !FileManager.default.fileExists(atPath: store.appLogURL.path) {
             FileManager.default.createFile(atPath: store.appLogURL.path, contents: nil)

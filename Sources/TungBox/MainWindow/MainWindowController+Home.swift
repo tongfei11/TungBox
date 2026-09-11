@@ -28,11 +28,13 @@ extension MainWindowController {
 
         statusChip.translatesAutoresizingMaskIntoConstraints = false
         statusChip.heightAnchor.constraint(equalToConstant: 32).isActive = true
-        statusChip.widthAnchor.constraint(equalToConstant: 96).isActive = true
+        // Size to content (with a sensible minimum) so transition labels like
+        // "启动中" / "关闭中" are never clipped.
+        statusChip.widthAnchor.constraint(greaterThanOrEqualToConstant: 96).isActive = true
 
         tunStatusChip.translatesAutoresizingMaskIntoConstraints = false
         tunStatusChip.heightAnchor.constraint(equalToConstant: 32).isActive = true
-        tunStatusChip.widthAnchor.constraint(equalToConstant: 96).isActive = true
+        tunStatusChip.widthAnchor.constraint(greaterThanOrEqualToConstant: 96).isActive = true
 
         serviceSwitch.target = self
         serviceSwitch.action = #selector(switchToggled(_:))
@@ -87,24 +89,60 @@ extension MainWindowController {
         currentNodeNameLabel.lineBreakMode = .byTruncatingTail
         currentNodeNameLabel.maximumNumberOfLines = 1
         currentNodeNameLabel.translatesAutoresizingMaskIntoConstraints = false
-        
+
+        // 自动选择标签：放在节点名右边的小绿色 chip。手动选节点时整体隐藏。
+        currentNodeAutoBadge.font = .systemFont(ofSize: 11, weight: .semibold)
+        currentNodeAutoBadge.textColor = MD3.onSuccessContainer
+        currentNodeAutoBadge.backgroundColor = MD3.successContainer
+        currentNodeAutoBadge.drawsBackground = true
+        currentNodeAutoBadge.isBezeled = false
+        currentNodeAutoBadge.alignment = .center
+        currentNodeAutoBadge.wantsLayer = true
+        currentNodeAutoBadge.layer?.cornerRadius = 8
+        currentNodeAutoBadge.layer?.masksToBounds = true
+        currentNodeAutoBadge.translatesAutoresizingMaskIntoConstraints = false
+        currentNodeAutoBadge.isHidden = true   // 默认隐藏
+        currentNodeAutoBadge.setContentHuggingPriority(.required, for: .horizontal)
+        currentNodeAutoBadge.setContentCompressionResistancePriority(.required, for: .horizontal)
+        registerThemeObserver { [weak self] in
+            guard let self else { return }
+            self.currentNodeAutoBadge.textColor = MD3.onSuccessContainer
+            self.currentNodeAutoBadge.backgroundColor = MD3.successContainer
+        }
+
         currentNodeDelayLabel.font = .systemFont(ofSize: 22, weight: .bold)
         currentNodeDelayLabel.textColor = MD3.success
+        currentNodeDelayLabel.lineBreakMode = .byClipping
+        currentNodeDelayLabel.maximumNumberOfLines = 1
         currentNodeDelayLabel.translatesAutoresizingMaskIntoConstraints = false
-        
+        // 延迟数字绝不被横向压缩/截断（之前 "141 ms" 被裁成 "141 n"）。
+        currentNodeDelayLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        currentNodeDelayLabel.setContentHuggingPriority(.required, for: .horizontal)
+
         let nodeLabelTitle = NSTextField(labelWithString: "当前节点")
         nodeLabelTitle.font = .systemFont(ofSize: 12, weight: .medium)
         nodeLabelTitle.textColor = MD3.onSurfaceVariant
-        
+
         let delayLabelTitle = NSTextField(labelWithString: "节点延迟")
         delayLabelTitle.font = .systemFont(ofSize: 12, weight: .medium)
         delayLabelTitle.textColor = MD3.onSurfaceVariant
-        
-        let nodeCol = NSStackView(views: [nodeLabelTitle, currentNodeNameLabel])
+
+        // 标题行：「当前节点」+ (自动) 绿色 chip。手动选节点时 chip 隐藏。
+        let titleRow = NSStackView(views: [nodeLabelTitle, currentNodeAutoBadge])
+        titleRow.orientation = .horizontal
+        titleRow.alignment = .centerY
+        titleRow.spacing = 6
+        titleRow.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            currentNodeAutoBadge.heightAnchor.constraint(equalToConstant: 18),
+            currentNodeAutoBadge.widthAnchor.constraint(greaterThanOrEqualToConstant: 36)
+        ])
+
+        let nodeCol = NSStackView(views: [titleRow, currentNodeNameLabel])
         nodeCol.orientation = .vertical
         nodeCol.alignment = .leading
         nodeCol.spacing = 4
-        
+
         let delayCol = NSStackView(views: [delayLabelTitle, currentNodeDelayLabel])
         delayCol.orientation = .vertical
         delayCol.alignment = .leading
@@ -167,7 +205,7 @@ extension MainWindowController {
         registerThemeObserver { [weak self] in
             guard let self = self else { return }
             self.currentNodeNameLabel.textColor = MD3.primary
-            self.currentNodeDelayLabel.textColor = MD3.success
+            self.currentNodeDelayLabel.textColor = MD3.latencyTextColor(self.currentNodeDelayLabel.stringValue)
             self.trafficStatsValueLabel.textColor = MD3.primary
             self.trafficStatsDetailLabel.textColor = MD3.onSurfaceVariant
             self.uploadValueLabel.textColor = MD3.primary
@@ -447,8 +485,15 @@ extension MainWindowController {
         }
         runningStatsMissCount = 0
 
+        // TUN 守护进程是独立 sing-box 进程，clash_api 在 9091。要算 TUN 流量
+        // 必须把那个端口也拉上，否则 TUN-only 时 delta 永远是 0、流量统计为 0。
+        let extraPorts: [Int] = isTunRuntimeRunning() ? [TungBoxConfig.tunDaemonClashPort] : []
+        let allPorts: [Int] = [9090] + extraPorts
+        let prevTotals = prevTrafficTotals
+        let elapsedSinceLast = max(Date().timeIntervalSince(connectionRefreshTime), 0.5)
         Task {
-            let apiConnections = try? await ClashAPI.connections()
+            let apiConnections = try? await ClashAPI.connectionsFromAll(extraPorts: extraPorts)
+            let totals = (try? await ClashAPI.trafficTotals(ports: allPorts)) ?? [:]
             let proxiesObj = (try? await ClashAPI.proxies())
             
             let rssValue = await withCheckedContinuation { (continuation: CheckedContinuation<String, Never>) in
@@ -483,23 +528,42 @@ extension MainWindowController {
             await MainActor.run { [weak self] in
                 guard let self = self else { return }
                 guard self.isProxyRuntimeRunning() else { return }
-                
+
                 if let apiConnections {
                     self.applyConnections(apiConnections, detail: "实时刷新")
                 }
-                
+
+                // 流量累计走 totals 路径（包含 UDP/IPv6/已关闭短连接），同时算出
+                // 这次 ↔ 上次的 delta 用作实时速率显示。
+                if !totals.isEmpty {
+                    var deltaUp: Int64 = 0, deltaDown: Int64 = 0
+                    for (port, curr) in totals {
+                        if let p = prevTotals[port], curr.upload >= p.upload, curr.download >= p.download {
+                            deltaUp += curr.upload - p.upload
+                            deltaDown += curr.download - p.download
+                        }
+                    }
+                    self.accumulateTrafficFromTotals(totals)
+                    if !prevTotals.isEmpty {
+                        let upSpeed = Int(Double(deltaUp) / elapsedSinceLast)
+                        let downSpeed = Int(Double(deltaDown) / elapsedSinceLast)
+                        self.updateRealtimeSpeed(uploadSpeed: upSpeed, downloadSpeed: downSpeed)
+                    }
+                }
+
                 // Sync delays and active node from Clash API
                 self.lastProxiesObj = proxiesObj
                 self.syncNodeDelaysFromClashAPI(proxiesObj: proxiesObj)
                 let activeNodeInfo = self.resolveActiveOutbound(proxiesObj: proxiesObj)
-                let formattedNode = activeNodeInfo.isAuto ? "\(activeNodeInfo.name) (自动)" : activeNodeInfo.name
-                self.currentNodeNameLabel.stringValue = formattedNode
+                self.currentNodeNameLabel.stringValue = activeNodeInfo.name.isEmpty ? "（选择中…）" : activeNodeInfo.name
+                self.currentNodeAutoBadge.isHidden = !activeNodeInfo.isAuto
                 let activeDelay = self.nodes.first(where: { $0.tag == activeNodeInfo.name })?.delay ?? "—"
                 self.currentNodeDelayLabel.stringValue = activeDelay == "未测试" ? "—" : activeDelay
-                
+                self.currentNodeDelayLabel.textColor = MD3.latencyTextColor(self.currentNodeDelayLabel.stringValue)
+
                 // 1. Update connections card
                 self.updateConnectionsCard(value: "\(connectionCount)", detail: "内存占用: \(rssValue)")
-                
+
                 if apiConnections == nil {
                     self.uploadValueLabel.stringValue = "—"
                     self.downloadValueLabel.stringValue = "—"
@@ -551,8 +615,10 @@ extension MainWindowController {
     @objc func switchToggled(_ sender: MD3Switch) {
         isSystemProxyEnabled = sender.isOn
         UserDefaults.standard.set(isSystemProxyEnabled, forKey: "systemProxyEnabled")
-        if sender.isOn { isProxyServiceTransitioning = true }
+        beginFeatureTransition(systemProxy: sender.isOn ? .starting : .stopping)
         syncProxyPreferenceControls()
+        refreshStatus()   // show 启动中/关闭中 + spinner right away
+        showToast(sender.isOn ? "系统代理已开启" : "系统代理已关闭", style: sender.isOn ? .success : .info)
         reconcileRuntime(reason: sender.isOn ? "开启系统代理" : "关闭系统代理")
     }
 
@@ -583,9 +649,11 @@ extension MainWindowController {
         }
         isTunEnabled = tunEnabled
         UserDefaults.standard.set(isTunEnabled, forKey: "tunEnabled")
-        if tunEnabled { isProxyServiceTransitioning = true }
+        beginFeatureTransition(tun: tunEnabled ? .starting : .stopping)
         syncProxyPreferenceControls()
+        refreshStatus()   // show 启动中/关闭中 + spinner right away
         appendLog("[\(source)] TUN 模式已\(tunEnabled ? "开启" : "关闭")\n")
+        showToast(tunEnabled ? "TUN 模式已开启" : "TUN 模式已关闭", style: tunEnabled ? .success : .info)
         reconcileRuntime(reason: tunEnabled ? "开启 TUN" : "关闭 TUN")
     }
 
@@ -593,6 +661,7 @@ extension MainWindowController {
         do {
             try saveCurrent()
             appendLog("[TungBox] 已保存\n")
+            showToast("配置已保存", style: .success)
         } catch {
             showError(error)
         }

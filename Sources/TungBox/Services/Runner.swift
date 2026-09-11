@@ -1,4 +1,5 @@
 import Foundation
+import Network
 
 final class Runner: @unchecked Sendable {
     private var process: Process?
@@ -177,6 +178,10 @@ final class Runner: @unchecked Sendable {
 
     private func startElevated(binary: String, config: URL) throws {
         let actualConfig = preprocessConfig(at: config, allowTun: true)
+        // Cap sing-box.log before the daemon starts appending — the shell `>>`
+        // redirect below has no built-in rotation, so without this the file grows
+        // forever across runs.
+        Store.rotateIfNeeded(at: store.logURL, maxBytes: 1_048_576)
         let command = [
             "cd \(shellQuote(store.baseURL.path))",
             "nohup env ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER=true \(shellQuote(binary)) run -c \(shellQuote(actualConfig.path)) >> \(shellQuote(store.logURL.path)) 2>&1 & echo $!"
@@ -219,7 +224,18 @@ final class Runner: @unchecked Sendable {
 
     func stop() {
         if let process, process.isRunning {
-            process.terminate()
+            let pid = process.processIdentifier
+            process.terminate()  // SIGTERM
+            // Wait for the process to ACTUALLY exit so its listener (7890/9090) is
+            // released before we return. Without this the dying instance lingers and
+            // a quick TUN<->proxy switch races it for the port (bind: address already
+            // in use, which SO_REUSEADDR can't get past for a live listener). SIGKILL
+            // if it doesn't go quickly — sing-box state lives in cache.db, no graceful
+            // drain is needed just to switch modes.
+            if !waitForProcessExit(process, timeout: 0.6) {
+                Darwin.kill(pid, SIGKILL)
+                _ = waitForProcessExit(process, timeout: 1.5)
+            }
             self.process = nil
             outputPipe?.fileHandleForReading.readabilityHandler = nil
             outputPipe = nil
@@ -232,19 +248,12 @@ final class Runner: @unchecked Sendable {
         elevatedPID = nil
     }
 
-    /// Stop the current process and wait briefly before a replacement is started.
-    /// Process.terminate() is asynchronous; starting immediately can leave the
-    /// old process holding ports and cache locks, causing the new config to be
-    /// silently bypassed by the still-running core.
-    func stopAndWait(timeout: TimeInterval = 3.0) {
-        stop()
+    private func waitForProcessExit(_ process: Process, timeout: TimeInterval) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
-        while isRunning && Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.05)
+        while process.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.02)
         }
-        if isRunning {
-            reapStrayUserProcesses()
-        }
+        return !process.isRunning
     }
 
     func stopStaleUserProcesses() {
@@ -273,11 +282,68 @@ final class Runner: @unchecked Sendable {
         }
     }
 
+    /// 直接 TCP 拨号测节点 server:port 的延迟（毫秒）。
+    ///
+    /// 关代理时这是最快的"可达性测速"方式 —— 不启动 sing-box，没有配置初始化
+    /// 开销，几十 ms 就完成。竞品（NekoBox 等）关 VPN 时也是这么测的。
+    ///
+    /// 局限：UDP-only 协议（hy2 / tuic）的 server 端口大多不接 TCP，
+    /// 这些节点会"超时"。调用方在那种情况下应回退到 sing-box fetch。
+    nonisolated static func tcpDialDelayMs(serverHostPort: String, timeout: TimeInterval = 3.0) async -> Int? {
+        // serverHostPort 形如 "host:port"，host 可能是 IPv6 字面量（带 []）
+        guard let (host, port) = splitHostPort(serverHostPort) else { return nil }
+        guard let nwPort = NWEndpoint.Port(rawValue: port) else { return nil }
+        return await withCheckedContinuation { (cont: CheckedContinuation<Int?, Never>) in
+            let conn = NWConnection(host: NWEndpoint.Host(host), port: nwPort, using: .tcp)
+            let start = Date()
+            // 防止 stateUpdateHandler 和 timeout 同时 resume continuation。
+            let resumed = LockedValue<Bool>(false)
+            @Sendable func finish(_ ms: Int?) {
+                if resumed.get() { return }
+                resumed.set(true)
+                conn.cancel()
+                cont.resume(returning: ms)
+            }
+            conn.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    finish(Int(Date().timeIntervalSince(start) * 1000))
+                case .failed, .cancelled:
+                    finish(nil)
+                default: break
+                }
+            }
+            conn.start(queue: .global(qos: .userInitiated))
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+                finish(nil)
+            }
+        }
+    }
+
+    private nonisolated static func splitHostPort(_ s: String) -> (host: String, port: UInt16)? {
+        // IPv6 形如 [::1]:443
+        if s.hasPrefix("[") {
+            guard let close = s.firstIndex(of: "]") else { return nil }
+            let host = String(s[s.index(after: s.startIndex)..<close])
+            let rest = s.index(after: close)
+            guard rest < s.endIndex, s[rest] == ":" else { return nil }
+            let portStr = String(s[s.index(after: rest)...])
+            guard let p = UInt16(portStr) else { return nil }
+            return (host, p)
+        }
+        // IPv4 / hostname:port —— 从最后一个冒号切（兼容含端口号）
+        guard let colon = s.lastIndex(of: ":") else { return nil }
+        let host = String(s[..<colon])
+        let portStr = String(s[s.index(after: colon)...])
+        guard !host.isEmpty, let p = UInt16(portStr) else { return nil }
+        return (host, p)
+    }
+
     func urlTest(config: URL, outbound: String, testURL: String) async throws -> String {
         guard let binary = findSingBox() else {
             throw NSError.user("找不到 sing-box。请先安装：brew install sing-box")
         }
-        let actualConfig = preprocessTestConfig(at: config)
+        let actualConfig = preprocessTestConfig(at: config, isolatingOutbound: outbound)
         let start = Date()
         
         let result: (status: Int32, output: String) = try await withCheckedThrowingContinuation { continuation in
@@ -298,7 +364,11 @@ final class Runner: @unchecked Sendable {
         
         if result.status != 0 {
             let message = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-            throw NSError.user(message.isEmpty ? "节点延迟测试超时或失败" : message)
+            // Include the test-config path so a "TLS required" / "initialize outbound"
+            // failure can be inspected against the EXACT JSON sing-box saw at that
+            // moment (race conditions during subscription swap are otherwise opaque).
+            let diag = "（测速配置：\(actualConfig.path)）"
+            throw NSError.user((message.isEmpty ? "节点延迟测试超时或失败" : message) + diag)
         }
         return "\(Int(Date().timeIntervalSince(start) * 1000)) ms"
     }
@@ -362,19 +432,37 @@ final class Runner: @unchecked Sendable {
               var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return url
         }
-        
+
         // Auto-fix any compatibility issues (like network: grpc) on the fly
         let (fixedJson, fixes) = ConfigCompatibilityChecker.autoFix(config: json)
         json = fixedJson
 
-        var inbounds = json["inbounds"] as? [[String: Any]] ?? []
-        let hasTun = inbounds.contains { ($0["type"] as? String) == "tun" }
-        let removeTun = hasTun && getuid() != 0 && !allowTun
-        if !removeTun && fixes.isEmpty { return url }
+        var changed = !fixes.isEmpty
+        let userMode = getuid() != 0 && !allowTun
+        var convertedTun = false
 
-        if removeTun {
+        // The user (non-root) instance must NEVER use the daemon's root-owned
+        // cache.db (/Library/Application Support/TungBox/cache.db) — it can only read
+        // it, so sing-box FATALs with "initialize cache-file: permission denied" and
+        // 7890 never comes up. Drop that path so sing-box falls back to a writable
+        // cache in its own working directory. (A stale TUN config can carry this path
+        // into the user runner during a fast switch; sanitize defensively.)
+        if userMode, var experimental = json["experimental"] as? [String: Any],
+           var cacheFile = experimental["cache_file"] as? [String: Any],
+           (cacheFile["path"] as? String) == TunServiceManager.cachePath {
+            cacheFile.removeValue(forKey: "path")
+            experimental["cache_file"] = cacheFile
+            json["experimental"] = experimental
+            changed = true
+        }
+
+        // Strip any TUN inbound — TUN requires root; the user instance serves a local
+        // mixed proxy instead. Keep an existing local inbound if present.
+        var inbounds = json["inbounds"] as? [[String: Any]] ?? []
+        if userMode, inbounds.contains(where: { ($0["type"] as? String) == "tun" }) {
             inbounds = inbounds.filter { ($0["type"] as? String) != "tun" }
-            if inbounds.isEmpty {
+            let localTypes: Set<String> = ["mixed", "socks", "http"]
+            if !inbounds.contains(where: { localTypes.contains(($0["type"] as? String) ?? "") }) {
                 inbounds.append([
                     "type": "mixed",
                     "tag": "mixed-in",
@@ -383,12 +471,18 @@ final class Runner: @unchecked Sendable {
                 ])
             }
             json["inbounds"] = inbounds
+            changed = true
+            convertedTun = true
+        }
+
+        if !changed {
+            return url
         }
 
         let tempURL = url.deletingLastPathComponent().appendingPathComponent("run_" + url.lastPathComponent)
         if let outData = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys]) {
             guard (try? outData.write(to: tempURL, options: .atomic)) != nil else { return url }
-            if removeTun {
+            if convertedTun {
                 DispatchQueue.main.async { [weak self] in
                     self?.onOutput?("[TungBox] 检测到当前运行非管理员权限，已自动将配置中的 TUN 模式转换为本地混合代理模式运行。\n")
                 }
@@ -398,16 +492,22 @@ final class Runner: @unchecked Sendable {
         return url
     }
 
-    private func preprocessTestConfig(at url: URL) -> URL {
+    /// Build a SINGLE-outbound test config for `outboundTag` so `sing-box tools fetch`
+    /// only initializes that one node — not the full 30+ outbound graph. The previous
+    /// implementation kept ALL outbounds in the test config, so cold-starting the
+    /// fetcher meant loading the entire profile (~700-1500ms overhead). NekoBox feels
+    /// faster because it tests against a running core via clash API; for the cold
+    /// path we make the cold itself cheap.
+    private func preprocessTestConfig(at url: URL, isolatingOutbound outboundTag: String? = nil) -> URL {
         guard let data = try? Data(contentsOf: url),
               var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return url
         }
-        
+
         // Auto-fix any compatibility issues (like network: grpc) on the fly
         let (fixedJson, _) = ConfigCompatibilityChecker.autoFix(config: json)
         json = fixedJson
-        
+
         json.removeValue(forKey: "experimental")
         json.removeValue(forKey: "inbounds")
         
@@ -448,28 +548,48 @@ final class Runner: @unchecked Sendable {
             ]
         }
         
-        // 3. Filter out virtual/test outbounds to prevent background startup storm during testing,
-        // and set domain_resolver for proxy outbounds.
+        // Outbounds. If a single tag is requested, keep ONLY that outbound + direct
+        // (sing-box always needs direct/block). This is the big perf win on the cold
+        // test path — initializing one outbound takes ~30ms vs ~1500ms for 30+.
         if var outbounds = json["outbounds"] as? [[String: Any]] {
-            let virtualTypes: Set<String> = ["direct", "block", "dns", "selector", "urltest", "url-test", "fallback"]
-            // Filter out selectors, urltests, and fallbacks to prevent background testing storm at startup
-            outbounds = outbounds.filter { outbound in
-                guard let type = outbound["type"] as? String else { return false }
-                let typeLower = type.lowercased()
-                return !["selector", "urltest", "url-test", "fallback"].contains(typeLower)
-            }
-            
-            // Inject domain_resolver to use the direct public DNS for all physical proxy outbounds
-            for i in outbounds.indices {
-                if let type = outbounds[i]["type"] as? String,
-                   !virtualTypes.contains(type.lowercased()) {
-                    outbounds[i]["domain_resolver"] = dnsServerTag
+            if let only = outboundTag {
+                var matched: [String: Any]? = nil
+                for o in outbounds where (o["tag"] as? String) == only {
+                    matched = o; break
                 }
+                var kept: [[String: Any]] = []
+                if var m = matched {
+                    m["domain_resolver"] = dnsServerTag
+                    kept.append(m)
+                }
+                kept.append(["type": "direct", "tag": "direct"])
+                json["outbounds"] = kept
+            } else {
+                let virtualTypes: Set<String> = ["direct", "block", "dns", "selector", "urltest", "url-test", "fallback"]
+                outbounds = outbounds.filter { outbound in
+                    guard let type = outbound["type"] as? String else { return false }
+                    let typeLower = type.lowercased()
+                    return !["selector", "urltest", "url-test", "fallback"].contains(typeLower)
+                }
+                for i in outbounds.indices {
+                    if let type = outbounds[i]["type"] as? String, !virtualTypes.contains(type.lowercased()) {
+                        outbounds[i]["domain_resolver"] = dnsServerTag
+                    }
+                }
+                json["outbounds"] = outbounds
             }
-            json["outbounds"] = outbounds
         }
         
-        let tempURL = url.deletingLastPathComponent().appendingPathComponent("test_" + url.lastPathComponent)
+        // Suffix the file by tag so concurrent tag tests never overwrite each other.
+        let suffix: String = {
+            guard let t = outboundTag, !t.isEmpty else { return "" }
+            let safe = t.unicodeScalars
+                .map { CharacterSet.alphanumerics.contains($0) ? String(Character($0)) : "_" }
+                .joined()
+                .prefix(40)
+            return "_\(safe)"
+        }()
+        let tempURL = url.deletingLastPathComponent().appendingPathComponent("test\(suffix)_\(url.lastPathComponent)")
         if let outData = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys]) {
             try? outData.write(to: tempURL)
             return tempURL

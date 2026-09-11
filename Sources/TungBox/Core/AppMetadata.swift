@@ -2,8 +2,8 @@ import AppKit
 import Foundation
 
 enum TungBoxVersion {
-    static let release = "0.2.0"
-    static let build = "0136"
+    static let release = "0.2.1"
+    static let build = "0160"
     static let current = "\(release)(\(build))"
     static let display = "TungBox v\(current)"
 }
@@ -20,8 +20,18 @@ enum AppResources {
             directories.append(executableDirectory)
             directories.append(executableDirectory.appendingPathComponent("TungBox_TungBox.bundle", isDirectory: true))
         }
-        directories.append(URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-            .appendingPathComponent(".build/arm64-apple-macosx/debug/TungBox_TungBox.bundle", isDirectory: true))
+        let currentDirectory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let buildDirectories = [
+            ".build/arm64-apple-macosx/debug",
+            ".build/arm64-apple-macosx/release",
+            ".build/x86_64-apple-macosx/debug",
+            ".build/x86_64-apple-macosx/release"
+        ]
+        for buildDirectory in buildDirectories {
+            directories.append(currentDirectory
+                .appendingPathComponent(buildDirectory, isDirectory: true)
+                .appendingPathComponent("TungBox_TungBox.bundle", isDirectory: true))
+        }
 
         for directory in directories {
             let candidates = [
