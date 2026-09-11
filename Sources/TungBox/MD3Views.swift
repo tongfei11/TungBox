@@ -3017,7 +3017,6 @@ final class MD3Dialog: NSView, MD3Themeable {
         } else {
             constraints.append(buttonStack.topAnchor.constraint(equalTo: messageLabel.bottomAnchor, constant: 24))
         }
-        constraints.append(card.heightAnchor.constraint(greaterThanOrEqualToConstant: 176))
         
         NSLayoutConstraint.activate(constraints)
         
@@ -3036,9 +3035,6 @@ final class MD3Dialog: NSView, MD3Themeable {
         onConfirm?()
     }
 
-    /// True while this dialog is on screen (added to a window, not mid-dismiss).
-    var isActiveModal: Bool { window != nil && !isHidden && alphaValue > 0.01 }
-
     func present() {
         self.alphaValue = 0
         NSAnimationContext.runAnimationGroup { context in
@@ -3049,7 +3045,6 @@ final class MD3Dialog: NSView, MD3Themeable {
     }
     
     func dismiss() {
-        guard superview != nil else { return }
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.15
             context.timingFunction = CAMediaTimingFunction(name: .easeIn)
@@ -3060,11 +3055,6 @@ final class MD3Dialog: NSView, MD3Themeable {
             }
         }
     }
-
-    // The scrim is a real modal barrier. Never allow a click to reach the page
-    // underneath while an animation or table selection is in progress.
-    override func mouseDown(with event: NSEvent) { }
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     
     func updateColors() {
         scrimView.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.4).cgColor
@@ -3089,16 +3079,7 @@ final class ControlFriendlyTableView: NSTableView {
         if responder is MD3Checkbox { return true }
         return super.validateProposedFirstResponder(responder, for: event)
     }
-    override func mouseDown(with event: NSEvent) {
-        // A modal MD3Dialog overlays the whole window. On macOS 26 a click on the
-        // dialog's blank areas can still reach this table through responder-chain
-        // forwarding and change the selection behind the dialog. While any dialog is
-        // up, swallow the click so the list underneath stays inert.
-        if window?.contentView?.subviews.contains(where: { ($0 as? MD3Dialog)?.isActiveModal == true }) == true {
-            return
-        }
-        super.mouseDown(with: event)
-    }
+
 }
 
 final class MD3Checkbox: NSControl, MD3Themeable {

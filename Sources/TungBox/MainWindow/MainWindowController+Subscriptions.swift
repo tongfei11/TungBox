@@ -81,15 +81,7 @@ extension MainWindowController {
         let subColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("subscription"))
         subColumn.resizingMask = .autoresizingMask
         subscriptionTable.addTableColumn(subColumn)
-        // The single column must follow the scroll view. Calling
-        // `sizeLastColumnToFit()` before the table has a real width measures the
-        // long subscription URL and gives NSTabView an enormous intrinsic width,
-        // which in turn expands the main window when this page is selected.
-        subscriptionTable.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
-        subscriptionTable.autosaveTableColumns = false
-        subscriptionTable.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        subscriptionTable.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        scroll.hasHorizontalScroller = false
+        subscriptionTable.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         
         subscriptionTable.headerView = nil
         subscriptionTable.delegate = self
@@ -99,6 +91,7 @@ extension MainWindowController {
         subscriptionTable.intercellSpacing = NSSize(width: 0, height: 8)
         subscriptionTable.rowHeight = 84   // 紧凑卡片高度（行间距由 intercellSpacing 给）
         scroll.documentView = subscriptionTable
+        subscriptionTable.sizeLastColumnToFit()
 
         // 直接把 scroll 放到 view 上（不再包 MD3Panel 底色），让卡片左缘和上方按钮、
         // 标题完全对齐 —— 视觉上更干净。

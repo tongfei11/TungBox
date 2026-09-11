@@ -218,7 +218,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var latestAppRelease: AppRelease?
     var appUpdateCheckState: AppUpdateCheckState = .notChecked
     private weak var toastView: NSView?
-    weak var activeDialog: MD3Dialog?
     private var pendingStatusRefresh: DispatchWorkItem?
     private var pendingLogRefresh: DispatchWorkItem?
     var logLineCount = 0
@@ -245,11 +244,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         window.title = "TungBox"
         window.titleVisibility = .hidden
         window.isReleasedWhenClosed = false
-        // Keep navigation and table layouts stable when switching NSTabView pages.
-        // Individual pages contain controls with different intrinsic widths; they
-        // must not be allowed to resize the shared window.
-        window.minSize = NSSize(width: 960, height: 620)
-        window.contentMinSize = NSSize(width: 960, height: 620)
         window.center()
         self.init(window: window)
         window.delegate = self
@@ -270,8 +264,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         configureCenteredWindowTitle()
 
         guard let content = window?.contentView else { return }
-
-        normalizeMainWindowFrame()
 
         content.wantsLayer = true
         content.layer?.backgroundColor = MD3.background.cgColor
@@ -364,32 +356,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         checkSingBoxInstall(showAlert: true)
         refreshSubscriptionBadge()
         registerSystemWakeObserver()
-    }
-
-    /// macOS can restore an obsolete autosaved frame after a page with a wide
-    /// intrinsic layout was selected. Keep the app usable on the current screen
-    /// and persist the corrected frame for the next launch.
-    func normalizeMainWindowFrame() {
-        guard let window, let screen = window.screen ?? NSScreen.main else { return }
-        let visible = screen.visibleFrame
-        var frame = window.frame
-        let maxWidth = min(visible.width, 1400)
-        let maxHeight = visible.height
-        var changed = false
-        if frame.width > maxWidth {
-            frame.size.width = min(1080, maxWidth)
-            changed = true
-        }
-        if frame.height > maxHeight {
-            frame.size.height = min(720, maxHeight)
-            changed = true
-        }
-        if changed {
-            frame.origin.x = visible.midX - frame.width / 2
-            frame.origin.y = visible.midY - frame.height / 2
-            window.setFrame(frame, display: true)
-        }
-        window.saveFrame(usingName: "TungBoxMainWindow")
     }
 
     func normalizeProxyPreferences() {
@@ -538,8 +504,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
         pages.translatesAutoresizingMaskIntoConstraints = false
         pages.tabViewType = .noTabsNoBorder
-        pages.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        pages.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let dashboardItem = NSTabViewItem(identifier: "dashboard")
         dashboardItem.label = "仪表盘"
@@ -763,7 +727,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
     func selectPage(at index: Int) {
         guard index >= 0, index < pages.numberOfTabViewItems else { return }
-        let stableWindowSize = window?.frame.size
         pages.selectTabViewItem(at: index)
         for button in navButtons {
             button.isSelected = (button.tag == index)
@@ -778,18 +741,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             stopConnectionsRefreshTimer()
         }
         window?.contentView?.refreshSubviews()
-        if let stableWindowSize, let window {
-            // NSTabView may perform a fitting pass when the newly selected page has
-            // a wider intrinsic layout. Restore the user's window size after that
-            // pass; page content is allowed to scroll/compress inside it.
-            DispatchQueue.main.async {
-                guard window.isVisible else { return }
-                var frame = window.frame
-                frame.size = NSSize(width: min(stableWindowSize.width, 1400), height: stableWindowSize.height)
-                window.setFrame(frame, display: true)
-                self.normalizeMainWindowFrame()
-            }
-        }
     }
     // The "代理服务" entry now means "turn the system proxy on". The runtime is
     // converged by reconcileRuntime() based on the two independent switches.
