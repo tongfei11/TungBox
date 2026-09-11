@@ -208,7 +208,7 @@ extension MainWindowController {
 
         // Use the native status-bar button. Nested custom views force AppKit to
         // continuously snapshot the status-item replicant on recent macOS.
-        statusItem.length = style == .iconOnly ? 24 : (style == .speedOnly ? 48 : 74)
+        statusItem.length = style == .iconOnly ? 24 : (style == .speedOnly ? 52 : 78)
         button.image = style == .speedOnly ? nil : trayIcon()
         button.imageScaling = .scaleProportionallyDown
         button.imagePosition = .imageLeading
@@ -223,7 +223,7 @@ extension MainWindowController {
         paragraph.minimumLineHeight = 10
         paragraph.maximumLineHeight = 10
         button.attributedTitle = NSAttributedString(string: button.title, attributes: [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 8.5, weight: .regular),
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 9.5, weight: .regular),
             .paragraphStyle: paragraph,
             .baselineOffset: -1.5
         ])
