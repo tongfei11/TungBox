@@ -405,7 +405,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             self?.refreshStatus()
         }
         pendingStatusRefresh = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: workItem)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: workItem)
     }
 
     func scheduleLogRefresh() {
@@ -413,12 +413,13 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         let workItem = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.pendingLogRefresh = nil
+            guard self.isLogsPageSelected(), self.window?.isVisible == true else { return }
             self.refreshLogDisplay()
             self.logs.scrollToEndOfDocument(nil)
             self.logStatusLabel.stringValue = "日志：\(self.logLineCount) 行"
         }
         pendingLogRefresh = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: workItem)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: workItem)
     }
 
     func setupSidebar(_ view: NSView) {
@@ -733,6 +734,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             refreshConnections(showErrors: false)
         } else {
             stopConnectionsRefreshTimer()
+        }
+        if index == 5 {
+            refreshLogDisplay()
         }
         window?.contentView?.refreshSubviews()
     }
@@ -1274,6 +1278,11 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     func isConnectionsPageSelected() -> Bool {
         guard let item = pages.selectedTabViewItem else { return false }
         return pages.indexOfTabViewItem(item) == 4
+    }
+
+    func isLogsPageSelected() -> Bool {
+        guard let item = pages.selectedTabViewItem else { return false }
+        return pages.indexOfTabViewItem(item) == 5
     }
 
     func ensureCoreAvailableForStart() -> Bool {

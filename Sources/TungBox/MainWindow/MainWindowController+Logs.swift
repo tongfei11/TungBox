@@ -147,6 +147,7 @@ extension MainWindowController {
     }
 
     @objc func refreshLogDisplay() {
+        guard isLogsPageSelected(), window?.isVisible == true else { return }
         let lines = logBuffer.components(separatedBy: .newlines)
         let levels = enabledLogLevels()
         let allLevelsOn = levels.count >= 4
