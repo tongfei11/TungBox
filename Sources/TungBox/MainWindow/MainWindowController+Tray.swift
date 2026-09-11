@@ -225,7 +225,7 @@ extension MainWindowController {
         button.attributedTitle = NSAttributedString(string: button.title, attributes: [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 9.5, weight: .regular),
             .paragraphStyle: paragraph,
-            .baselineOffset: -1.5
+            .baselineOffset: -4.5
         ])
         button.toolTip = TungBoxVersion.display
         return
