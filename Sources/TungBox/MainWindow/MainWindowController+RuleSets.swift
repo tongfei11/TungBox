@@ -121,7 +121,7 @@ extension MainWindowController {
         showToast(ruleSetApplyStatus)
     }
 
-    private func applyRuleSetRuntime(_ text: String, previous: Data, configURL: URL) throws {
+    func applyRuleSetRuntime(_ text: String, previous: Data, configURL: URL) throws {
         if isTunEnabled && TunServiceManager.activeSingBoxPID(store: store) != nil {
             let prepared = try preparedTunConfigText(from: text)
             let oldRequest = try Data(contentsOf: store.tunRequestConfigURL)

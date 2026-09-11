@@ -591,7 +591,10 @@ extension MainWindowController {
                 store.saveCustomRules(customRules)
                 editor.string = try renderConfig(try applyCustomRules(to: previous, subscriptionID: subscription.id))
                 let url = try saveCurrent()
-                do { _ = try runner.check(config: url) }
+                do {
+                    _ = try runner.check(config: url)
+                    try applyRuleSetRuntime(editor.string, previous: Data(previous.utf8), configURL: url)
+                }
                 catch {
                     customRules = previousRules; store.saveCustomRules(customRules)
                     editor.string = previous; _ = try? saveCurrent()
@@ -606,7 +609,10 @@ extension MainWindowController {
                 store.saveCustomRules(customRules)
                 editor.string = try renderConfig(try applyCustomRules(to: previous, subscriptionID: subscription.id))
                 let url = try saveCurrent()
-                do { _ = try runner.check(config: url) }
+                do {
+                    _ = try runner.check(config: url)
+                    try applyRuleSetRuntime(editor.string, previous: Data(previous.utf8), configURL: url)
+                }
                 catch {
                     customRules.removeAll { $0.id == newRule.id }; store.saveCustomRules(customRules)
                     editor.string = previous; _ = try? saveCurrent()
@@ -645,6 +651,7 @@ extension MainWindowController {
             let url = try saveCurrent()
             do {
                 _ = try runner.check(config: url)
+                try applyRuleSetRuntime(editor.string, previous: Data(previousConfig.utf8), configURL: url)
             } catch {
                 customRules = previousRules
                 store.saveCustomRules(customRules)
@@ -701,6 +708,7 @@ extension MainWindowController {
 
     func setCustomRuleEnabled(at idx: Int, to enabled: Bool) {
         guard customRules.indices.contains(idx) else { return }
+        let previousConfig = editor.string
         customRules[idx].enabled = enabled
         store.saveCustomRules(customRules)
         appendLog("[规则] \(customRules[idx].type) \(customRules[idx].value) 已\(customRules[idx].enabled ? "启用" : "禁用")\n")
@@ -710,11 +718,15 @@ extension MainWindowController {
             do {
                 let baseConfig = try removeCustomRule(customRules[idx], from: editor.string)
                 editor.string = try renderConfig(try applyCustomRules(to: baseConfig, subscriptionID: sub.id))
-                _ = try saveCurrent()
+                let url = try saveCurrent()
+                _ = try runner.check(config: url)
+                try applyRuleSetRuntime(editor.string, previous: Data(previousConfig.utf8), configURL: url)
             } catch {
                 // Rollback
                 customRules[idx].enabled.toggle()
                 store.saveCustomRules(customRules)
+                editor.string = previousConfig
+                _ = try? saveCurrent()
                 showError(error)
             }
         }
