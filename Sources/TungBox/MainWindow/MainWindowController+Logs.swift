@@ -21,6 +21,7 @@ extension MainWindowController {
 
         // Filter toolbar
         let searchField = MD3TextField()
+        logSearchField = searchField
         searchField.placeholderString = "搜索日志关键词..."
         searchField.target = self
         searchField.action = #selector(refreshLogDisplay)
@@ -149,6 +150,7 @@ extension MainWindowController {
         let lines = logBuffer.components(separatedBy: .newlines)
         let levels = enabledLogLevels()
         let allLevelsOn = levels.count >= 4
+        let query = logSearchField?.stringValue.uppercased() ?? ""
 
         let filtered = lines.filter { line in
             let upper = line.uppercased()
@@ -163,7 +165,6 @@ extension MainWindowController {
                 guard matched else { return false }
             }
             // Keyword match from search field
-            let query = logSearchFieldText()
             guard query.isEmpty || upper.contains(query) else { return false }
             return true
         }
@@ -172,24 +173,6 @@ extension MainWindowController {
         logCountLabel.stringValue = filtered.count == lines.count && allLevelsOn
             ? "共 \(lines.filter { !$0.isEmpty }.count) 条"
             : "显示 \(filtered.count) / \(lines.filter { !$0.isEmpty }.count) 条"
-    }
-
-    private func logSearchFieldText() -> String {
-        // Find the first MD3TextField in the toolbar that isn't a level button
-        // The search field is the first child of the toolbar stack
-        guard let content = window?.contentView else { return "" }
-        return findLogSearchText(in: content).lowercased()
-    }
-
-    private func findLogSearchText(in root: NSView) -> String {
-        if let field = root as? NSTextField, field.placeholderString?.contains("搜索日志") == true {
-            return field.stringValue
-        }
-        for sub in root.subviews {
-            let result = findLogSearchText(in: sub)
-            if !result.isEmpty { return result }
-        }
-        return ""
     }
 
     var logCountLabel: NSTextField {
