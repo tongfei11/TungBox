@@ -201,65 +201,20 @@ extension MainWindowController {
         let active = isProxyServiceActiveOrRequested()
         let delay = nodes.first(where: { $0.tag == resolveActiveOutbound(proxiesObj: lastProxiesObj).name })?.delay ?? ""
         let presentation = "\(style.rawValue)|\(active)|\(currentUploadSpeed)|\(currentDownloadSpeed)|\(delay)"
-        if lastTrayPresentation == presentation, trayImageView != nil, traySpeedLabel != nil {
+        if lastTrayPresentation == presentation {
             return
         }
         lastTrayPresentation = presentation
-        let (imageView, label) = getOrCreateTraySubviews(in: button)
 
-        let shouldShowIcon = style != .speedOnly
-        let shouldShowSpeed = style != .iconOnly
-        
-        let itemWidth: CGFloat
-        if shouldShowIcon && shouldShowSpeed {
-            itemWidth = 78
-        } else if shouldShowIcon {
-            itemWidth = 24
-        } else {
-            itemWidth = 52
-        }
-        statusItem.length = itemWidth
-        
-        button.image = nil
-        button.title = ""
-        button.attributedTitle = NSAttributedString()
-        
-        if shouldShowIcon {
-            imageView.isHidden = false
-            imageView.image = trayIcon()
-            imageView.frame = NSRect(x: 4, y: 1, width: 20, height: 20)
-        } else {
-            imageView.isHidden = true
-            imageView.image = nil
-        }
-        
-        if shouldShowSpeed {
-            label.isHidden = false
-            label.frame = shouldShowIcon ? NSRect(x: 26, y: 2, width: 48, height: 18) : NSRect(x: 2, y: 2, width: 48, height: 18)
-            
-            let uploadText = formatTraySpeed(currentUploadSpeed)
-            let downloadText = formatTraySpeed(currentDownloadSpeed)
-            let fullText = "\(uploadText)\n\(downloadText)"
-            
-            let paragraphStyle = NSMutableParagraphStyle()
-            paragraphStyle.alignment = .right
-            paragraphStyle.minimumLineHeight = 9.0
-            paragraphStyle.maximumLineHeight = 9.0
-            paragraphStyle.lineSpacing = 0.0
-            
-            let font = NSFont.monospacedDigitSystemFont(ofSize: 8.5, weight: .regular)
-            let attributes: [NSAttributedString.Key: Any] = [
-                .font: font,
-                .paragraphStyle: paragraphStyle,
-                .foregroundColor: NSColor.labelColor
-            ]
-            label.attributedStringValue = NSAttributedString(string: fullText, attributes: attributes)
-        } else {
-            label.isHidden = true
-            label.attributedStringValue = NSAttributedString()
-        }
-        
+        // Use the native status-bar button. Nested custom views force AppKit to
+        // continuously snapshot the status-item replicant on recent macOS.
+        statusItem.length = style == .iconOnly ? 24 : 78
+        button.image = style == .speedOnly ? nil : trayIcon()
+        button.imageScaling = .scaleProportionallyDown
+        button.title = style == .iconOnly ? "" : "\(formatTraySpeed(currentUploadSpeed))  \(formatTraySpeed(currentDownloadSpeed))"
+        button.attributedTitle = NSAttributedString(string: button.title)
         button.toolTip = TungBoxVersion.display
+        return
     }
 
     func formatTraySpeed(_ bytes: Int) -> String {
