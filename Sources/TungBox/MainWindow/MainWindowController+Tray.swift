@@ -208,11 +208,16 @@ extension MainWindowController {
 
         // Use the native status-bar button. Nested custom views force AppKit to
         // continuously snapshot the status-item replicant on recent macOS.
-        statusItem.length = style == .iconOnly ? 24 : 78
+        statusItem.length = style == .iconOnly ? 24 : (style == .speedOnly ? 96 : 124)
         button.image = style == .speedOnly ? nil : trayIcon()
         button.imageScaling = .scaleProportionallyDown
-        button.title = style == .iconOnly ? "" : "\(formatTraySpeed(currentUploadSpeed))  \(formatTraySpeed(currentDownloadSpeed))"
-        button.attributedTitle = NSAttributedString(string: button.title)
+        button.cell?.wraps = false
+        button.cell?.isScrollable = false
+        button.cell?.truncatesLastVisibleLine = true
+        button.title = style == .iconOnly ? "" : "↑ \(formatTraySpeed(currentUploadSpeed))  ↓ \(formatTraySpeed(currentDownloadSpeed))"
+        button.attributedTitle = NSAttributedString(string: button.title, attributes: [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+        ])
         button.toolTip = TungBoxVersion.display
         return
     }
