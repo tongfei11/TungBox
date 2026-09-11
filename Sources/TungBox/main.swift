@@ -205,6 +205,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var trayImageView: NSImageView?
     var traySpeedLabel: NSTextField?
     var statsTimer: Timer?
+    var isUpdatingRunningStats = false
     var runningStatsMissCount = 0
     var lastProxiesObj: [String: Any]? = nil
     var prevConnections: [ConnectionInfo] = []
@@ -2718,7 +2719,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         statsTimer?.invalidate()
         runningStatsMissCount = 0
         updateTrafficLabels()
-        statsTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+        statsTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.updateRunningStats()
             }

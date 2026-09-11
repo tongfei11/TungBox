@@ -473,6 +473,7 @@ extension MainWindowController {
     }
 
     func updateRunningStats() {
+        guard !isUpdatingRunningStats else { return }
         guard isProxyRuntimeRunning(), let pid = currentProxyPID() else {
             // Tolerate transient unavailability (e.g. the daemon hot-reloading
             // sing-box for a node switch) so a single blip doesn't permanently
@@ -484,6 +485,7 @@ extension MainWindowController {
             return
         }
         runningStatsMissCount = 0
+        isUpdatingRunningStats = true
 
         // TUN 守护进程是独立 sing-box 进程，clash_api 在 9091。要算 TUN 流量
         // 必须把那个端口也拉上，否则 TUN-only 时 delta 永远是 0、流量统计为 0。
@@ -492,6 +494,11 @@ extension MainWindowController {
         let prevTotals = prevTrafficTotals
         let elapsedSinceLast = max(Date().timeIntervalSince(connectionRefreshTime), 0.5)
         Task {
+            defer {
+                Task { @MainActor [weak self] in
+                    self?.isUpdatingRunningStats = false
+                }
+            }
             let apiConnections = try? await ClashAPI.connectionsFromAll(extraPorts: extraPorts)
             let totals = (try? await ClashAPI.trafficTotals(ports: allPorts)) ?? [:]
             let proxiesObj = (try? await ClashAPI.proxies())
