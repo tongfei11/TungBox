@@ -84,7 +84,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     let rulesTable = ControlFriendlyTableView()
     let connectionsTable = NSTableView()
     let nodeGroupsStack = NSStackView()
-    let pages = NSTabView()
+    let pages = ConsoleTabView()
     var navButtons: [MD3SidebarItem] = []
     let editor = NSTextView()
     let logs = NSTextView()
@@ -502,7 +502,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             view?.layer?.backgroundColor = MD3.background.cgColor
         }
 
-        pages.translatesAutoresizingMaskIntoConstraints = false
         pages.tabViewType = .noTabsNoBorder
 
         let dashboardItem = NSTabViewItem(identifier: "dashboard")
@@ -540,14 +539,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         settingsItem.view = makeSettingsView()
         pages.addTabViewItem(settingsItem)
 
-        view.addSubview(pages)
-
-        NSLayoutConstraint.activate([
-            pages.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            pages.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            pages.topAnchor.constraint(equalTo: view.topAnchor),
-            pages.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-        ])
+        split.installPages(pages)
     }
     func populateRuleTypePopup() {
         let currentKey = customRuleTypePopup.selectedItem?.representedObject as? String

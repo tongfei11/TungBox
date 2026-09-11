@@ -20,13 +20,11 @@ let split = FixedSidebarLayout(frame: root.bounds)
 split.translatesAutoresizingMaskIntoConstraints = false
 root.addSubview(split)
 NSLayoutConstraint.activate([split.leadingAnchor.constraint(equalTo: root.leadingAnchor), split.trailingAnchor.constraint(equalTo: root.trailingAnchor), split.topAnchor.constraint(equalTo: root.topAnchor), split.bottomAnchor.constraint(equalTo: root.bottomAnchor)])
-let tabs = NSTabView()
+let tabs = ConsoleTabView()
 tabs.tabViewType = .noTabsNoBorder
 tabs.setContentHuggingPriority(.defaultLow, for: .horizontal)
 tabs.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-tabs.translatesAutoresizingMaskIntoConstraints = false
-split.mainContent.addSubview(tabs)
-NSLayoutConstraint.activate([tabs.leadingAnchor.constraint(equalTo: split.mainContent.leadingAnchor), tabs.trailingAnchor.constraint(equalTo: split.mainContent.trailingAnchor), tabs.topAnchor.constraint(equalTo: split.mainContent.topAnchor), tabs.bottomAnchor.constraint(equalTo: split.mainContent.bottomAnchor)])
+split.installPages(tabs)
 for width in [600.0, 1250.0, 800.0] {
     let page = NSView()
     let field = NSTextField(labelWithString: "Page")
@@ -40,8 +38,50 @@ for index in [0, 1, 2, 0, 1, 0] {
     tabs.selectTabViewItem(at: index)
     root.layoutSubtreeIfNeeded()
     RunLoop.current.run(until: Date().addingTimeInterval(0.05))
-    print("page", index, "window", window.frame.width, "initial", before.width)
+    precondition(window.frame == before, "Page selection changed the window frame")
+    precondition(tabs.frame.size == split.mainContent.bounds.size, "Pages must fit the available area")
 }
+// Exercise actual two-column subscription cards with oversized metadata.
+let subscriptionPage = NSView()
+let cell = MD3SubscriptionCellView()
+cell.translatesAutoresizingMaskIntoConstraints = false
+subscriptionPage.addSubview(cell)
+NSLayoutConstraint.activate([
+    cell.leadingAnchor.constraint(equalTo: subscriptionPage.leadingAnchor, constant: 32),
+    cell.trailingAnchor.constraint(equalTo: subscriptionPage.trailingAnchor, constant: -32),
+    cell.topAnchor.constraint(equalTo: subscriptionPage.topAnchor, constant: 100),
+    cell.heightAnchor.constraint(equalToConstant: 84)
+])
+let subscription = Subscription(id: UUID(), name: String(repeating: "长订阅名称", count: 30),
+    url: "https://" + String(repeating: "long-domain", count: 20) + ".example/subscription",
+    updatedAt: Date(), lastError: String(repeating: "刷新错误", count: 40),
+    upload: 123456789, download: 987654321, total: 9999999999, expiresAt: Date())
+cell.configure(leftSub: subscription, leftSelected: true, rightSub: subscription,
+    rightSelected: false, leftClick: nil, rightClick: nil)
+let subscriptionTab = NSTabViewItem()
+subscriptionTab.view = subscriptionPage
+tabs.addTabViewItem(subscriptionTab)
+for width in [1080.0, 900.0, 1400.0, 1080.0] {
+    window.setContentSize(NSSize(width: width, height: 720))
+    let expected = window.frame
+    for index in [3, 0, 3, 1, 3] {
+        tabs.selectTabViewItem(at: index)
+        root.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        precondition(window.frame == expected, "Subscription page changed the window frame")
+        precondition(tabs.frame.size == split.mainContent.bounds.size)
+    }
+    precondition(cell.frame.width <= tabs.bounds.width)
+    for card in [cell.leftItem, cell.rightItem] {
+        precondition(card.titleLabel.frame.maxX <= card.bounds.width)
+        precondition(card.domainLabel.frame.maxX <= card.updatedAtLabel.frame.minX)
+    }
+    window.orderOut(nil)
+    window.orderFrontRegardless()
+    root.layoutSubtreeIfNeeded()
+    precondition(window.frame == expected, "Reopening changed the window frame")
+}
+print("Page selection, long subscription metadata, resize and reopen regressions passed")
 let custom = NSView()
 custom.translatesAutoresizingMaskIntoConstraints = false
 NSLayoutConstraint.activate([custom.widthAnchor.constraint(equalToConstant: 460), custom.heightAnchor.constraint(equalToConstant: 540)])

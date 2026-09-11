@@ -1449,6 +1449,11 @@ final class MD3SubscriptionItemView: NSView, MD3Themeable {
         errorLabel.translatesAutoresizingMaskIntoConstraints = false
         errorLabel.isHidden = true
 
+        // Long subscription metadata must truncate inside the card, not widen it.
+        for label in [titleLabel, domainLabel, trafficLabel, updatedAtLabel, expiresLabel, errorLabel] {
+            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        }
+
         card.addSubview(titleLabel)
         card.addSubview(domainLabel)
         card.addSubview(trafficLabel)
