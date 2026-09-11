@@ -213,17 +213,19 @@ extension MainWindowController {
         button.imageScaling = .scaleProportionallyDown
         button.imagePosition = .imageLeading
         button.imageHugsTitle = true
+        button.alignment = .center
         button.cell?.wraps = true
         button.cell?.isScrollable = false
         button.cell?.truncatesLastVisibleLine = false
         button.title = style == .iconOnly ? "" : "↑ \(formatTraySpeed(currentUploadSpeed))\n↓ \(formatTraySpeed(currentDownloadSpeed))"
         let paragraph = NSMutableParagraphStyle()
-        paragraph.alignment = .left
-        paragraph.minimumLineHeight = 9
-        paragraph.maximumLineHeight = 9
+        paragraph.alignment = .center
+        paragraph.minimumLineHeight = 10
+        paragraph.maximumLineHeight = 10
         button.attributedTitle = NSAttributedString(string: button.title, attributes: [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 8.5, weight: .regular),
-            .paragraphStyle: paragraph
+            .paragraphStyle: paragraph,
+            .baselineOffset: -1.5
         ])
         button.toolTip = TungBoxVersion.display
         return
