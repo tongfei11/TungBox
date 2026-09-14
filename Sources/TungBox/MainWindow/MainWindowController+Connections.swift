@@ -318,10 +318,19 @@ extension MainWindowController {
         let conns = displayedConnections
         guard conns.indices.contains(row) else { return }
         let conn = conns[row]
+        let connectionPort: Int?
+        let connectionID: String
+        if conn.id.hasPrefix("p9091:") {
+            connectionPort = TungBoxConfig.tunDaemonClashPort
+            connectionID = String(conn.id.dropFirst("p9091:".count))
+        } else {
+            connectionPort = nil
+            connectionID = conn.id
+        }
 
         Task {
             do {
-                try await ClashAPI.closeConnection(id: conn.id)
+                try await ClashAPI.closeConnection(id: connectionID, port: connectionPort)
                 await MainActor.run {
                     // Remove from the unfiltered list too
                     connections.removeAll { $0.id == conn.id }
@@ -342,7 +351,7 @@ extension MainWindowController {
         guard isProxyRuntimeRunning() else { return }
         Task {
             do {
-                _ = try await ClashAPI.closeConnections()
+                _ = try await ClashAPI.closeConnections(port: delayAPIPort())
                 connections.removeAll()
                 refreshConnectionsTable()
                 appendLog("[连接] 已关闭全部连接\n")

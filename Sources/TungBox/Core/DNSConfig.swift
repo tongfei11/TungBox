@@ -298,6 +298,7 @@ enum DNSConfig {
             // 国外域名 → 分配 fakeip
             rules.append([
                 "rule_set": TungBoxConfig.ruleSetGeolocationNotCN,
+                "query_type": ["A", "AAAA"],
                 "server": "dns-fakeip"
             ])
             // 没命中 rule_set 的（小众域名）→ 国外真实 DNS

@@ -408,16 +408,19 @@ extension MainWindowController {
             guard let best = candidates.min(by: { $0.1 < $1.1 }) else { continue }
             
             let oldCurrent = nodeGroups[index].current
-            nodeGroups[index].current = best.0
-            
             if isProxyRuntimeRunning() && oldCurrent != best.0 {
                 let nodeTag = best.0
+                let apiPort = delayAPIPort()
                 Task {
                     do {
-                        try await ClashAPI.selectProxy(group: groupTag, node: nodeTag)
-                        _ = try? await ClashAPI.closeConnections()
+                        try await ClashAPI.selectProxy(group: groupTag, node: nodeTag, port: apiPort)
+                        _ = try? await ClashAPI.closeConnections(port: apiPort)
                         await MainActor.run { [weak self] in
-                            self?.appendLog("[节点] 测速后自动将 \(groupTag) 切换到最快节点: \(nodeTag)，并已断开旧连接\n")
+                            guard let self,
+                                  let groupIndex = self.nodeGroups.firstIndex(where: { $0.tag == groupTag }) else { return }
+                            self.nodeGroups[groupIndex].current = nodeTag
+                            self.refreshNodeGroupsView()
+                            self.appendLog("[节点] 测速后自动将 \(groupTag) 切换到最快节点: \(nodeTag)，并已断开旧连接\n")
                         }
                     } catch {
                         await MainActor.run { [weak self] in
@@ -425,6 +428,8 @@ extension MainWindowController {
                         }
                     }
                 }
+            } else if !isProxyRuntimeRunning() {
+                nodeGroups[index].current = best.0
             }
         }
     }

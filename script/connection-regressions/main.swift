@@ -2,6 +2,37 @@ let app = NSApplication.shared
 app.setActivationPolicy(.prohibited)
 let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1080, height: 720), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
 let controller = MainWindowController(window: window)
+precondition(ClashAPI.endpointURL(path: "/proxies", port: 9091)?.port == 9091,
+    "TUN-only control requests must target the TUN Clash API")
+
+let heartbeatDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+let heartbeatStore = Store(baseURL: heartbeatDirectory)
+defer { try? FileManager.default.removeItem(at: heartbeatDirectory) }
+FileManager.default.createFile(atPath: heartbeatStore.tunRequestFlagURL.path, contents: Data())
+try! Data("{}".utf8).write(to: heartbeatStore.tunRequestConfigURL)
+FileManager.default.createFile(atPath: heartbeatStore.tunRequestHeartbeatURL.path, contents: Data())
+try! FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -120)],
+    ofItemAtPath: heartbeatStore.tunRequestHeartbeatURL.path)
+precondition(TunServiceManager.heartbeatAction(isTunEnabled: true, store: heartbeatStore) == .refresh,
+    "A stale heartbeat must be refreshed while TUN is still requested")
+try! FileManager.default.removeItem(at: heartbeatStore.tunRequestFlagURL)
+precondition(TunServiceManager.heartbeatAction(isTunEnabled: true, store: heartbeatStore) == .recover,
+    "Missing request files must recover TUN instead of stopping its heartbeat")
+precondition(TunServiceManager.heartbeatAction(isTunEnabled: false, store: heartbeatStore) == .stop,
+    "An explicit off state must stop the heartbeat")
+precondition(!TunServiceManager.unexpectedChildExitShell.contains("REQUEST_FLAG") &&
+    TunServiceManager.unexpectedChildExitShell.contains("restart"),
+    "An unexpected TUN child exit must preserve the request and restart")
+
+let coreDirectory = heartbeatDirectory.appendingPathComponent("core")
+try! FileManager.default.createDirectory(at: coreDirectory, withIntermediateDirectories: true)
+let installedCore = coreDirectory.appendingPathComponent("sing-box")
+let preparedCore = heartbeatDirectory.appendingPathComponent("sing-box.new")
+try! Data("old".utf8).write(to: installedCore)
+try! Data("new".utf8).write(to: preparedCore)
+try! CoreUpdater.activatePreparedBinary(at: preparedCore, to: installedCore)
+precondition(String(data: try! Data(contentsOf: installedCore), encoding: .utf8) == "new",
+    "Core activation must replace the binary atomically without stopping the runtime first")
 let root = window.contentView!
 controller.split.frame = root.bounds
 controller.split.autoresizingMask = [.width, .height]

@@ -358,7 +358,7 @@ extension MainWindowController {
             )
             for i in nodes.indices { nodes[i].delay = "未测试" }
             refreshNodeGroupsView()
-            Task { _ = try? await ClashAPI.closeConnections() }
+            Task { _ = try? await ClashAPI.closeConnections(port: delayAPIPort()) }
             reconcileRuntime(reason: "切换订阅", forceRestart: true)
         }
     }
@@ -616,7 +616,7 @@ extension MainWindowController {
             )
             for i in nodes.indices { nodes[i].delay = "未测试" }
             refreshNodeGroupsView()
-            Task { _ = try? await ClashAPI.closeConnections() }
+            Task { _ = try? await ClashAPI.closeConnections(port: delayAPIPort()) }
             reconcileRuntime(reason: "订阅刷新", forceRestart: true)
         }
     }

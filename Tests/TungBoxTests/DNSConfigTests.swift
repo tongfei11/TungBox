@@ -195,6 +195,14 @@ final class DNSConfigTests: XCTestCase {
         XCTAssertNil(dns["independent_cache"])
     }
 
+    func testFakeIPRuleOnlyMatchesAddressQueries() throws {
+        DNSConfig.fakeIPEnabled = true
+        let dns = DNSConfig.buildSingBoxDNS()
+        let rules = try XCTUnwrap(dns["rules"] as? [[String: Any]])
+        let fakeRule = try XCTUnwrap(rules.first { $0["server"] as? String == "dns-fakeip" })
+        XCTAssertEqual(fakeRule["query_type"] as? [String], ["A", "AAAA"])
+    }
+
     func testBuildProxyServerHasDetour() {
         let dns = DNSConfig.buildSingBoxDNS()
         let servers = dns["servers"] as? [[String: Any]] ?? []

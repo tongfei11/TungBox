@@ -491,6 +491,7 @@ extension MainWindowController {
         // 必须把那个端口也拉上，否则 TUN-only 时 delta 永远是 0、流量统计为 0。
         let extraPorts: [Int] = isTunRuntimeRunning() ? [TungBoxConfig.tunDaemonClashPort] : []
         let allPorts: [Int] = [9090] + extraPorts
+        let proxyAPIPort = delayAPIPort()
         let prevTotals = prevTrafficTotals
         let elapsedSinceLast = max(Date().timeIntervalSince(connectionRefreshTime), 0.5)
         Task {
@@ -501,7 +502,7 @@ extension MainWindowController {
             }
             let apiConnections = try? await ClashAPI.connectionsFromAll(extraPorts: extraPorts)
             let totals = (try? await ClashAPI.trafficTotals(ports: allPorts)) ?? [:]
-            let proxiesObj = (try? await ClashAPI.proxies())
+            let proxiesObj = (try? await ClashAPI.proxies(port: proxyAPIPort))
             
             let rssValue = await withCheckedContinuation { (continuation: CheckedContinuation<String, Never>) in
                 DispatchQueue.global(qos: .background).async {

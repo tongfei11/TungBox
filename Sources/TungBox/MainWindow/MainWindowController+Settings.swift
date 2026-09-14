@@ -635,11 +635,6 @@ extension MainWindowController {
 
     func installCoreRelease(_ release: CoreRelease, reason: String) {
         let wasRunning = isProxyRuntimeRunning()
-        if wasRunning {
-            stopService()
-            showToast("已暂停代理服务以安装 Core")
-            appendLog("[Core] 暂停代理服务以便安装 \(release.version)\n")
-        }
 
         serviceLabel.stringValue = "sing-box Core：正在安装 \(release.version)..."
         appendLog("[Core] 开始安装 \(reason)：\(release.version)\n")
@@ -652,7 +647,7 @@ extension MainWindowController {
                     self?.appendLog("[Core] 已安装 \(release.version) 到 \(coreBinaryURL.path)\n")
                     self?.checkSingBoxInstall(showAlert: false)
                     self?.showToast(wasRunning
-                        ? "Core 已更新至 \(release.version)，请手动重启代理"
+                        ? "Core 已更新至 \(release.version)，当前代理保持运行"
                         : "Core 已安装：\(release.version)")
                 }
             } catch {
@@ -943,7 +938,7 @@ extension MainWindowController {
             // 可能还没回来，立刻 reconcile 会建在错的接口上。等 2s 再动手。
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
                 guard let self else { return }
-                guard self.isTunRuntimeRunning() else { return }
+                guard self.isTunEnabled else { return }
                 self.appendLog("[TungBox] 系统已唤醒，自动重新下发 TUN 配置以恢复守护进程\n")
                 self.reconcileRuntime(reason: "唤醒", forceRestart: false)
             }
@@ -1063,9 +1058,10 @@ extension MainWindowController {
             targets.append((tag, def))
         }
         guard !targets.isEmpty else { return }
+        let apiPort = delayAPIPort()
         Task {
             for target in targets {
-                try? await ClashAPI.selectProxy(group: target.group, node: target.node)
+                try? await ClashAPI.selectProxy(group: target.group, node: target.node, port: apiPort)
             }
         }
     }
@@ -1076,11 +1072,16 @@ extension MainWindowController {
         tunRequestHeartbeatTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                guard self.isTunEnabled, TunServiceManager.hasEnableRequest(store: self.store) else {
+                switch TunServiceManager.heartbeatAction(isTunEnabled: self.isTunEnabled, store: self.store) {
+                case .refresh:
+                    TunServiceManager.refreshRequestHeartbeat(store: self.store)
+                case .recover:
+                    self.appendLog("[TUN] 请求文件意外丢失，正在恢复 TUN\n")
                     self.stopTunRequestHeartbeat()
-                    return
+                    self.reconcileRuntime(reason: "恢复 TUN 请求")
+                case .stop:
+                    self.stopTunRequestHeartbeat()
                 }
-                TunServiceManager.refreshRequestHeartbeat(store: self.store)
             }
         }
     }

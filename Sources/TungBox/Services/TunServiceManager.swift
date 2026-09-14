@@ -49,6 +49,12 @@ enum TunServiceStatus {
 }
 
 enum TunServiceManager {
+    enum HeartbeatAction {
+        case refresh
+        case recover
+        case stop
+    }
+
     static let label = "com.tung.tungbox.tun"
     static let installDirectoryPath = "/Library/Application Support/TungBox"
     static let plistPath = "/Library/LaunchDaemons/\(label).plist"
@@ -68,6 +74,10 @@ enum TunServiceManager {
     static let tunIPv4Address = "198.19.0.1"
     static let legacyTunIPv4Address = "172.19.0.1"
     static let requestHeartbeatTimeout: TimeInterval = 30
+    static let unexpectedChildExitShell = """
+                echo "$(date '+%Y-%m-%d %H:%M:%S') sing-box TUN exited unexpectedly; preserving request for restart" >> "$LOG"
+                sleep 3
+    """
     private static let cachedTunProcessPID = LockedValue<(pid: Int32?, checkedAt: Date)?>(nil)
 
     static var logURL: URL {
@@ -218,6 +228,13 @@ enum TunServiceManager {
         FileManager.default.fileExists(atPath: store.tunRequestFlagURL.path)
             || FileManager.default.fileExists(atPath: store.tunRequestConfigURL.path)
             || FileManager.default.fileExists(atPath: store.tunRequestHeartbeatURL.path)
+    }
+
+    static func heartbeatAction(isTunEnabled: Bool, store: Store) -> HeartbeatAction {
+        guard isTunEnabled else { return .stop }
+        let hasPayload = FileManager.default.fileExists(atPath: store.tunRequestFlagURL.path)
+            && FileManager.default.fileExists(atPath: store.tunRequestConfigURL.path)
+        return hasPayload ? .refresh : .recover
     }
 
     static func waitUntilStopped(store: Store, timeout: TimeInterval) -> Bool {
@@ -948,7 +965,8 @@ enum TunServiceManager {
           fi
 
           if ! route_safe_to_start; then
-            rm -f "$FLAG" "$PIDFILE" "$REQUEST_FLAG" "$REQUEST_CONFIG" "$REQUEST_HEARTBEAT"
+            echo "$(date '+%Y-%m-%d %H:%M:%S') TUN route temporarily unsafe; request preserved for retry" >> "$LOG"
+            rm -f "$FLAG" "$PIDFILE"
             sleep 2
             continue
           fi
@@ -981,8 +999,7 @@ enum TunServiceManager {
               child_status="$?"
               clean_routes
               if [ "$child_status" -ne 0 ] && has_request; then
-                echo "$(date '+%Y-%m-%d %H:%M:%S') sing-box TUN exited with status $child_status, disabling current request" >> "$LOG"
-                rm -f "$FLAG" "$PIDFILE" "$REQUEST_FLAG" "$REQUEST_CONFIG" "$REQUEST_HEARTBEAT"
+                \(unexpectedChildExitShell)
               fi
             fi
             rm -f "$PIDFILE"

@@ -1,8 +1,8 @@
 import Foundation
 
 enum ClashAPI {
-    static func proxies() async throws -> [String: Any] {
-        try await requestJSON(path: "/proxies") as? [String: Any] ?? [:]
+    static func proxies(port: Int? = nil) async throws -> [String: Any] {
+        try await requestJSON(path: "/proxies", port: port) as? [String: Any] ?? [:]
     }
 
     static func proxyInfo(_ tag: String) async throws -> [String: Any] {
@@ -10,9 +10,9 @@ enum ClashAPI {
         return try await requestJSON(path: "/proxies/\(escaped)") as? [String: Any] ?? [:]
     }
 
-    static func selectProxy(group: String, node: String) async throws {
+    static func selectProxy(group: String, node: String, port: Int? = nil) async throws {
         let escaped = group.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? group
-        try await requestJSON(path: "/proxies/\(escaped)", method: "PUT", body: ["name": node])
+        try await requestJSON(path: "/proxies/\(escaped)", method: "PUT", body: ["name": node], port: port)
     }
 
     static func delay(node: String, url: String, port: Int? = nil) async throws -> Int {
@@ -116,13 +116,13 @@ enum ClashAPI {
     }
 
     @discardableResult
-    static func closeConnections() async throws -> Any {
-        try await requestJSON(path: "/connections", method: "DELETE")
+    static func closeConnections(port: Int? = nil) async throws -> Any {
+        try await requestJSON(path: "/connections", method: "DELETE", port: port)
     }
 
     @discardableResult
-    static func closeConnection(id: String) async throws -> Any {
-        try await requestJSON(path: "/connections/\(id)", method: "DELETE")
+    static func closeConnection(id: String, port: Int? = nil) async throws -> Any {
+        try await requestJSON(path: "/connections/\(id)", method: "DELETE", port: port)
     }
 
     static func traffic() async throws -> (up: Int, down: Int) {
@@ -158,13 +158,7 @@ enum ClashAPI {
 
     @discardableResult
     private static func requestJSON(path: String, method: String = "GET", body: [String: Any]? = nil, port: Int? = nil) async throws -> Any {
-        let base: String
-        if let port = port {
-            base = "http://127.0.0.1:\(port)"
-        } else {
-            base = TungBoxConfig.clashAPIURL
-        }
-        guard let url = URL(string: base + path) else {
+        guard let url = endpointURL(path: path, port: port) else {
             throw NSError.user("Clash API 地址无效")
         }
         var request = URLRequest(url: url)
@@ -182,5 +176,15 @@ enum ClashAPI {
         }
         if data.isEmpty { return [:] }
         return (try? JSONSerialization.jsonObject(with: data)) ?? [:]
+    }
+
+    static func endpointURL(path: String, port: Int? = nil) -> URL? {
+        let base: String
+        if let port = port {
+            base = "http://127.0.0.1:\(port)"
+        } else {
+            base = TungBoxConfig.clashAPIURL
+        }
+        return URL(string: base + path)
     }
 }

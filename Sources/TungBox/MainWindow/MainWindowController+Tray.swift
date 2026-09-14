@@ -106,7 +106,8 @@ extension MainWindowController {
     private func refreshTrayRuntimeState(for menu: NSMenu) {
         guard isProxyRuntimeRunning() else { return }
         Task { [weak self, weak menu] in
-            guard let proxiesObj = try? await ClashAPI.proxies() else { return }
+            let apiPort = await MainActor.run { [weak self] in self?.delayAPIPort() }
+            guard let proxiesObj = try? await ClashAPI.proxies(port: apiPort) else { return }
             await MainActor.run { [weak self, weak menu] in
                 guard let self, let menu, menu === self.statusItem?.menu else { return }
                 self.lastProxiesObj = proxiesObj

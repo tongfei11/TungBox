@@ -1514,12 +1514,13 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     }
 
     func selectNode(_ nodeTag: String, inGroup groupTag: String) {
+        let apiPort = delayAPIPort()
         Task {
             var switchedByAPI = false
             if isProxyRuntimeRunning() {
                 do {
-                    try await ClashAPI.selectProxy(group: groupTag, node: nodeTag)
-                    _ = try? await ClashAPI.closeConnections()
+                    try await ClashAPI.selectProxy(group: groupTag, node: nodeTag, port: apiPort)
+                    _ = try? await ClashAPI.closeConnections(port: apiPort)
                     switchedByAPI = true
                     appendLog("[节点] \(groupTag) 已通过运行时 API 切换到: \(nodeTag)，并已断开旧连接\n")
                 } catch {

@@ -53,13 +53,23 @@ enum CoreUpdater {
         }
         try verifyExtractedBinary(at: binaryURL, expectedVersion: release.version)
 
+        try activatePreparedBinary(at: binaryURL, to: coreBinaryURL)
+    }
+
+    static func activatePreparedBinary(at preparedURL: URL, to coreBinaryURL: URL) throws {
         let coreDirectory = coreBinaryURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: coreDirectory, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: preparedURL.path)
         if FileManager.default.fileExists(atPath: coreBinaryURL.path) {
-            try FileManager.default.removeItem(at: coreBinaryURL)
+            _ = try FileManager.default.replaceItemAt(
+                coreBinaryURL,
+                withItemAt: preparedURL,
+                backupItemName: nil,
+                options: [.usingNewMetadataOnly]
+            )
+        } else {
+            try FileManager.default.moveItem(at: preparedURL, to: coreBinaryURL)
         }
-        try FileManager.default.copyItem(at: binaryURL, to: coreBinaryURL)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: coreBinaryURL.path)
     }
 
     private static func fetchData(from url: URL) async throws -> Data {
