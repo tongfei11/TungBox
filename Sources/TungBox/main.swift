@@ -1619,11 +1619,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                         _ = try self.saveCurrent()
                         self.appendLog("[节点] \(groupTag) 已选择: \(nodeTag)\n")
                         self.refreshNodesFromEditor()
-                        if nodeTag == TungBoxConfig.tagAuto {
-                            if let autoGroup = self.nodeGroups.first(where: { $0.tag == TungBoxConfig.tagAuto }) {
-                                self.testGroupNodes(autoGroup)
-                            }
-                        }
                         if self.isProxyRuntimeRunning() && !switchedByAPI {
                             if self.isTunEnabled {
                                 // TUN is already running; hot-reload the config in
