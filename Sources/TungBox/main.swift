@@ -1582,9 +1582,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         let selectionID = selectorSelectionID
         let transitionID = runtimeTransitionID
         let apiPorts = activeSelectorAPIPorts()
-        let previousSelection = selectorSelectionTask
         selectorSelectionTask = Task {
-            await previousSelection?.value
             guard selectorSelectionID == selectionID, runtimeTransitionID == transitionID else { return }
             var switchedByAPI = false
             if isProxyRuntimeRunning() {
@@ -1592,10 +1590,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                     for apiPort in apiPorts {
                         guard selectorSelectionID == selectionID, runtimeTransitionID == transitionID else { return }
                         try await ClashAPI.selectProxy(group: groupTag, node: nodeTag, port: apiPort)
-                        _ = try? await ClashAPI.closeConnections(port: apiPort)
                     }
                     switchedByAPI = true
-                    appendLog("[节点] \(groupTag) 已通过运行时 API 切换到: \(nodeTag)，并已断开旧连接\n")
+                    appendLog("[节点] \(groupTag) 已通过运行时 API 切换到: \(nodeTag)\n")
                 } catch {
                     appendLog("[节点] 运行时 API 切换失败，改用配置重启：\(error.localizedDescription)\n")
                 }
