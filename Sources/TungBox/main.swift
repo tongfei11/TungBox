@@ -952,6 +952,12 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             self.clearFeatureTransitions()
             self.refreshStatus()
             self.scheduleConnectionsRefreshAfterStart()
+            // Refresh the selected URLTest group after the system proxy is ready
+            // so the Nodes page does not retain pre-start results.
+            if wantSystemProxy,
+               let autoGroup = self.nodeGroups.first(where: { $0.tag == TungBoxConfig.tagAuto }) {
+                self.testGroupNodes(autoGroup)
+            }
         }
     }
 
