@@ -2720,7 +2720,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         statsTimer?.invalidate()
         runningStatsMissCount = 0
         updateTrafficLabels()
-        statsTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+        statsTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.updateRunningStats()
             }
