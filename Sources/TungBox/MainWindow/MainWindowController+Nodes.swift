@@ -290,7 +290,7 @@ extension MainWindowController {
         }
         tile.isActionEnabled = !isAutoMember
         let isSelector = group.type.lowercased() == "selector"
-        tile.isInteractive = isSelector
+        tile.isInteractive = isSelector && !isAutoMember
         
         var displayName = nodeTag
         var displayDelay = node?.delay ?? ""
