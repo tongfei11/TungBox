@@ -788,6 +788,10 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         let token = runtimeTransitionID
         let wantSystemProxy = isSystemProxyEnabled
         let wantTun = isTunEnabled
+        // TUN and system proxy are independent switches. Once the TUN request
+        // is already present, changing only the system-proxy switch must not
+        // rebuild the TUN config or rerun synchronous route checks.
+        let tunNeedsReconcile = wantTun && !TunServiceManager.hasEnableRequest(store: store)
         let runnerRef = runner
         let storeCopy = store
         let log: @Sendable (String) -> Void = { [weak self] text in
@@ -799,7 +803,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         // derived from it inside enableTunServiceSafely (utun29, no 7890/9090).
         var userProxyURL: URL? = nil
         var userConfigText: String? = nil
-        if wantSystemProxy || wantTun {
+        if wantSystemProxy || tunNeedsReconcile {
             guard ensureCoreAvailableForStart() else { markProxyStartupFailed(); return }
             guard selectedIndex != nil, !nodes.isEmpty else {
                 showError(NSError.user("没有可用的配置或节点，请先导入订阅。"))
@@ -829,22 +833,26 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
             // ===== 1) Converge the TUN daemon (utun29) — independent of the proxy =====
             if wantTun {
-                do {
-                    let status = try await self.runSerializedOffMain { TunServiceManager.status(store: storeCopy) }
-                    guard token == self.runtimeTransitionID else { return }
-                    guard status.isUsable else {
-                        throw NSError.user("TUN 服务不可用：\(status.displayText)。请到 设置 > TUN 设置处理。")
+                if !tunNeedsReconcile {
+                    self.appendLog("[TungBox] TUN 已在运行，系统代理切换不重启 TUN\n")
+                } else {
+                    do {
+                        let status = try await self.runSerializedOffMain { TunServiceManager.status(store: storeCopy) }
+                        guard token == self.runtimeTransitionID else { return }
+                        guard status.isUsable else {
+                            throw NSError.user("TUN 服务不可用：\(status.displayText)。请到 设置 > TUN 设置处理。")
+                        }
+                        try self.enableTunServiceSafely(configText: userConfigText!)
+                        self.appendLog("[TungBox] TUN 已启用（\(reason)）\n")
+                    } catch {
+                        guard token == self.runtimeTransitionID else { return }
+                        self.appendLog("[TungBox] TUN 启用失败（\(reason)）：\(error.localizedDescription)\n")
+                        self.isTunEnabled = false
+                        UserDefaults.standard.set(false, forKey: "tunEnabled")
+                        self.tunTransition = .none
+                        self.syncProxyPreferenceControls()
+                        self.showError(error)
                     }
-                    try self.enableTunServiceSafely(configText: userConfigText!)
-                    self.appendLog("[TungBox] TUN 已启用（\(reason)）\n")
-                } catch {
-                    guard token == self.runtimeTransitionID else { return }
-                    self.appendLog("[TungBox] TUN 启用失败（\(reason)）：\(error.localizedDescription)\n")
-                    self.isTunEnabled = false
-                    UserDefaults.standard.set(false, forKey: "tunEnabled")
-                    self.tunTransition = .none
-                    self.syncProxyPreferenceControls()
-                    self.showError(error)
                 }
             } else {
                 // Closing TUN is INSTANT: just drop the request file. The daemon
