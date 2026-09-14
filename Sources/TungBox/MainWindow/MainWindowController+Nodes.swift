@@ -432,11 +432,8 @@ extension MainWindowController {
                 await withTaskGroup(of: (String, String).self) { tasks in
                     for tag in tags {
                         tasks.addTask {
-                            if runtimeRunning {
-                                do { return (tag, "\(try await ClashAPI.delay(node: tag, url: testURL, port: apiPort)) ms") }
-                                catch { return (tag, "失败") }
-                            }
-                            return (tag, await MainWindowController.fastDelayProbe(runner: runner, config: config, outbound: tag, testURL: testURL))
+                            return (tag, await MainWindowController.fastDelayProbe(serverHostPort: self.nodes.first(where: { $0.tag == tag })?.server,
+                                                                                    runner: runner, config: config, outbound: tag, testURL: testURL))
                         }
                     }
                     for await (tag, result) in tasks {
@@ -489,9 +486,14 @@ extension MainWindowController {
         } catch { showError(error) }
     }
 
-    /// 未开启运行时 API 时也使用 sing-box 的实际出站 URLTest，避免与
-    /// 开启代理时的 API 测试产生两套不同的测速语义。
-    nonisolated static func fastDelayProbe(runner: Runner, config: URL, outbound: String, testURL: String) async -> String {
+    /// 以节点服务器 TCP 连接作为稳定的可用性与延迟基准；UDP-only 节点
+    /// 或 TCP 失败时再回退到 sing-box URLTest。
+    nonisolated static func fastDelayProbe(serverHostPort: String?, runner: Runner, config: URL, outbound: String, testURL: String) async -> String {
+        if let hp = serverHostPort, !hp.isEmpty, !hp.hasSuffix(":") {
+            if let ms = await Runner.tcpDialDelayMs(serverHostPort: hp, timeout: 3.0) {
+                return "\(ms) ms"
+            }
+        }
         do {
             return try await runner.urlTest(config: config, outbound: outbound, testURL: testURL)
         } catch {
