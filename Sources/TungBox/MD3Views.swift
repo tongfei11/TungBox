@@ -2587,6 +2587,11 @@ final class MD3NodeTileView: NSView, MD3Themeable {
     
     var onClick: (() -> Void)?
     var onTestClick: (() -> Void)?
+    /// Delay values on node tiles are display-only.  Testing is triggered from
+    /// the page or group header so a tile cannot start a second test by accident.
+    var isActionEnabled: Bool = true {
+        didSet { actionButton.isEnabled = isActionEnabled }
+    }
     
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -2626,6 +2631,7 @@ final class MD3NodeTileView: NSView, MD3Themeable {
         actionButton.translatesAutoresizingMaskIntoConstraints = false
         actionButton.target = self
         actionButton.action = #selector(actionButtonClicked)
+        actionButton.isEnabled = isActionEnabled
         
         addSubview(nameLabel)
         addSubview(subLabel)
@@ -2733,6 +2739,7 @@ final class MD3NodeTileView: NSView, MD3Themeable {
     }
     
     @objc private func actionButtonClicked() {
+        guard isActionEnabled else { return }
         onTestClick?()
     }
     

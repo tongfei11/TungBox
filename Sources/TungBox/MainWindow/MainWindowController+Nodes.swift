@@ -285,6 +285,10 @@ extension MainWindowController {
         tile.groupTag = group.tag
         tile.nodeTag = nodeTag
         tile.isSelected = isSelected
+        let isAutoMember = nodeGroups.contains { candidate in
+            candidate.tag == nodeTag && ["urltest", "url-test", "fallback"].contains(candidate.type.lowercased())
+        }
+        tile.isActionEnabled = !isAutoMember
         let isSelector = group.type.lowercased() == "selector"
         tile.isInteractive = isSelector
         
@@ -314,12 +318,16 @@ extension MainWindowController {
                 self.selectNode(nodeTag, inGroup: group.tag)
             }
         }
-        
-        tile.onTestClick = { [weak self] in
-            guard let self = self else { return }
-            self.testSingleNode(tag: nodeTag)
+
+        // Individual leaf nodes remain manually testable. An auto-group tile is
+        // display-only; its result is refreshed when any of its members is tested
+        // or when the group header/page test is used.
+        if !isAutoMember {
+            tile.onTestClick = { [weak self] in
+                self?.testSingleNode(tag: nodeTag)
+            }
         }
-        
+
         tile.translatesAutoresizingMaskIntoConstraints = false
         tile.heightAnchor.constraint(equalToConstant: 42).isActive = true
         
