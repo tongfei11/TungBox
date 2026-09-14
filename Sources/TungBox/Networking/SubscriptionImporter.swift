@@ -9,7 +9,7 @@ enum SubscriptionImporter {
     /// 不列 Surge 或 NekoBox UA：那些 UA 服务端会返回 Surge MANAGED-CONFIG 或
     /// base64 share-link 列表，我们当前不解析这些格式，加进来只会浪费一次请求。
     static let fallbackUserAgents = [
-        "sing-box/1.12.0",
+        "sing-box/1.14.0",
         "clash-verge/v2.4.4 mihomo/Meta",
         "ClashMetaForAndroid/2.11.10.Meta",
         "Clash/v1.18.0"
@@ -114,7 +114,7 @@ enum SubscriptionImporter {
         return (text, header)
     }
 
-    static func fetch(urlString: String, userAgent: String = "sing-box/1.12.0") throws -> String {
+    static func fetch(urlString: String, userAgent: String = "sing-box/1.14.0") throws -> String {
         guard let url = URL(string: urlString.trimmingCharacters(in: .whitespacesAndNewlines)),
               ["http", "https"].contains(url.scheme?.lowercased()) else {
             throw NSError.user("订阅地址必须是 http 或 https URL")
