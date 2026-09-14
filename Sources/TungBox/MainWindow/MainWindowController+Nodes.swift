@@ -438,7 +438,7 @@ extension MainWindowController {
                                 do { return (tag, "\(try await ClashAPI.delay(node: tag, url: testURL, port: apiPort)) ms") }
                                 catch { return (tag, "失败") }
                             }
-                            return (tag, await MainWindowController.fastDelayProbe(serverHostPort: server, runner: runner, config: config, outbound: tag, testURL: testURL))
+                            return (tag, await MainWindowController.fastDelayProbe(runner: runner, config: config, outbound: tag, testURL: testURL))
                         }
                     }
                     for await (tag, result) in tasks {
@@ -491,14 +491,9 @@ extension MainWindowController {
         } catch { showError(error) }
     }
 
-    /// 关代理时的快速测速：先 TCP 直拨节点 server:port（几十 ms 完成），
-    /// 失败/不可达则回退到 sing-box fetch（UDP-only 节点如 hy2/tuic 需要）。
-    nonisolated static func fastDelayProbe(serverHostPort: String?, runner: Runner, config: URL, outbound: String, testURL: String) async -> String {
-        if let hp = serverHostPort, !hp.isEmpty, !hp.hasSuffix(":") {
-            if let ms = await Runner.tcpDialDelayMs(serverHostPort: hp, timeout: 3.0) {
-                return "\(ms) ms"
-            }
-        }
+    /// 未开启运行时 API 时也使用 sing-box 的实际出站 URLTest，避免与
+    /// 开启代理时的 API 测试产生两套不同的测速语义。
+    nonisolated static func fastDelayProbe(runner: Runner, config: URL, outbound: String, testURL: String) async -> String {
         do {
             return try await runner.urlTest(config: config, outbound: outbound, testURL: testURL)
         } catch {
