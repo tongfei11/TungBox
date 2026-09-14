@@ -58,7 +58,7 @@ extension MainWindowController {
     /// Import configurations created before the independent rule-source file was
     /// introduced. The current editor is the only available baseline; remove the
     /// known generated rule-set entries and persist the resulting snapshot once.
-    private func ensureRuleBase(for subscription: Subscription) throws {
+    func ensureRuleBase(for subscription: Subscription) throws {
         do {
             _ = try store.baseRouteRules(for: subscription.id)
             return

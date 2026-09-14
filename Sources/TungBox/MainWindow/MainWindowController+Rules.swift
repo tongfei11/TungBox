@@ -605,6 +605,7 @@ extension MainWindowController {
             guard let subscription = currentSubscription() else {
                 throw NSError.user("请先选择一个订阅。自定义规则会按订阅单独保存。")
             }
+            try ensureRuleBase(for: subscription)
 
             let strategy = customRuleStrategyPopup.titleOfSelectedItem ?? "Proxy"
             let note = customRuleNoteField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -670,6 +671,7 @@ extension MainWindowController {
             guard let subscription = currentSubscription() else {
                 throw NSError.user("请先选择一个订阅")
             }
+            try ensureRuleBase(for: subscription)
             guard let deletedRule = customRules.first(where: { $0.id == ruleID }) else {
                 throw NSError.user("没有找到选中的自定义规则")
             }
@@ -748,6 +750,7 @@ extension MainWindowController {
         // Regenerate config to apply the toggle
         if let sub = currentSubscription() {
             do {
+                try ensureRuleBase(for: sub)
                 let baseConfig = try removeCustomRule(customRules[idx], from: editor.string)
                 editor.string = try renderConfig(try applyCustomRules(to: baseConfig, subscriptionID: sub.id))
                 let url = try saveCurrent()
