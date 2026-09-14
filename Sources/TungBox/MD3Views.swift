@@ -3028,6 +3028,33 @@ final class MD3Dialog: NSView, MD3Themeable {
         updateColors()
     }
     
+    // Keep passive content inside the modal boundary. Plain NSViews and labels
+    // can forward unhandled mouse events along the responder chain.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard !isHidden, bounds.contains(convert(point, from: superview)) else { return nil }
+        guard let hit = super.hitTest(point) else { return self }
+        if hit === scrimView { return hit }
+        var candidate: NSView? = hit
+        while let view = candidate, view !== self {
+            if let field = view as? NSTextField {
+                if field.isEditable || field.isSelectable { return hit }
+            } else if view is NSControl || view is NSScrollView || view is NSTextView {
+                return hit
+            }
+            if !(view is NSTextField), !view.gestureRecognizers.isEmpty { return hit }
+            candidate = view.superview
+        }
+        return self
+    }
+
+    override func mouseDown(with event: NSEvent) {}
+    override func mouseUp(with event: NSEvent) {}
+    override func rightMouseDown(with event: NSEvent) {}
+    override func rightMouseUp(with event: NSEvent) {}
+    override func otherMouseDown(with event: NSEvent) {}
+    override func otherMouseUp(with event: NSEvent) {}
+    override func scrollWheel(with event: NSEvent) {}
+
     @objc private func scrimClicked() {
         cancelClicked()
     }
