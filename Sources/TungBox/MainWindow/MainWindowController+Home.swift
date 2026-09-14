@@ -639,22 +639,38 @@ extension MainWindowController {
     /// proxy state is untouched; reconcileRuntime() converges the runtime.
     func setCaptureMode(tunEnabled: Bool, source: String) {
         if tunEnabled {
-            let tunStatus = TunServiceManager.status(store: store)
-            guard tunStatus.isUsable else {
-                syncProxyPreferenceControls()
-                showToast("请先安装 TUN 服务")
-                showError(NSError.user("TUN 服务不可用：\(tunStatus.displayText)。请到 设置 > TUN 设置处理。"))
-                return
+            let storeCopy = store
+            beginFeatureTransition(tun: .starting)
+            syncProxyPreferenceControls()
+            Task.detached { [weak self] in
+                let status = TunServiceManager.status(store: storeCopy)
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    guard self.isTunEnabled == false else { return }
+                    guard status.isUsable else {
+                        self.clearFeatureTransitions()
+                        self.syncProxyPreferenceControls()
+                        self.showToast("请先安装 TUN 服务")
+                        self.showError(NSError.user("TUN 服务不可用：\(status.displayText)。请到 设置 > TUN 设置处理。"))
+                        return
+                    }
+                    do {
+                        try self.ensureTunRouteIsSafeToStart()
+                        self.commitCaptureMode(tunEnabled: true, source: source)
+                    } catch {
+                        self.clearFeatureTransitions()
+                        self.syncProxyPreferenceControls()
+                        self.showToast("TUN 已被保护拦截")
+                        self.showError(error)
+                    }
+                }
             }
-            do {
-                try ensureTunRouteIsSafeToStart()
-            } catch {
-                syncProxyPreferenceControls()
-                showToast("TUN 已被保护拦截")
-                showError(error)
-                return
-            }
+            return
         }
+        commitCaptureMode(tunEnabled: false, source: source)
+    }
+
+    private func commitCaptureMode(tunEnabled: Bool, source: String) {
         isTunEnabled = tunEnabled
         UserDefaults.standard.set(isTunEnabled, forKey: "tunEnabled")
         if !tunEnabled {
