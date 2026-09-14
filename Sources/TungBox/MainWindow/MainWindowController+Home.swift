@@ -657,6 +657,13 @@ extension MainWindowController {
         }
         isTunEnabled = tunEnabled
         UserDefaults.standard.set(isTunEnabled, forKey: "tunEnabled")
+        if !tunEnabled {
+            // Remove the request before scheduling the async runtime converge.
+            // This closes the race where a rapid off/on sequence leaves the
+            // daemon with an old request after the UI switch is already off.
+            stopTunRequestHeartbeat()
+            try? TunServiceManager.disable(store: store)
+        }
         beginFeatureTransition(tun: tunEnabled ? .starting : .stopping)
         syncProxyPreferenceControls()
         refreshStatus()   // show 启动中/关闭中 + spinner right away

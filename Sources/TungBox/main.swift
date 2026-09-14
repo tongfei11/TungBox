@@ -371,6 +371,13 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             UserDefaults.standard.set(false, forKey: "tunEnabled")
             try? TunServiceManager.disable(store: store)
             appendLog("[TUN] 检测到 TUN 服务不可用，已关闭 TUN 模式。请到 设置 > TUN 设置 重新安装。\n")
+        } else if !isTunEnabled && TunServiceManager.hasRequestFiles(store: store) {
+            // A crash or forced quit can leave the request files behind even
+            // though the persisted switch is off. Clear them before restoring
+            // any other runtime state, otherwise the root daemon can resurrect
+            // TUN during the next proxy transition.
+            try? TunServiceManager.disable(store: store)
+            appendLog("[TUN] 清理了开关已关闭但残留的 TUN 请求\n")
         }
         runner.stopStaleUserProcesses()
     }
