@@ -162,13 +162,13 @@ build_core() {
   local host_goarch
   host_goarch="$(go env GOARCH)"
 
-  # Resolve latest sing-box version for version injection
-  local core_version
-  if core_version="$(go list -m -json github.com/sagernet/sing-box@latest 2>/dev/null | awk -F'"' '/"Version"/ {print $4}')" && [[ -n "$core_version" ]]; then
+  # Pin the bundled core to the validated stable release. Override for local testing.
+  local core_version="${TUNGBOX_CORE_VERSION:-1.14.0}"
+  if [[ -n "$core_version" ]]; then
     echo "sing-box ${core_version} identified, building..." >&2
   else
-    core_version="unknown"
-    echo "Failed to resolve sing-box version, building with 'unknown'..." >&2
+    echo "Missing TUNGBOX_CORE_VERSION." >&2
+    return 1
   fi
 
   local tags="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale"
@@ -183,7 +183,7 @@ build_core() {
 
   echo "Building stripped sing-box core for ${target_arch} (tags: ${tags}, version: ${core_version})..." >&2
   env CGO_ENABLED=0 GOOS=darwin GOARCH="$go_arch" go install \
-    -trimpath -ldflags="$ldflags" -tags "$tags" github.com/sagernet/sing-box/cmd/sing-box@latest
+    -trimpath -ldflags="$ldflags" -tags "$tags" github.com/sagernet/sing-box/cmd/sing-box@v${core_version}
 
   if [[ -x "$installed_binary" ]]; then
     cp "$installed_binary" "$binary"

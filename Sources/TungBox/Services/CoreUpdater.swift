@@ -19,7 +19,7 @@ enum CoreUpdater {
         let tag = "v\(rawVersion)"
         let arch = platformAssetArch()
         guard isCompatibleCoreVersion(rawVersion) else {
-            throw NSError.user("TungBox 当前仅验证支持 sing-box Core 1.12.x 和 1.13.x。\(rawVersion)（\(arch)）暂未确认兼容，请等待 TungBox 官方确认支持后再安装。")
+            throw NSError.user("TungBox 当前仅验证支持 sing-box Core 1.12.x、1.13.x 和 1.14.x。\(rawVersion)（\(arch)）暂未确认兼容，请等待 TungBox 官方确认支持后再安装。")
         }
         let assetName = "sing-box-\(rawVersion)-darwin-\(arch).tar.gz"
         let downloadURL = releaseBaseURL
@@ -141,7 +141,7 @@ enum CoreUpdater {
               Int(components[2]) != nil else {
             return false
         }
-        return minor == 12 || minor == 13
+        return minor == 12 || minor == 13 || minor == 14
     }
 
     private static func run(_ binary: String, args: [String]) throws {
