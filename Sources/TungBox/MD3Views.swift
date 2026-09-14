@@ -2590,7 +2590,10 @@ final class MD3NodeTileView: NSView, MD3Themeable {
     /// Delay values on node tiles are display-only.  Testing is triggered from
     /// the page or group header so a tile cannot start a second test by accident.
     var isActionEnabled: Bool = true {
-        didSet { actionButton.isEnabled = isActionEnabled }
+        didSet {
+            actionButton.isEnabled = isActionEnabled
+            actionButton.isHidden = !isActionEnabled
+        }
     }
     
     override init(frame frameRect: NSRect) {
@@ -2632,6 +2635,7 @@ final class MD3NodeTileView: NSView, MD3Themeable {
         actionButton.target = self
         actionButton.action = #selector(actionButtonClicked)
         actionButton.isEnabled = isActionEnabled
+        actionButton.isHidden = !isActionEnabled
         
         addSubview(nameLabel)
         addSubview(subLabel)
