@@ -28,13 +28,25 @@ struct Main {
         behind.target = probe
         behind.action = #selector(ClickProbe.clicked(_:))
         root.addSubview(behind)
+        behind.updateTrackingAreas()
+        let enter = NSEvent.enterExitEvent(with: .mouseEntered, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0, trackingNumber: 0, userData: nil)!
+        behind.updateLayer()
+        let idleColor = behind.layer!.backgroundColor!
         let input = NSTextField(string: "editable")
         input.heightAnchor.constraint(equalToConstant: 30).isActive = true
         for custom in [nil, input] as [NSView?] {
+            behind.mouseEntered(with: enter)
+            behind.updateLayer()
+            precondition(behind.layer!.backgroundColor! != idleColor, "Background hover must work before presenting")
             let dialog = MD3Dialog(title: "Core 更新", message: "当前版本：1.13.13\n最新版本：1.14.0", customView: custom)
             dialog.frame = root.bounds
             root.addSubview(dialog)
             root.layoutSubtreeIfNeeded()
+            behind.updateLayer()
+            precondition(behind.layer!.backgroundColor! == idleColor, "Presenting must clear existing background hover")
+            behind.mouseEntered(with: enter)
+            behind.updateLayer()
+            precondition(behind.layer!.backgroundColor! == idleColor, "Background tracking events must be blocked")
             let card = dialog.subviews[1]
             let label = card.subviews.compactMap { $0 as? NSTextField }.last!
             for local in [NSPoint(x: 10, y: 10), NSPoint(x: card.bounds.maxX - 10, y: card.bounds.midY), label.convert(NSPoint(x: 5, y: 5), to: card)] {
@@ -44,6 +56,12 @@ struct Main {
             }
             let stack = card.subviews.compactMap { $0 as? NSStackView }.last!
             let confirm = stack.arrangedSubviews.last!
+            let confirmButton = confirm as! MD3Button
+            confirmButton.updateLayer()
+            let confirmColor = confirmButton.layer!.backgroundColor!
+            confirmButton.mouseEntered(with: enter)
+            confirmButton.updateLayer()
+            precondition(confirmButton.layer!.backgroundColor! != confirmColor, "Dialog hover must remain active")
             precondition(root.hitTest(confirm.convert(NSPoint(x: confirm.bounds.midX, y: confirm.bounds.midY), to: root)) === confirm, "Confirm must remain clickable")
             if custom != nil {
                 let hit = root.hitTest(input.convert(NSPoint(x: 5, y: 5), to: root))
@@ -60,6 +78,7 @@ struct Main {
             let scrimHit = root.hitTest(NSPoint(x: 5, y: 5))
             precondition(scrimHit === dialog || scrimHit?.isDescendant(of: dialog) == true, "Scrim must block underlying controls")
             dialog.removeFromSuperview()
+            precondition(!behind.isBlockedByMD3Dialog, "Removing must restore background interaction")
         }
         print("Dialog text, blank space, scrim, buttons and custom input regressions passed")
     }

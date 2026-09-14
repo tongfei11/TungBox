@@ -1,6 +1,16 @@
 import AppKit
 import Foundation
 
+// Tracking areas receive hover independently of hitTest. Only the topmost
+// dialog and its descendants may react while a modal overlay is attached.
+extension NSView {
+    var isBlockedByMD3Dialog: Bool {
+        guard let root = window?.contentView,
+              let dialog = root.subviews.reversed().compactMap({ $0 as? MD3Dialog }).first(where: { !$0.isHidden }) else { return false }
+        return self !== dialog && !isDescendant(of: dialog)
+    }
+}
+
 // MARK: - Color Mix & Hex Helper
 
 extension NSColor {
@@ -440,10 +450,13 @@ final class MD3Button: NSButton, MD3Themeable {
     }
     
     override func resetCursorRects() {
+        guard !isBlockedByMD3Dialog else { return }
         addCursorRect(bounds, cursor: .pointingHand)
     }
     
     override func mouseEntered(with event: NSEvent) {
+        guard !isBlockedByMD3Dialog else { return }
+
         isHovered = true
     }
     
@@ -1385,7 +1398,10 @@ final class MD3SubscriptionItemView: NSView, MD3Themeable {
         let area = NSTrackingArea(rect: bounds, options: opts, owner: self, userInfo: nil)
         addTrackingArea(area); trackingArea = area
     }
-    override func mouseEntered(with event: NSEvent) { isHovered = true }
+    override func mouseEntered(with event: NSEvent) {
+        guard !isBlockedByMD3Dialog else { return }
+        isHovered = true
+    }
     override func mouseExited(with event: NSEvent) { isHovered = false }
     override func mouseDown(with event: NSEvent) { onClick?() }
 
@@ -1990,6 +2006,8 @@ final class MD3SidebarItem: NSView, MD3Themeable {
     }
     
     override func mouseEntered(with event: NSEvent) {
+        guard !isBlockedByMD3Dialog else { return }
+
         isHovered = true
     }
     
@@ -2177,6 +2195,8 @@ final class MD3AppVersionFooter: NSControl, MD3Themeable {
     }
 
     override func mouseEntered(with event: NSEvent) {
+        guard !isBlockedByMD3Dialog else { return }
+
         isHovered = true
     }
 
@@ -2197,6 +2217,7 @@ final class MD3AppVersionFooter: NSControl, MD3Themeable {
     }
 
     override func resetCursorRects() {
+        guard !isBlockedByMD3Dialog else { return }
         addCursorRect(bounds, cursor: .pointingHand)
     }
 
@@ -2354,6 +2375,8 @@ final class MD3ColorSchemeRow: NSView, MD3Themeable {
     }
     
     override func mouseEntered(with event: NSEvent) {
+        guard !isBlockedByMD3Dialog else { return }
+
         isHovered = true
     }
     
@@ -2753,6 +2776,7 @@ final class MD3GroupDelayButton: NSView, MD3Themeable {
     }
     
     override func resetCursorRects() {
+        guard !isBlockedByMD3Dialog else { return }
         addCursorRect(bounds, cursor: .pointingHand)
     }
     
@@ -2811,6 +2835,8 @@ final class MD3GroupDelayButton: NSView, MD3Themeable {
     }
     
     override func mouseEntered(with event: NSEvent) {
+        guard !isBlockedByMD3Dialog else { return }
+
         isHovered = true
     }
     
@@ -3055,6 +3081,34 @@ final class MD3Dialog: NSView, MD3Themeable {
     override func otherMouseUp(with event: NSEvent) {}
     override func scrollWheel(with event: NSEvent) {}
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let root = superview, let window else { return }
+        // Clear hover that was already active when a button opened the dialog.
+        let event = NSEvent.enterExitEvent(with: .mouseExited, location: .zero,
+            modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
+            context: nil, eventNumber: 0, trackingNumber: 0, userData: nil)!
+        func reset(_ view: NSView) {
+            guard view !== self else { return }
+            if !view.trackingAreas.isEmpty { view.mouseExited(with: event) }
+            window.invalidateCursorRects(for: view)
+            for child in view.subviews { reset(child) }
+        }
+        reset(root)
+        NSCursor.arrow.set()
+    }
+
+    override func removeFromSuperview() {
+        let previousWindow = window
+        super.removeFromSuperview()
+        // Rebuild cursors after the modal restriction is lifted.
+        func refresh(_ view: NSView) {
+            previousWindow?.invalidateCursorRects(for: view)
+            for child in view.subviews { refresh(child) }
+        }
+        if let root = previousWindow?.contentView { refresh(root) }
+    }
+
     @objc private func scrimClicked() {
         cancelClicked()
     }
@@ -3175,6 +3229,8 @@ final class MD3Checkbox: NSControl, MD3Themeable {
     }
     
     override func mouseEntered(with event: NSEvent) {
+        guard !isBlockedByMD3Dialog else { return }
+
         guard isEnabled else { return }
         isHovered = true
     }
@@ -3351,6 +3407,8 @@ final class MD3PopUpButton: NSPopUpButton, MD3Themeable {
     }
     
     override func mouseEntered(with event: NSEvent) {
+        guard !isBlockedByMD3Dialog else { return }
+
         isHovered = true
     }
     
@@ -3501,6 +3559,8 @@ final class MD3RadioButton: NSControl, MD3Themeable {
     }
     
     override func mouseEntered(with event: NSEvent) {
+        guard !isBlockedByMD3Dialog else { return }
+
         guard isEnabled else { return }
         isHovered = true
     }
