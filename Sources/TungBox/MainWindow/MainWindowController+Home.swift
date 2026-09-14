@@ -492,6 +492,8 @@ extension MainWindowController {
         let extraPorts: [Int] = isTunRuntimeRunning() ? [TungBoxConfig.tunDaemonClashPort] : []
         let allPorts: [Int] = [9090] + extraPorts
         let proxyAPIPort = delayAPIPort()
+        let statsTransitionID = runtimeTransitionID
+        let statsSelectionID = selectorSelectionID
         let prevTotals = prevTrafficTotals
         let elapsedSinceLast = max(Date().timeIntervalSince(connectionRefreshTime), 0.5)
         Task {
@@ -535,7 +537,7 @@ extension MainWindowController {
             
             await MainActor.run { [weak self] in
                 guard let self = self else { return }
-                guard self.isProxyRuntimeRunning() else { return }
+                guard self.isProxyRuntimeRunning(), self.runtimeTransitionID == statsTransitionID, self.selectorSelectionID == statsSelectionID else { return }
 
                 if let apiConnections {
                     self.applyConnections(apiConnections, detail: "实时刷新")
@@ -562,6 +564,18 @@ extension MainWindowController {
                 // Sync active node from Clash API. Delay values are updated only by
                 // the explicit automatic/all-node delay test, not by this poll.
                 self.lastProxiesObj = proxiesObj
+                if let proxies = proxiesObj?["proxies"] as? [String: Any] {
+                    var changed = false
+                    for index in self.nodeGroups.indices {
+                        if let group = proxies[self.nodeGroups[index].tag] as? [String: Any],
+                           let now = group["now"] as? String, !now.isEmpty,
+                           self.nodeGroups[index].current != now {
+                            self.nodeGroups[index].current = now
+                            changed = true
+                        }
+                    }
+                    if changed { self.refreshNodeGroupsView() }
+                }
                 let activeNodeInfo = self.resolveActiveOutbound(proxiesObj: proxiesObj)
                 self.currentNodeNameLabel.stringValue = activeNodeInfo.name.isEmpty ? "（选择中…）" : activeNodeInfo.name
                 self.currentNodeAutoBadge.isHidden = !activeNodeInfo.isAuto
@@ -592,8 +606,8 @@ extension MainWindowController {
         proc.standardError = pipe
         do {
             try proc.run()
-            proc.waitUntilExit()
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            proc.waitUntilExit()
             return String(data: data, encoding: .utf8) ?? ""
         } catch {
             return ""
@@ -638,15 +652,20 @@ extension MainWindowController {
     /// Toggle the TUN switch (shared by the home switch, tray, and settings). System
     /// proxy state is untouched; reconcileRuntime() converges the runtime.
     func setCaptureMode(tunEnabled: Bool, source: String) {
+        tunCaptureIntentID = UUID()
+        let intent = tunCaptureIntentID
         if tunEnabled {
             let storeCopy = store
             beginFeatureTransition(tun: .starting)
             syncProxyPreferenceControls()
             Task.detached { [weak self] in
                 let status = TunServiceManager.status(store: storeCopy)
+                let route = self?.runCommand("/sbin/route", args: ["-n", "get", "default"]) ?? ""
+                let virtualRoute = route.split(separator: "\n").contains { $0.contains("interface:") && $0.contains("utun") }
+                let blockedRoute = virtualRoute && TunServiceManager.defaultNetworkInterface() == nil
                 await MainActor.run { [weak self] in
                     guard let self else { return }
-                    guard self.isTunEnabled == false else { return }
+                    guard self.tunCaptureIntentID == intent, !self.isTunEnabled else { return }
                     guard status.isUsable else {
                         self.clearFeatureTransitions()
                         self.syncProxyPreferenceControls()
@@ -655,7 +674,7 @@ extension MainWindowController {
                         return
                     }
                     do {
-                        try self.ensureTunRouteIsSafeToStart()
+                        if blockedRoute { throw NSError.user("系统默认路由位于 TUN/VPN，且没有可用物理出口。请检查网络后重试。") }
                         self.commitCaptureMode(tunEnabled: true, source: source)
                     } catch {
                         self.clearFeatureTransitions()

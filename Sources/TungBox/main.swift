@@ -53,7 +53,14 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var nodeTileActions: [Int: (group: String, node: String)] = [:]
     var groupTestActions: [Int: String] = [:]
     var nextNodeTileTag = 1
-    var selectedIndex: Int?
+    var selectedIndex: Int? {
+        didSet {
+            if oldValue != selectedIndex {
+                nodeDelayTestID = UUID()
+                selectorSelectionID = UUID()
+            }
+        }
+    }
     var selectedSubscriptionIndex: Int? {
         didSet {
             if let index = selectedSubscriptionIndex {
@@ -208,6 +215,10 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var statsTimer: Timer?
     var isUpdatingRunningStats = false
     var runningStatsMissCount = 0
+    var nodeDelayTestID = UUID()
+    var selectorSelectionID = UUID()
+    var selectorSelectionTask: Task<Void, Never>?
+    var tunCaptureIntentID = UUID()
     var lastProxiesObj: [String: Any]? = nil
     var prevConnections: [ConnectionInfo] = []
     /// 上一次拉到的 sing-box 进程级累计字节数（按端口分别记，因为用户代理 9090 和
@@ -792,6 +803,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     func reconcileRuntime(reason: String, forceRestart: Bool = false) {
         let port = getMixedProxyPort()
         runtimeTransitionID += 1
+        nodeDelayTestID = UUID()
         let token = runtimeTransitionID
         let wantSystemProxy = isSystemProxyEnabled
         let wantTun = isTunEnabled
@@ -805,13 +817,14 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             Task { @MainActor [weak self] in self?.appendLog(text) }
         }
 
-        // Build the configs on the main thread (touches the editor). The user proxy
-        // config is a plain NON-TUN local proxy (7890); the TUN daemon config is
-        // derived from it inside enableTunServiceSafely (utun29, no 7890/9090).
+        // Snapshot the editor only when a process needs configuration. Network
+        // discovery is awaited off the main actor below; toggling the OS proxy
+        // never rebuilds subscription/rules views or reconfigures a live TUN.
         var userProxyURL: URL? = nil
         var userConfigText: String? = nil
-        var preparedTunRequest: String? = nil
-        if wantSystemProxy || tunNeedsReconcile {
+        let needsUserProxyStart = wantSystemProxy && (!runner.isRunning || forceRestart)
+        let transitionStarted = Date()
+        if needsUserProxyStart || tunNeedsReconcile {
             guard ensureCoreAvailableForStart() else { markProxyStartupFailed(); return }
             guard selectedIndex != nil, !nodes.isEmpty else {
                 showError(NSError.user("没有可用的配置或节点，请先导入订阅。"))
@@ -825,11 +838,12 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 config = setTunEnabled(false, in: config)   // user proxy is never TUN
                 config = ensureModeSupport(in: config, mode: selectedMode())
                 editor.string = try renderConfig(config)
-                userProxyURL = try saveCurrent()
+                // Runtime convergence does not rebuild the rules and nodes UI.
+                guard let index = selectedIndex else { throw NSError.user("请先选择一个配置") }
+                userProxyURL = store.configURL(for: profiles[index])
+                try editor.string.write(to: userProxyURL!, atomically: true, encoding: .utf8)
                 userConfigText = editor.string
-                if wantTun && tunNeedsReconcile {
-                    preparedTunRequest = try preparedTunConfigText(from: editor.string)
-                }
+
             } catch {
                 showError(error)
                 markProxyStartupFailed()
@@ -837,6 +851,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             }
         }
 
+        appendLog("[性能] 主线程配置准备：\(Int(Date().timeIntervalSince(transitionStarted) * 1000)) ms\n")
         if wantSystemProxy { wasProxyActiveInThisSession = true }
         appendLog("[TungBox] 正在切换运行状态（\(reason)）...\n")
         Task { @MainActor [weak self] in
@@ -853,10 +868,19 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                         guard status.isUsable else {
                             throw NSError.user("TUN 服务不可用：\(status.displayText)。请到 设置 > TUN 设置处理。")
                         }
-                        let request = preparedTunRequest ?? userConfigText!
+                        let source = userConfigText!
+                        let upstreamHosts = self.tunUpstreamHosts(in: source)
+                        let discoveryStarted = Date()
+                        let network = try await self.runSerializedOffMain {
+                            (TunServiceManager.defaultNetworkInterface(), self.resolvePublicIPv4Addresses(forHosts: upstreamHosts))
+                        }
+                        guard token == self.runtimeTransitionID else { return }
+                        self.appendLog("[性能] TUN 后台出口探测：\(Int(Date().timeIntervalSince(discoveryStarted) * 1000)) ms\n")
+                        let request = try self.preparedTunConfigText(from: source, networkSnapshot: network)
                         try await self.runSerializedOffMain {
                             try TunServiceManager.enable(store: storeCopy, configText: request)
                         }
+                        guard token == self.runtimeTransitionID else { return }
                         self.startTunRequestHeartbeat()
                         self.wasTunActiveInThisSession = true
                         self.verifyTunStartupAsync()
@@ -923,6 +947,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             }
 
             guard token == self.runtimeTransitionID else { return }
+            self.appendLog("[性能] 运行状态切换完成（\(reason)）：\(Int(Date().timeIntervalSince(transitionStarted) * 1000)) ms，UI 保持异步\n")
+            self.reconcileSelectorSelectionsToConfig()
             self.clearFeatureTransitions()
             self.refreshStatus()
             self.scheduleConnectionsRefreshAfterStart()
@@ -1539,19 +1565,35 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
     
 
+    func activeSelectorAPIPorts() -> [Int] {
+        var ports: [Int] = []
+        if runner.isRunning { ports.append(9090) }
+        if isTunRuntimeRunning() { ports.append(TungBoxConfig.tunDaemonClashPort) }
+        return ports
+    }
+
     func selectNode(at index: Int) {
         guard nodes.indices.contains(index) else { return }
         selectNode(nodes[index].tag, inGroup: TungBoxConfig.tagManual)
     }
 
     func selectNode(_ nodeTag: String, inGroup groupTag: String) {
-        let apiPort = delayAPIPort()
-        Task {
+        selectorSelectionID = UUID()
+        let selectionID = selectorSelectionID
+        let transitionID = runtimeTransitionID
+        let apiPorts = activeSelectorAPIPorts()
+        let previousSelection = selectorSelectionTask
+        selectorSelectionTask = Task {
+            await previousSelection?.value
+            guard selectorSelectionID == selectionID, runtimeTransitionID == transitionID else { return }
             var switchedByAPI = false
             if isProxyRuntimeRunning() {
                 do {
-                    try await ClashAPI.selectProxy(group: groupTag, node: nodeTag, port: apiPort)
-                    _ = try? await ClashAPI.closeConnections(port: apiPort)
+                    for apiPort in apiPorts {
+                        guard selectorSelectionID == selectionID, runtimeTransitionID == transitionID else { return }
+                        try await ClashAPI.selectProxy(group: groupTag, node: nodeTag, port: apiPort)
+                        _ = try? await ClashAPI.closeConnections(port: apiPort)
+                    }
                     switchedByAPI = true
                     appendLog("[节点] \(groupTag) 已通过运行时 API 切换到: \(nodeTag)，并已断开旧连接\n")
                 } catch {
@@ -1559,7 +1601,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 }
             }
             await MainActor.run { [weak self] in
-                guard let self = self else { return }
+                guard let self = self, self.selectorSelectionID == selectionID, self.runtimeTransitionID == transitionID else { return }
                 do {
                     guard var config = self.parseConfigObject(from: self.editor.string) else { return }
                     var outbounds = config["outbounds"] as? [[String: Any]] ?? []
@@ -1574,7 +1616,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                     if found {
                         config["outbounds"] = outbounds
                         self.editor.string = try self.renderConfig(config)
-                        let url = try self.saveCurrent()
+                        _ = try self.saveCurrent()
                         self.appendLog("[节点] \(groupTag) 已选择: \(nodeTag)\n")
                         self.refreshNodesFromEditor()
                         if nodeTag == TungBoxConfig.tagAuto {
@@ -1590,9 +1632,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                                 // (the reported "switching node killed the proxy").
                                 self.reloadTunConfigInPlace(configText: self.editor.string)
                                 self.appendLog("[节点] 已按新节点热重载 TUN\n")
+                                if self.isSystemProxyEnabled { self.reconcileRuntime(reason: "节点切换后重启", forceRestart: true) }
                             } else {
-                                self.runner.stop()
-                                try self.startNormalProxy(config: url, port: self.getMixedProxyPort(), reason: "节点切换后重启")
+                                self.reconcileRuntime(reason: "节点切换后重启", forceRestart: true)
                                 self.appendLog("[节点] 服务已按新节点重启\n")
                             }
                             self.refreshStatus()
@@ -1641,7 +1683,15 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         }
     }
 
-    func preparedTunConfigText(from configText: String) throws -> String {
+    func tunUpstreamHosts(in text: String) -> [String] {
+        let config = parseConfigObject(from: text) ?? [:]
+        let outbounds = config["outbounds"] as? [[String: Any]] ?? []
+        var seen = Set<String>()
+        return Array(outbounds.compactMap { $0["server"] as? String }
+            .filter { !$0.isEmpty && routeExcludeCIDR(for: $0) == nil && seen.insert($0).inserted }.prefix(16))
+    }
+
+    func preparedTunConfigText(from configText: String, networkSnapshot: (String?, [String: [String]])? = nil) throws -> String {
         guard var config = parseConfigObject(from: configText) else {
             throw NSError.user("当前配置不是有效 JSON")
         }
@@ -1664,8 +1714,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         config = ensureModeSupport(in: config, mode: Mode(value: modeValue, displayName: modeDisplayName(modeValue)))
         config = stripLocalListenersForTunDaemon(in: config)
         config = applyTunAutomaticEgressRouting(in: config)
-        config = applyTunPhysicalEgressBinding(in: config)
-        config = applyTunRuntimeRouteExclusions(in: config)
+        config = applyTunPhysicalEgressBinding(in: config, interfaceSnapshot: networkSnapshot.map { $0.0 })
+        config = applyTunRuntimeRouteExclusions(in: config, resolvedSnapshot: networkSnapshot?.1)
         config = setTunCacheFile(enabled: true, in: config)
         try validateTunRuntimeRouting(in: config)
 
@@ -1801,9 +1851,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         return config
     }
 
-    func applyTunPhysicalEgressBinding(in config: [String: Any]) -> [String: Any] {
+    func applyTunPhysicalEgressBinding(in config: [String: Any], interfaceSnapshot: String?? = nil) -> [String: Any] {
         var config = config
-        guard let interface = TunServiceManager.defaultNetworkInterface() else {
+        guard let interface = interfaceSnapshot ?? TunServiceManager.defaultNetworkInterface() else {
             appendLog("[TUN] 未找到可用物理出口接口，保留 auto_detect_interface\n")
             return config
         }
@@ -1830,7 +1880,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         return config
     }
 
-    func applyTunRuntimeRouteExclusions(in config: [String: Any]) -> [String: Any] {
+    func applyTunRuntimeRouteExclusions(in config: [String: Any], resolvedSnapshot: [String: [String]]? = nil) -> [String: Any] {
         var config = config
         var bypassCIDRs: [String] = []
         var seen = Set<String>()
@@ -1894,7 +1944,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         // ~1.5s per host, so 16 hostnames serially stalled the TUN switch for many
         // seconds on the main thread. Concurrency caps the wait at ~one lookup.
         let cappedHosts = Array(hostsToResolve.prefix(16))
-        let resolvedByHost = resolvePublicIPv4Addresses(forHosts: cappedHosts)
+        let resolvedByHost = resolvedSnapshot ?? resolvePublicIPv4Addresses(forHosts: cappedHosts)
         for host in cappedHosts {
             for ip in (resolvedByHost[host] ?? []).prefix(4) {
                 if let cidr = routeExcludeCIDR(for: ip) {

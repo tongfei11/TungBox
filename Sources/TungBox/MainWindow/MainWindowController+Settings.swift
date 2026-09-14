@@ -1017,7 +1017,7 @@ extension MainWindowController {
                 try? await Task.sleep(nanoseconds: 500_000_000)
                 let stillWanted = await MainActor.run { [weak self] in self?.isTunEnabled ?? false }
                 guard stillWanted else { return }
-                if TunServiceManager.activeSingBoxPID(store: store) != nil,
+                if TunServiceManager.activeSingBoxPID(store: store, allowScan: false) != nil,
                    TunServiceManager.tunInterfaceIsActive() {
                     online = true
                     break
@@ -1058,10 +1058,15 @@ extension MainWindowController {
             targets.append((tag, def))
         }
         guard !targets.isEmpty else { return }
-        let apiPort = delayAPIPort()
+        let apiPorts = activeSelectorAPIPorts()
+        let selectionID = selectorSelectionID
+        let transitionID = runtimeTransitionID
         Task {
             for target in targets {
-                try? await ClashAPI.selectProxy(group: target.group, node: target.node, port: apiPort)
+                for apiPort in apiPorts {
+                    guard selectionID == selectorSelectionID, transitionID == runtimeTransitionID else { return }
+                    try? await ClashAPI.selectProxy(group: target.group, node: target.node, port: apiPort)
+                }
             }
         }
     }
@@ -1154,7 +1159,7 @@ extension MainWindowController {
             return runner.pid
         }
         if isTunRuntimeRunning() {
-            return TunServiceManager.activeSingBoxPID(store: store)
+            return TunServiceManager.activeSingBoxPID(store: store, allowScan: false)
         }
         return nil
     }

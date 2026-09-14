@@ -16,15 +16,30 @@ enum ClashAPI {
     }
 
     static func delay(node: String, url: String, port: Int? = nil) async throws -> Int {
-        let escapedNode = node.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? node
-        let escapedURL = url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? url
-        let path = "/proxies/\(escapedNode)/delay?url=\(escapedURL)&timeout=5000"
-
-        guard let object = try await requestJSON(path: path, port: port) as? [String: Any],
+        guard let object = try await requestJSON(path: delayPath(kind: "proxies", tag: node, url: url), port: port) as? [String: Any],
               let delay = object["delay"] as? Int else {
             throw NSError.user("测速接口响应无效")
         }
         return delay
+    }
+
+    /// sing-box Meta API calls URLTestGroup.URLTest and performs its selection update.
+    /// /proxies/{tag}/delay only probes the selected outbound; PUT supports selectors only.
+    static func testGroup(_ tag: String, url: String, port: Int? = nil) async throws {
+        // sing-box returns a single {"delay": ms} value for group URLTest.
+        // The important side effect is the group's selected outbound; the
+        // subsequent /proxies refresh is the source of truth for the UI.
+        guard let result = try await requestJSON(path: delayPath(kind: "group", tag: tag, url: url), port: port, timeout: 35) as? [String: Any],
+              result["delay"] != nil else {
+            throw NSError.user("分组测速接口响应无效")
+        }
+    }
+
+    static func delayPath(kind: String, tag: String, url: String) -> String {
+        let unreserved = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+        let escapedTag = tag.addingPercentEncoding(withAllowedCharacters: unreserved) ?? tag
+        let escapedURL = url.addingPercentEncoding(withAllowedCharacters: unreserved) ?? url
+        return "/\(kind)/\(escapedTag)/delay?url=\(escapedURL)&timeout=\(kind == "group" ? 30000 : 5000)"
     }
 
     static func connections() async throws -> [ConnectionInfo] {
@@ -157,13 +172,13 @@ enum ClashAPI {
     }
 
     @discardableResult
-    private static func requestJSON(path: String, method: String = "GET", body: [String: Any]? = nil, port: Int? = nil) async throws -> Any {
+    private static func requestJSON(path: String, method: String = "GET", body: [String: Any]? = nil, port: Int? = nil, timeout: TimeInterval = 7) async throws -> Any {
         guard let url = endpointURL(path: path, port: port) else {
             throw NSError.user("Clash API 地址无效")
         }
         var request = URLRequest(url: url)
         request.httpMethod = method
-        request.timeoutInterval = 5
+        request.timeoutInterval = timeout
         if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: body)

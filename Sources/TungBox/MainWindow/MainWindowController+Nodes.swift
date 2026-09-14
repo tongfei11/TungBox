@@ -197,7 +197,7 @@ extension MainWindowController {
             self.testGroupNodes(group)
         }
 
-        let resolved = resolveActiveOutboundForGroup(groupTag: group.tag, proxiesObj: lastProxiesObj)
+        let resolved = resolveActiveOutboundForGroup(groupTag: group.tag, proxiesObj: isProxyRuntimeRunning() ? lastProxiesObj : nil)
         // For auto groups (urltest/fallback) the picked node is already shown with a
         // selected highlight in the grid below, so omit the redundant "(自动)" suffix
         // in the header. Selector groups keep it to show they route through auto.
@@ -277,11 +277,10 @@ extension MainWindowController {
     }
 
     func nodeTile(group: NodeGroupInfo, nodeTag: String, node: NodeInfo?) -> NSView {
-        let isAutoGroup = ["urltest", "url-test", "fallback"].contains(group.type.lowercased())
-        let resolvedCurrent = isAutoGroup
-            ? resolveActiveOutboundForGroup(groupTag: group.tag, proxiesObj: lastProxiesObj).name
-            : group.current
-        let isSelected = nodeTag == (resolvedCurrent.isEmpty ? group.current : resolvedCurrent)
+        let proxies = lastProxiesObj?["proxies"] as? [String: Any]
+        let runtimeGroup = proxies?[group.tag] as? [String: Any]
+        let current = isProxyRuntimeRunning() ? (runtimeGroup?["now"] as? String ?? group.current) : group.current
+        let isSelected = nodeTag == current
         let tile = MD3NodeTileView()
         tile.groupTag = group.tag
         tile.nodeTag = nodeTag
@@ -299,7 +298,7 @@ extension MainWindowController {
             // name, not the currently-resolved node — the resolved node flickers as
             // urltest re-picks. The home page still surfaces the concrete pick.
             displayName = nodeTag
-            let resolvedTag = resolveActiveOutboundForGroup(groupTag: autoGroup.tag, proxiesObj: lastProxiesObj).name
+            let resolvedTag = resolveActiveOutboundForGroup(groupTag: autoGroup.tag, proxiesObj: isProxyRuntimeRunning() ? lastProxiesObj : nil).name
             if let resolvedNodeInfo = nodes.first(where: { $0.tag == (resolvedTag.isEmpty ? autoGroup.current : resolvedTag) }) {
                 displayDelay = resolvedNodeInfo.delay
             }
@@ -360,34 +359,9 @@ extension MainWindowController {
     }
 
     func groupDelay(group: NodeGroupInfo, nodeByTag: [String: NodeInfo]) -> String {
-        let members = group.members.isEmpty ? nodes.map(\.tag) : group.members
-        var minMs: Int? = nil
-        var isTesting = false
-        
-        for member in members {
-            if let node = nodeByTag[member] {
-                let delay = node.delay
-                if delay == "测试中" {
-                    isTesting = true
-                } else if let ms = parsedDelay(delay) {
-                    if let currentMin = minMs {
-                        minMs = min(currentMin, ms)
-                    } else {
-                        minMs = ms
-                    }
-                }
-            }
-        }
-        
-        if let minMs = minMs {
-            return "\(minMs) ms"
-        }
-        
-        if isTesting {
-            return "测试中"
-        }
-        
-        return "—"
+        let current = resolveActiveOutboundForGroup(groupTag: group.tag, proxiesObj: isProxyRuntimeRunning() ? lastProxiesObj : nil).name
+        let delay = nodeByTag[current]?.delay ?? "—"
+        return delay == "未测试" || delay.isEmpty ? "—" : delay
     }
 
     func parsedDelay(_ value: String) -> Int? {
@@ -396,97 +370,117 @@ extension MainWindowController {
         return Int(digits)
     }
 
-    func updateURLTestSelectionsFromMeasuredDelays() {
-        let delayByTag = Dictionary(uniqueKeysWithValues: nodes.compactMap { node -> (String, Int)? in
-            guard let delay = parsedDelay(node.delay) else { return nil }
-            return (node.tag, delay)
-        })
-
-        for index in nodeGroups.indices {
-            let type = nodeGroups[index].type.lowercased()
-            guard ["urltest", "url-test", "fallback"].contains(type) else { continue }
-            let candidates = nodeGroups[index].members.compactMap { tag -> (String, Int)? in
-                guard let delay = delayByTag[tag] else { return nil }
-                return (tag, delay)
-            }
-            guard let best = candidates.min(by: { $0.1 < $1.1 }) else { continue }
-            
-            // Measuring latency must never change a running selector. The
-            // selected node is user state; urltest groups may choose internally,
-            // but the UI must not overwrite the configured/current choice based
-            // on a one-off test result.
-            if !isProxyRuntimeRunning() {
-                nodeGroups[index].current = best.0
-            }
-        }
+    func testGroupNodes(_ group: NodeGroupInfo) {
+        runNodeDelayTest(tags: group.members.isEmpty ? nodes.map(\.tag) : group.members, title: group.tag)
     }
 
-    func testGroupNodes(_ group: NodeGroupInfo) {
-        // 切换订阅/启停代理过渡期间禁止测速：此时 sing-box 实例可能正在销毁/重建，
-        // 用过渡中的状态去 ClashAPI 测速会拿到"旧实例 + 新节点 tag"的混合错误
-        // （典型表现：FATAL initialize outbound[N]: TLS required）。
-        if isProxyServiceTransitioning {
+    /// Every entry point shares runtime reselection and freshness checks.
+    func runNodeDelayTest(tags requestedTags: [String], title: String) {
+        guard !isProxyServiceTransitioning else {
             showToast("正在切换运行状态，请稍后再测")
             return
         }
         do {
             let config = try saveCurrent()
-            let testURL = nodeTestURLField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            let finalURL = testURL.isEmpty ? TungBoxConfig.urlTestURL : testURL
-            
-            let members = group.members.isEmpty ? nodes.map(\.tag) : group.members
-            guard !members.isEmpty else { return }
-            
-            appendLog("[节点] 开始测试分组 \(group.tag) 中的 \(members.count) 个节点\n")
-
-            for tag in members {
-                if let idx = nodes.firstIndex(where: { $0.tag == tag }) {
-                    nodes[idx].delay = "测试中"
-                }
-            }
-            refreshNodeGroupsView()
-
-            let runner = runner
-            let apiPort = delayAPIPort()
+            let tags = Array(Set(requestedTags)).sorted()
+            guard !tags.isEmpty else { return }
+            let enteredURL = nodeTestURLField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            let testURL = enteredURL.isEmpty ? TungBoxConfig.urlTestURL : enteredURL
+            let requestID = UUID()
+            nodeDelayTestID = requestID
+            let transitionID = runtimeTransitionID
+            let configText = editor.string
+            let profileID = selectedIndex.map { profiles[$0].id }
             let runtimeRunning = isProxyRuntimeRunning()
-            let groupName = group.tag
-            // 关代理时用 TCP 直拨 → 不启动 sing-box，几十 ms 完成（接近竞品速度）。
-            // 提前把每个 tag 对应的 server:port 拷贝出来，detached 任务能直接读。
+            let apiPort = delayAPIPort()
+            let tunRunning = isTunRuntimeRunning()
+            let userRunning = runner.isRunning
+            let runner = runner
             let serverByTag = Dictionary(uniqueKeysWithValues: nodes.map { ($0.tag, $0.server) })
+            // Resolve nested membership, including a test of an auto-group tile itself.
+            let groups = nodeGroups
+            func containsTested(_ tag: String, visited: Set<String> = []) -> Bool {
+                if tags.contains(tag) { return true }
+                guard !visited.contains(tag), let group = groups.first(where: { $0.tag == tag }) else { return false }
+                return group.members.contains { containsTested($0, visited: visited.union([tag])) }
+            }
+            let autoGroups = groups.filter {
+                ["urltest", "url-test", "fallback"].contains($0.type.lowercased()) && containsTested($0.tag)
+            }.map(\.tag)
+            for index in nodes.indices {
+                if nodes[index].delay == "测试中" { nodes[index].delay = "未测试" }
+                if tags.contains(nodes[index].tag) { nodes[index].delay = "测试中" }
+            }
+            nodeTestStatusLabel.stringValue = "节点 URLTest：测试中，\(tags.count) 个节点"
+            refreshNodeGroupsView()
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                await withTaskGroup(of: (String, String).self) { tg in
-                    for tag in members {
+                @MainActor func isCurrent() -> Bool {
+                    self.nodeDelayTestID == requestID && self.runtimeTransitionID == transitionID
+                        && self.editor.string == configText && self.selectedIndex.map { self.profiles[$0].id } == profileID
+                        && !self.isProxyServiceTransitioning
+                        && self.runner.isRunning == userRunning && self.isTunRuntimeRunning() == tunRunning
+                        && self.delayAPIPort() == apiPort
+                }
+                await withTaskGroup(of: (String, String).self) { tasks in
+                    for tag in tags {
                         let server = serverByTag[tag]
-                        tg.addTask { @Sendable in
+                        tasks.addTask {
                             if runtimeRunning {
-                                do {
-                                    let ms = try await ClashAPI.delay(node: tag, url: finalURL, port: apiPort)
-                                    return (tag, "\(ms) ms")
-                                } catch {
-                                    return (tag, error.localizedDescription.contains("超时") ? "超时" : "失败")
-                                }
+                                do { return (tag, "\(try await ClashAPI.delay(node: tag, url: testURL, port: apiPort)) ms") }
+                                catch { return (tag, "失败") }
                             }
-                            return (tag, await MainWindowController.fastDelayProbe(serverHostPort: server, runner: runner, config: config, outbound: tag, testURL: finalURL))
+                            return (tag, await MainWindowController.fastDelayProbe(serverHostPort: server, runner: runner, config: config, outbound: tag, testURL: testURL))
                         }
                     }
-                    for await (tag, result) in tg {
-                        if let idx = self.nodes.firstIndex(where: { $0.tag == tag }) {
-                            self.nodes[idx].delay = result
-                        }
-                        if result == "失败" || result == "超时" {
-                            self.appendLog("[节点] 测试 \(tag): \(result)\n")
-                        }
+                    for await (tag, result) in tasks {
+                        guard isCurrent() else { tasks.cancelAll(); continue }
+                        if let index = self.nodes.firstIndex(where: { $0.tag == tag }) { self.nodes[index].delay = result }
                     }
                 }
-                self.updateURLTestSelectionsFromMeasuredDelays()
+                guard isCurrent() else { return }
+                var selectionRefreshFailed = false
+                if runtimeRunning {
+                    // Both independent cores must retest; no selector PUT or invented minimum selection.
+                    let ports: [Int?] = userRunning && tunRunning ? [nil, TungBoxConfig.tunDaemonClashPort] : [apiPort]
+                    for port in ports {
+                        for group in autoGroups {
+                            guard isCurrent() else { return }
+                            do {
+                                try await ClashAPI.testGroup(group, url: testURL, port: port)
+                                guard isCurrent() else { return }
+                            } catch {
+                                guard isCurrent() else { return }
+                                selectionRefreshFailed = true
+                                self.appendLog("[节点] 自动分组 \(group) 测速失败：\(error.localizedDescription)\n")
+                            }
+                        }
+                    }
+                    do {
+                        let proxies = try await ClashAPI.proxies(port: apiPort)
+                        guard isCurrent() else { return }
+                        self.lastProxiesObj = proxies
+                        self.syncNodeDelaysFromClashAPI(proxiesObj: proxies)
+                        let active = self.resolveActiveOutbound(proxiesObj: proxies)
+                        self.currentNodeNameLabel.stringValue = active.name
+                        self.currentNodeAutoBadge.isHidden = !active.isAuto
+                        self.currentNodeDelayLabel.stringValue = self.nodes.first(where: { $0.tag == active.name })?.delay ?? "—"
+                        self.currentNodeDelayLabel.textColor = MD3.latencyTextColor(self.currentNodeDelayLabel.stringValue)
+                        self.refreshTrayIcon()
+                    } catch {
+                        guard isCurrent() else { return }
+                        selectionRefreshFailed = true
+                        self.appendLog("[节点] 读取实际选中节点失败：\(error.localizedDescription)\n")
+                    }
+                }
+                guard isCurrent() else { return }
+                self.nodeTable.reloadData()
                 self.refreshNodeGroupsView()
-                let summary = self.delayTestSummary(memberTags: members)
-                self.showToast("\(groupName) 测速完成（\(summary)）", style: summary.contains("可用 0") ? .warning : .success)
+                self.nodeTestStatusLabel.stringValue = "节点 URLTest：已完成，\(tags.count) 个节点"
+                let summary = self.delayTestSummary(memberTags: tags)
+                self.showToast(selectionRefreshFailed ? "测速完成，但自动选择状态刷新失败" : "\(title) 测速完成（\(summary)）", style: selectionRefreshFailed || summary.contains("可用 0") ? .warning : .success)
             }
-        } catch {
-            showError(error)
-        }
+        } catch { showError(error) }
     }
 
     /// 关代理时的快速测速：先 TCP 直拨节点 server:port（几十 ms 完成），
@@ -528,119 +522,11 @@ extension MainWindowController {
     }
 
     func testSingleNode(tag: String) {
-        if isProxyServiceTransitioning {
-            showToast("正在切换运行状态，请稍后再测")
-            return
-        }
-        do {
-            let config = try saveCurrent()
-            let testURL = nodeTestURLField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            let finalURL = testURL.isEmpty ? TungBoxConfig.urlTestURL : testURL
-            
-            if let idx = nodes.firstIndex(where: { $0.tag == tag }) {
-                nodes[idx].delay = "测试中"
-                refreshNodeGroupsView()
-            }
-            
-            let runner = runner
-            let apiPort = delayAPIPort()
-            let runtimeRunning = isProxyRuntimeRunning()
-            let server = nodes.first(where: { $0.tag == tag })?.server
-            Task.detached { [weak self, runner, apiPort, runtimeRunning, server] in
-                let result: String
-                if runtimeRunning {
-                    do {
-                        let ms = try await ClashAPI.delay(node: tag, url: finalURL, port: apiPort)
-                        result = "\(ms) ms"
-                    } catch {
-                        let msg = error.localizedDescription
-                        await MainActor.run { [weak self] in self?.appendLog("[节点] 测试 \(tag) 失败原因: \(msg)\n") }
-                        result = msg.contains("超时") ? "超时" : "失败"
-                    }
-                } else {
-                    result = await MainWindowController.fastDelayProbe(serverHostPort: server, runner: runner, config: config, outbound: tag, testURL: finalURL)
-                }
-
-                await MainActor.run { [weak self] in
-                    guard let self = self else { return }
-                    if let idx = self.nodes.firstIndex(where: { $0.tag == tag }) {
-                        self.nodes[idx].delay = result
-                    }
-                    self.updateURLTestSelectionsFromMeasuredDelays()
-                    self.refreshNodeGroupsView()
-                }
-            }
-        } catch {
-            showError(error)
-        }
+        runNodeDelayTest(tags: [tag], title: tag)
     }
 
     @objc func testAllNodesClicked() {
-        if isProxyServiceTransitioning {
-            showToast("正在切换运行状态，请稍后再测")
-            return
-        }
-        do {
-            let config = try saveCurrent()
-            refreshNodesFromEditor()
-            guard !nodes.isEmpty else {
-                showError(NSError.user("当前配置没有可测试的节点"))
-                return
-            }
-            let testURL = nodeTestURLField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !testURL.isEmpty else {
-                showError(NSError.user("请输入测试 URL"))
-                return
-            }
-            nodeTestStatusLabel.stringValue = "节点 URLTest：测试中，\(nodes.count) 个节点"
-            appendLog("[节点] 开始测试 \(nodes.count) 个节点\n")
-            for index in nodes.indices {
-                nodes[index].delay = "测试中"
-            }
-            nodeTable.reloadData()
-            refreshNodeGroupsView()
-
-            let runner = runner
-            let apiPort = delayAPIPort()
-            let runtimeRunning = isProxyRuntimeRunning()
-            let tags = nodes.map(\.tag)
-            let serverByTag = Dictionary(uniqueKeysWithValues: nodes.map { ($0.tag, $0.server) })
-            // 全部并发测速：关代理时 TCP 直拨 + 开代理时 ClashAPI。30 节点几秒搞定。
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                await withTaskGroup(of: (String, String).self) { tg in
-                    for tag in tags {
-                        let server = serverByTag[tag]
-                        tg.addTask { @Sendable in
-                            if runtimeRunning {
-                                do {
-                                    let ms = try await ClashAPI.delay(node: tag, url: testURL, port: apiPort)
-                                    return (tag, "\(ms) ms")
-                                } catch {
-                                    return (tag, error.localizedDescription.contains("超时") ? "超时" : "失败")
-                                }
-                            }
-                            return (tag, await MainWindowController.fastDelayProbe(serverHostPort: server, runner: runner, config: config, outbound: tag, testURL: testURL))
-                        }
-                    }
-                    for await (tag, result) in tg {
-                        if let idx = self.nodes.firstIndex(where: { $0.tag == tag }) {
-                            self.nodes[idx].delay = result
-                            self.nodeTable.reloadData()
-                            self.refreshNodeGroupsView()
-                        }
-                    }
-                }
-                self.updateURLTestSelectionsFromMeasuredDelays()
-                self.refreshNodeGroupsView()
-                self.nodeTestStatusLabel.stringValue = "节点 URLTest：已完成，\(tags.count) 个节点"
-                self.appendLog("[节点] 测试完成\n")
-                let summary = self.delayTestSummary(memberTags: tags)
-                self.showToast("全部节点测速完成（\(summary)）", style: summary.contains("可用 0") ? .warning : .success)
-            }
-        } catch {
-            showError(error)
-        }
+        runNodeDelayTest(tags: nodes.map(\.tag), title: "全部节点")
     }
 
 
