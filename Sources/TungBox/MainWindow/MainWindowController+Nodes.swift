@@ -290,7 +290,9 @@ extension MainWindowController {
         }
         tile.isActionEnabled = !isAutoMember
         let isSelector = group.type.lowercased() == "selector"
-        tile.isInteractive = isSelector && !isAutoMember
+        // Auto groups are selectable in a Selector, but their delay affordance
+        // remains display-only. Selecting the group must not start a test.
+        tile.isInteractive = isSelector
         
         var displayName = nodeTag
         var displayDelay = node?.delay ?? ""
