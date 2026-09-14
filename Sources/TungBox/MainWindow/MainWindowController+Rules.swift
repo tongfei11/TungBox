@@ -817,9 +817,6 @@ extension MainWindowController {
     func applyCustomRules(to text: String, subscriptionID: UUID, freshSubscription: Bool = false) throws -> [String: Any] {
         guard var config = parseConfigObject(from: text) else { throw NSError.user("当前配置不是有效 JSON") }
         let base = try store.baseRouteRules(for: subscriptionID)
-        if !freshSubscription {
-            try store.verifyRuleProjection((config["route"] as? [String: Any])?["rules"] as? [[String: Any]] ?? [], for: subscriptionID)
-        }
         let sets = store.loadRuleSets(for: subscriptionID).valid.filter { $0.enabled }
         var specs = customRules.filter { $0.subscriptionID == subscriptionID && $0.enabled }
             .sorted { $0.createdAt == $1.createdAt ? $0.id.uuidString < $1.id.uuidString : $0.createdAt < $1.createdAt }
