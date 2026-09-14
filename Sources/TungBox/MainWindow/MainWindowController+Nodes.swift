@@ -404,6 +404,7 @@ extension MainWindowController {
             let tunRunning = isTunRuntimeRunning()
             let userRunning = runner.isRunning
             let runner = runner
+            let serverByTag = Dictionary(uniqueKeysWithValues: nodes.map { ($0.tag, $0.server) })
             // Resolve nested membership, including a test of an auto-group tile itself.
             let groups = nodeGroups
             func containsTested(_ tag: String, visited: Set<String> = []) -> Bool {
@@ -431,9 +432,13 @@ extension MainWindowController {
                 }
                 await withTaskGroup(of: (String, String).self) { tasks in
                     for tag in tags {
+                        let server = serverByTag[tag]
                         tasks.addTask {
-                            return (tag, await MainWindowController.fastDelayProbe(serverHostPort: self.nodes.first(where: { $0.tag == tag })?.server,
-                                                                                    runner: runner, config: config, outbound: tag, testURL: testURL))
+                            if runtimeRunning {
+                                do { return (tag, "\(try await ClashAPI.delay(node: tag, url: testURL, port: apiPort)) ms") }
+                                catch { return (tag, "失败") }
+                            }
+                            return (tag, await MainWindowController.fastDelayProbe(serverHostPort: server, runner: runner, config: config, outbound: tag, testURL: testURL))
                         }
                     }
                     for await (tag, result) in tasks {
