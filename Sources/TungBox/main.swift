@@ -885,6 +885,12 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                     self.showError(error)
                 }
             } else {
+                // The preference has already been switched off by the user. End the
+                // home-page transition immediately; networksetup may take a while
+                // while it walks all active services, but that work must not make
+                // the UI claim that the proxy is still closing.
+                self.systemProxyTransition = .none
+                self.refreshStatus()
                 try await self.runSerializedOffMain {
                     if runnerRef.isRunning { runnerRef.stop() }
                     self.applySystemProxyBlocking(enabled: false, port: port)

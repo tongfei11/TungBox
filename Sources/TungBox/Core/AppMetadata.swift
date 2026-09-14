@@ -3,7 +3,7 @@ import Foundation
 
 enum TungBoxVersion {
     static let release = "0.3.0"
-    static let build = "0185"
+    static let build = "0186"
     static let current = "\(release)(\(build))"
     static let display = "TungBox v\(current)"
 }
