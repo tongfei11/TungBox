@@ -29,8 +29,7 @@ enum ClashAPI {
         // sing-box returns a single {"delay": ms} value for group URLTest.
         // The important side effect is the group's selected outbound; the
         // subsequent /proxies refresh is the source of truth for the UI.
-        guard let result = try await requestJSON(path: delayPath(kind: "group", tag: tag, url: url), port: port, timeout: 35) as? [String: Any],
-              result["delay"] != nil else {
+        guard try await requestJSON(path: delayPath(kind: "group", tag: tag, url: url), port: port, timeout: 35) is [String: Any] else {
             throw NSError.user("分组测速接口响应无效")
         }
     }
