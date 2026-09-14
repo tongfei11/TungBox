@@ -398,7 +398,6 @@ extension MainWindowController {
         })
 
         for index in nodeGroups.indices {
-            let groupTag = nodeGroups[index].tag
             let type = nodeGroups[index].type.lowercased()
             guard ["urltest", "url-test", "fallback"].contains(type) else { continue }
             let candidates = nodeGroups[index].members.compactMap { tag -> (String, Int)? in
@@ -407,28 +406,11 @@ extension MainWindowController {
             }
             guard let best = candidates.min(by: { $0.1 < $1.1 }) else { continue }
             
-            let oldCurrent = nodeGroups[index].current
-            if isProxyRuntimeRunning() && oldCurrent != best.0 {
-                let nodeTag = best.0
-                let apiPort = delayAPIPort()
-                Task {
-                    do {
-                        try await ClashAPI.selectProxy(group: groupTag, node: nodeTag, port: apiPort)
-                        _ = try? await ClashAPI.closeConnections(port: apiPort)
-                        await MainActor.run { [weak self] in
-                            guard let self,
-                                  let groupIndex = self.nodeGroups.firstIndex(where: { $0.tag == groupTag }) else { return }
-                            self.nodeGroups[groupIndex].current = nodeTag
-                            self.refreshNodeGroupsView()
-                            self.appendLog("[节点] 测速后自动将 \(groupTag) 切换到最快节点: \(nodeTag)，并已断开旧连接\n")
-                        }
-                    } catch {
-                        await MainActor.run { [weak self] in
-                            self?.appendLog("[节点] 自动切换 \(groupTag) 至 \(nodeTag) 失败: \(error.localizedDescription)\n")
-                        }
-                    }
-                }
-            } else if !isProxyRuntimeRunning() {
+            // Measuring latency must never change a running selector. The
+            // selected node is user state; urltest groups may choose internally,
+            // but the UI must not overwrite the configured/current choice based
+            // on a one-off test result.
+            if !isProxyRuntimeRunning() {
                 nodeGroups[index].current = best.0
             }
         }

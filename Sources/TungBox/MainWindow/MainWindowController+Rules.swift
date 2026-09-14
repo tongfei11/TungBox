@@ -56,7 +56,15 @@ extension MainWindowController {
         addRuleSetButton.translatesAutoresizingMaskIntoConstraints = false
         addRuleSetButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
 
-        let ruleToolbar = NSStackView(views: [ruleSearchField, addRuleSetButton, addRuleButton])
+        let deleteRuleButton = MD3Button()
+        deleteRuleButton.title = "删除选中"
+        deleteRuleButton.style = .outlined
+        deleteRuleButton.target = self
+        deleteRuleButton.action = #selector(deleteSelectedRuleClicked)
+        deleteRuleButton.translatesAutoresizingMaskIntoConstraints = false
+        deleteRuleButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
+
+        let ruleToolbar = NSStackView(views: [ruleSearchField, addRuleSetButton, addRuleButton, deleteRuleButton])
         ruleToolbar.orientation = .horizontal
         ruleToolbar.spacing = 12
         ruleToolbar.alignment = .centerY
@@ -199,6 +207,26 @@ extension MainWindowController {
 
     @objc func deleteRuleSetClicked() {
         if let set = selectedRuleSet() { deleteRuleSet(set) }
+    }
+
+    @objc func deleteSelectedRuleClicked() {
+        let rows = filteredRuleRows()
+        let row = rulesTable.selectedRow
+        guard rows.indices.contains(row) else {
+            showToast("请先选中要删除的规则", style: .warning)
+            return
+        }
+        let selected = rows[row]
+        if selected.customRuleID != nil {
+            deleteCustomRuleClicked()
+        } else if let setID = selected.ruleSetID,
+                  let set = customRuleSets.first(where: { $0.id == setID }) {
+            deleteRuleSet(set)
+        } else if selected.ruleSetInvalidURL != nil {
+            deleteInvalidRuleSetClicked()
+        } else {
+            showToast("订阅内置规则不能删除", style: .info)
+        }
     }
 
     @objc func revealInvalidRuleSetClicked() {
