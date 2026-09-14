@@ -431,12 +431,14 @@ extension MainWindowController {
                         && self.delayAPIPort() == apiPort
                 }
                 await withTaskGroup(of: (String, String).self) { tasks in
-                    if !runtimeRunning {
-                        for tag in tags {
-                            let server = serverByTag[tag]
-                            tasks.addTask {
-                                return (tag, await MainWindowController.fastDelayProbe(serverHostPort: server, runner: runner, config: config, outbound: tag, testURL: testURL))
+                    for tag in tags {
+                        let server = serverByTag[tag]
+                        tasks.addTask {
+                            if runtimeRunning {
+                                do { return (tag, "\(try await ClashAPI.delay(node: tag, url: testURL, port: apiPort)) ms") }
+                                catch { return (tag, "失败") }
                             }
+                            return (tag, await MainWindowController.fastDelayProbe(serverHostPort: server, runner: runner, config: config, outbound: tag, testURL: testURL))
                         }
                     }
                     for await (tag, result) in tasks {
