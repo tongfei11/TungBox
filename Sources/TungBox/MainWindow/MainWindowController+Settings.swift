@@ -1180,7 +1180,7 @@ extension MainWindowController {
     func applyTunServiceStatus(_ status: TunServiceStatus, recentLogText: String) {
         tunServiceStatusLabel.stringValue = "TUN 服务状态：\(status.displayText)"
         if status.shouldReinstall {
-            tunServiceToggleButton.title = "安装 TUN 服务"
+            tunServiceToggleButton.title = "更新 TUN 服务"
             tunServiceToggleButton.style = .filled
         } else {
             tunServiceToggleButton.title = status.isInstalled ? "卸载 TUN 服务" : "安装 TUN 服务"

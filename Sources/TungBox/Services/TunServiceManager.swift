@@ -104,7 +104,7 @@ enum TunServiceManager {
             return .abnormal("Core 路径错误")
         }
         guard installedServiceDefinitionIsCurrent() else {
-            return .abnormal("服务版本过旧，请重新安装 TUN 服务")
+                return .abnormal("服务需要更新，请重新安装 TUN 服务")
         }
         guard launchDaemonIsLoaded() else {
             return .abnormal("服务未加载，请重新安装 TUN 服务")
@@ -624,7 +624,7 @@ enum TunServiceManager {
         DNS_BACKUP=\(shellQuote(dnsBackupPath))
         TUN_DNS_ADDR="198.18.0.2"
         CHILD=""
-        SCRIPT_VERSION="2026-06-tun-log-rotate-v24"
+        SCRIPT_VERSION="2026-09-tun-recovery-v25"
         REQUEST_MAX_AGE=30
         CLEANING_UP=0
         LOG_MAX_BYTES=1048576
@@ -1061,7 +1061,7 @@ enum TunServiceManager {
             && script.contains("clean_routes")
             && script.contains("wait_for_pid_exit")
             && script.contains("stop_pid")
-            && script.contains("2026-06-tun-log-rotate-v24")
+            && script.contains("2026-09-tun-recovery-v25")
             && script.contains("rotate_log_if_big")
             && script.contains("clean_dns")
             && script.contains("flush_dns_after_tun_up")
