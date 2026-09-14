@@ -277,7 +277,11 @@ extension MainWindowController {
     }
 
     func nodeTile(group: NodeGroupInfo, nodeTag: String, node: NodeInfo?) -> NSView {
-        let isSelected = nodeTag == group.current
+        let isAutoGroup = ["urltest", "url-test", "fallback"].contains(group.type.lowercased())
+        let resolvedCurrent = isAutoGroup
+            ? resolveActiveOutboundForGroup(groupTag: group.tag, proxiesObj: lastProxiesObj).name
+            : group.current
+        let isSelected = nodeTag == (resolvedCurrent.isEmpty ? group.current : resolvedCurrent)
         let tile = MD3NodeTileView()
         tile.groupTag = group.tag
         tile.nodeTag = nodeTag
@@ -295,7 +299,8 @@ extension MainWindowController {
             // name, not the currently-resolved node — the resolved node flickers as
             // urltest re-picks. The home page still surfaces the concrete pick.
             displayName = nodeTag
-            if let resolvedNodeInfo = nodes.first(where: { $0.tag == autoGroup.current }) {
+            let resolvedTag = resolveActiveOutboundForGroup(groupTag: autoGroup.tag, proxiesObj: lastProxiesObj).name
+            if let resolvedNodeInfo = nodes.first(where: { $0.tag == (resolvedTag.isEmpty ? autoGroup.current : resolvedTag) }) {
                 displayDelay = resolvedNodeInfo.delay
             }
         }

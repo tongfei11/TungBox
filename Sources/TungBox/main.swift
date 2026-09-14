@@ -810,6 +810,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         // derived from it inside enableTunServiceSafely (utun29, no 7890/9090).
         var userProxyURL: URL? = nil
         var userConfigText: String? = nil
+        var preparedTunRequest: String? = nil
         if wantSystemProxy || tunNeedsReconcile {
             guard ensureCoreAvailableForStart() else { markProxyStartupFailed(); return }
             guard selectedIndex != nil, !nodes.isEmpty else {
@@ -826,6 +827,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 editor.string = try renderConfig(config)
                 userProxyURL = try saveCurrent()
                 userConfigText = editor.string
+                if wantTun && tunNeedsReconcile {
+                    preparedTunRequest = try preparedTunConfigText(from: editor.string)
+                }
             } catch {
                 showError(error)
                 markProxyStartupFailed()
@@ -849,7 +853,13 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                         guard status.isUsable else {
                             throw NSError.user("TUN 服务不可用：\(status.displayText)。请到 设置 > TUN 设置处理。")
                         }
-                        try self.enableTunServiceSafely(configText: userConfigText!)
+                        let request = preparedTunRequest ?? userConfigText!
+                        try await self.runSerializedOffMain {
+                            try TunServiceManager.enable(store: storeCopy, configText: request)
+                        }
+                        self.startTunRequestHeartbeat()
+                        self.wasTunActiveInThisSession = true
+                        self.verifyTunStartupAsync()
                         self.appendLog("[TungBox] TUN 已启用（\(reason)）\n")
                     } catch {
                         guard token == self.runtimeTransitionID else { return }
