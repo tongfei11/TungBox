@@ -2963,14 +2963,28 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     }
 
     nonisolated func disableSystemProxyIfOwned(service: String, port: Int) {
-        if proxySettingMatches(service: service, getter: "-getwebproxy", port: port) {
-            _ = runCommand("/usr/sbin/networksetup", args: ["-setwebproxystate", service, "off"])
+        let checks: [(getter: String, stateArg: String)] = [
+            ("-getwebproxy", "-setwebproxystate"),
+            ("-getsecurewebproxy", "-setsecurewebproxystate"),
+            ("-getsocksfirewallproxy", "-setsocksfirewallproxystate")
+        ]
+        let matches = LockedValue<[String: Bool]>([:])
+        let group = DispatchGroup()
+        for check in checks {
+            group.enter()
+            DispatchQueue.global(qos: .utility).async {
+                let isOwned = self.proxySettingMatches(service: service, getter: check.getter, port: port)
+                matches.mutate { $0[check.getter] = isOwned }
+                group.leave()
+            }
         }
-        if proxySettingMatches(service: service, getter: "-getsecurewebproxy", port: port) {
-            _ = runCommand("/usr/sbin/networksetup", args: ["-setsecurewebproxystate", service, "off"])
-        }
-        if proxySettingMatches(service: service, getter: "-getsocksfirewallproxy", port: port) {
-            _ = runCommand("/usr/sbin/networksetup", args: ["-setsocksfirewallproxystate", service, "off"])
+        // A stuck networksetup query must not hold the runtime transition forever.
+        _ = group.wait(timeout: .now() + 4)
+
+        let ownedStates = checks.filter { matches.get()[ $0.getter ] == true }
+        DispatchQueue.concurrentPerform(iterations: ownedStates.count) { index in
+            let stateArg = ownedStates[index].stateArg
+            _ = self.runCommand("/usr/sbin/networksetup", args: [stateArg, service, "off"])
         }
     }
 
