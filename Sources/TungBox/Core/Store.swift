@@ -67,11 +67,11 @@ final class Store: @unchecked Sendable {
         try? FileManager.default.createDirectory(at: ruleSetsURL, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: coreURL, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: subscriptionFoldersURL, withIntermediateDirectories: true)
-        try? FileManager.default.createDirectory(at: profileFoldersURL, withIntermediateDirectories: true)
         migrateLegacyConfigLayout()
         pruneMissingProfileRecords()
         migrateLegacyCustomRules()
         cleanupObsoleteGeneratedFiles()
+        cleanupEmptyProfileFolders()
     }
 
     private func relativePath(for url: URL) -> String {
@@ -282,6 +282,26 @@ final class Store: @unchecked Sendable {
         let url = baseURL.appendingPathComponent(profile.fileName)
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         return url
+    }
+
+    func deleteConfig(for profile: ConfigProfile) {
+        let url = configURL(for: profile)
+        try? FileManager.default.removeItem(at: url)
+        cleanupEmptyProfileFolders()
+    }
+
+    private func cleanupEmptyProfileFolders() {
+        let folders = (try? FileManager.default.contentsOfDirectory(
+            at: profileFoldersURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        for folder in folders {
+            let contents = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+            if contents.isEmpty { try? FileManager.default.removeItem(at: folder) }
+        }
+        let rootContents = (try? FileManager.default.contentsOfDirectory(atPath: profileFoldersURL.path)) ?? []
+        if rootContents.isEmpty { try? FileManager.default.removeItem(at: profileFoldersURL) }
     }
 
     func ruleBaseURL(for id: UUID) -> URL {

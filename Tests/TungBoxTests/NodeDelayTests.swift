@@ -76,22 +76,20 @@ final class NodeDelayTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
 
-        let existingID = UUID()
         let missingID = UUID()
         let subscriptionID = UUID()
         let profiles = [
-            ConfigProfile(id: existingID, name: "存在", fileName: "existing.json", updatedAt: Date()),
             ConfigProfile(id: missingID, name: "已删除", fileName: "missing.json", updatedAt: Date())
         ]
         let subscription = Subscription(id: subscriptionID, name: "失效订阅", url: "https://example.com", profileID: missingID, updatedAt: nil)
         try JSONEncoder().encode(profiles).write(to: directory.appendingPathComponent("profiles.json"))
         try JSONEncoder().encode([subscription]).write(to: directory.appendingPathComponent("subscriptions.json"))
-        try Data("{}".utf8).write(to: directory.appendingPathComponent("existing.json"))
 
         let store = Store(baseURL: directory)
 
-        XCTAssertEqual(store.loadProfiles().map(\.id), [existingID])
+        XCTAssertTrue(store.loadProfiles().isEmpty)
         XCTAssertNil(store.loadSubscriptions().first?.profileID)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("profiles").path))
     }
 
     func testCompatibilityRepairRestoresMissingTrojanTLS() throws {

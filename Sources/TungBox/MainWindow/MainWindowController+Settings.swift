@@ -1237,7 +1237,7 @@ extension MainWindowController {
     @objc func deleteClicked() {
         guard let index = selectedIndex else { return }
         let profile = profiles[index]
-        try? FileManager.default.removeItem(at: store.configURL(for: profile))
+        store.deleteConfig(for: profile)
         profiles.remove(at: index)
         store.saveProfiles(profiles)
         table.reloadData()
