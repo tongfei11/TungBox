@@ -43,6 +43,17 @@ final class NodeDelayTests: XCTestCase {
         try Data("{}".utf8).write(to: directory.appendingPathComponent(legacyName))
         try Data("{}".utf8).write(to: directory.appendingPathComponent("rule-base-\(subscriptionID.uuidString).json"))
         try Data("[]".utf8).write(to: directory.appendingPathComponent("rule-projection-\(subscriptionID.uuidString).json"))
+        let customRule = CustomRule(
+            id: UUID(),
+            subscriptionID: subscriptionID,
+            type: "DOMAIN",
+            value: "example.com",
+            strategy: "direct",
+            note: "",
+            enabled: true,
+            createdAt: Date()
+        )
+        try JSONEncoder().encode([customRule]).write(to: directory.appendingPathComponent("custom-rules.json"))
         let oldRuleSets = directory.appendingPathComponent("custom-rulesets/\(subscriptionID.uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: oldRuleSets, withIntermediateDirectories: true)
         try Data("name: custom".utf8).write(to: oldRuleSets.appendingPathComponent("rule.yml"))
@@ -54,7 +65,33 @@ final class NodeDelayTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent("config.json").path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent("rule-base.json").path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent("rule-projection.json").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent("custom-rules.json").path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent("custom-rulesets/rule.yml").path))
+        XCTAssertEqual(store.loadCustomRules(), [customRule])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("custom-rules.json").path))
+    }
+
+    func testStorePrunesProfilesWhoseConfigWasDeleted() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let existingID = UUID()
+        let missingID = UUID()
+        let subscriptionID = UUID()
+        let profiles = [
+            ConfigProfile(id: existingID, name: "存在", fileName: "existing.json", updatedAt: Date()),
+            ConfigProfile(id: missingID, name: "已删除", fileName: "missing.json", updatedAt: Date())
+        ]
+        let subscription = Subscription(id: subscriptionID, name: "失效订阅", url: "https://example.com", profileID: missingID, updatedAt: nil)
+        try JSONEncoder().encode(profiles).write(to: directory.appendingPathComponent("profiles.json"))
+        try JSONEncoder().encode([subscription]).write(to: directory.appendingPathComponent("subscriptions.json"))
+        try Data("{}".utf8).write(to: directory.appendingPathComponent("existing.json"))
+
+        let store = Store(baseURL: directory)
+
+        XCTAssertEqual(store.loadProfiles().map(\.id), [existingID])
+        XCTAssertNil(store.loadSubscriptions().first?.profileID)
     }
 
     func testCompatibilityRepairRestoresMissingTrojanTLS() throws {

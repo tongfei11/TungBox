@@ -69,6 +69,8 @@ final class Store: @unchecked Sendable {
         try? FileManager.default.createDirectory(at: subscriptionFoldersURL, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: profileFoldersURL, withIntermediateDirectories: true)
         migrateLegacyConfigLayout()
+        pruneMissingProfileRecords()
+        migrateLegacyCustomRules()
         cleanupObsoleteGeneratedFiles()
     }
 
@@ -147,6 +149,42 @@ final class Store: @unchecked Sendable {
         try? FileManager.default.moveItem(at: source, to: destination)
     }
 
+    private func pruneMissingProfileRecords() {
+        let profiles = loadProfiles()
+        let retained = profiles.filter { profile in
+            FileManager.default.fileExists(atPath: baseURL.appendingPathComponent(profile.fileName).path)
+        }
+        guard retained.count != profiles.count else { return }
+        let retainedIDs = Set(retained.map(\.id))
+        saveProfiles(retained)
+
+        var subscriptions = loadSubscriptions()
+        var subscriptionsChanged = false
+        for index in subscriptions.indices {
+            if let profileID = subscriptions[index].profileID, !retainedIDs.contains(profileID) {
+                subscriptions[index].profileID = nil
+                subscriptionsChanged = true
+            }
+        }
+        if subscriptionsChanged { saveSubscriptions(subscriptions) }
+    }
+
+    private func migrateLegacyCustomRules() {
+        guard let data = try? Data(contentsOf: customRulesURL),
+              let rules = try? JSONDecoder().decode([CustomRule].self, from: data) else { return }
+        let grouped = Dictionary(grouping: rules, by: \.subscriptionID)
+        var completed = true
+        for (subscriptionID, subscriptionRules) in grouped {
+            let url = customRulesURL(for: subscriptionID)
+            guard let encoded = try? JSONEncoder.pretty.encode(subscriptionRules),
+                  (try? encoded.write(to: url, options: .atomic)) != nil else {
+                completed = false
+                continue
+            }
+        }
+        if completed { try? FileManager.default.removeItem(at: customRulesURL) }
+    }
+
     /// Remove diagnostic and test copies created by older builds. These files are
     /// never user-authored and are not read by the current runtime.
     private func cleanupObsoleteGeneratedFiles() {
@@ -186,13 +224,58 @@ final class Store: @unchecked Sendable {
     }
 
     func loadCustomRules() -> [CustomRule] {
-        guard let data = try? Data(contentsOf: customRulesURL) else { return [] }
-        return (try? JSONDecoder().decode([CustomRule].self, from: data)) ?? []
+        let folders = (try? FileManager.default.contentsOfDirectory(
+            at: subscriptionFoldersURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        var rules: [CustomRule] = []
+        for folder in folders {
+            let url = folder.appendingPathComponent("custom-rules.json")
+            guard let data = try? Data(contentsOf: url),
+                  let stored = try? JSONDecoder().decode([CustomRule].self, from: data) else { continue }
+            rules.append(contentsOf: stored)
+        }
+        // Keep reading a legacy file if migration could not write one of its groups.
+        if let data = try? Data(contentsOf: customRulesURL),
+           let legacy = try? JSONDecoder().decode([CustomRule].self, from: data) {
+            let existing = Set(rules.map(\.id))
+            rules.append(contentsOf: legacy.filter { !existing.contains($0.id) })
+        }
+        return rules
     }
 
     func saveCustomRules(_ rules: [CustomRule]) {
-        guard let data = try? JSONEncoder.pretty.encode(rules) else { return }
-        try? data.write(to: customRulesURL, options: .atomic)
+        let grouped = Dictionary(grouping: rules, by: \.subscriptionID)
+        var completed = true
+        for (subscriptionID, subscriptionRules) in grouped {
+            guard let data = try? JSONEncoder.pretty.encode(subscriptionRules),
+                  (try? data.write(to: customRulesURL(for: subscriptionID), options: .atomic)) != nil else {
+                completed = false
+                continue
+            }
+        }
+        guard completed else {
+            if let data = try? JSONEncoder.pretty.encode(rules) {
+                try? data.write(to: customRulesURL, options: .atomic)
+            }
+            return
+        }
+        let folders = (try? FileManager.default.contentsOfDirectory(
+            at: subscriptionFoldersURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        for folder in folders {
+            guard let subscriptionID = UUID(uuidString: folder.lastPathComponent),
+                  grouped[subscriptionID] == nil else { continue }
+            try? FileManager.default.removeItem(at: folder.appendingPathComponent("custom-rules.json"))
+        }
+        try? FileManager.default.removeItem(at: customRulesURL)
+    }
+
+    func customRulesURL(for subscriptionID: UUID) -> URL {
+        subscriptionFolder(for: subscriptionID).appendingPathComponent("custom-rules.json")
     }
 
     func configURL(for profile: ConfigProfile) -> URL {
