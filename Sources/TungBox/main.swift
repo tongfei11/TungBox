@@ -860,6 +860,11 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             // ===== 1) Converge the TUN daemon (utun29) — independent of the proxy =====
             if wantTun {
                 if !tunNeedsReconcile {
+                    // Timers do not survive an app restart. Even when the previous
+                    // request files are still fresh, resume this process's heartbeat
+                    // immediately or the daemon will expire the request after 30s.
+                    self.startTunRequestHeartbeat()
+                    self.verifyTunStartupAsync()
                     self.appendLog("[TungBox] TUN 已在运行，系统代理切换不重启 TUN\n")
                 } else {
                     do {

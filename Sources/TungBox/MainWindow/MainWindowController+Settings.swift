@@ -1006,12 +1006,16 @@ extension MainWindowController {
     /// off the main thread, so it adds no switch latency.
     func verifyTunStartupAsync() {
         let store = self.store
+        let transitionID = runtimeTransitionID
         Task.detached { [weak self] in
             let deadline = Date().addingTimeInterval(8)
             var online = false
             while Date() < deadline {
                 try? await Task.sleep(nanoseconds: 500_000_000)
-                let stillWanted = await MainActor.run { [weak self] in self?.isTunEnabled ?? false }
+                let stillWanted = await MainActor.run { [weak self] in
+                    guard let self else { return false }
+                    return self.isTunEnabled && self.runtimeTransitionID == transitionID
+                }
                 guard stillWanted else { return }
                 if TunServiceManager.activeSingBoxPID(store: store, allowScan: false) != nil,
                    TunServiceManager.tunInterfaceIsActive() {
@@ -1028,12 +1032,23 @@ extension MainWindowController {
                 await MainActor.run { [weak self] in self?.reconcileSelectorSelectionsToConfig() }
                 return
             }
-            let stillWanted = await MainActor.run { [weak self] in self?.isTunEnabled ?? false }
+            let stillWanted = await MainActor.run { [weak self] in
+                guard let self else { return false }
+                return self.isTunEnabled && self.runtimeTransitionID == transitionID
+            }
             guard stillWanted else { return }
             let reason = TunServiceManager.lastDaemonErrorLine() ?? "未知原因，请查看 TUN 日志"
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.appendLog("[TUN] 启动校验失败：sing-box 未在 8 秒内就绪。原因：\(reason)\n")
+                self.stopTunRequestHeartbeat()
+                try? TunServiceManager.disable(store: self.store)
+                self.isTunEnabled = false
+                UserDefaults.standard.set(false, forKey: "tunEnabled")
+                self.wasTunActiveInThisSession = false
+                self.tunTransition = .none
+                self.syncProxyPreferenceControls()
+                self.refreshStatus()
                 self.showToast("TUN 启动失败：\(reason)")
             }
         }
