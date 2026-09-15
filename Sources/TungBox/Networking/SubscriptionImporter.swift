@@ -10,6 +10,8 @@ enum SubscriptionImporter {
     /// base64 share-link 列表，我们当前不解析这些格式，加进来只会浪费一次请求。
     static let fallbackUserAgents = [
         "sing-box/1.14.0",
+        "sing-box/1.13.0",
+        "sing-box/1.12.0",
         "clash-verge/v2.4.4 mihomo/Meta",
         "ClashMetaForAndroid/2.11.10.Meta",
         "Clash/v1.18.0"

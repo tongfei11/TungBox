@@ -30,6 +30,15 @@ enum ConfigCompatibilityChecker {
         // --- 1.12.0: domain_strategy in dial fields → domain_resolver ---
         if let outbounds = config["outbounds"] as? [[String: Any]] {
             for (i, outbound) in outbounds.enumerated() {
+                if (outbound["type"] as? String)?.lowercased() == "trojan",
+                   outbound["tls"] == nil {
+                    issues.append(Issue(
+                        severity: .error,
+                        path: "outbounds[\(i)].tls",
+                        message: "Trojan 节点缺少 TLS 配置，将补充 tls.enabled = true。",
+                        autoFixed: true
+                    ))
+                }
                 if let dial = outbound["dial"] as? [String: Any], dial["domain_strategy"] != nil {
                     issues.append(Issue(
                         severity: .warn,
@@ -209,6 +218,11 @@ enum ConfigCompatibilityChecker {
         if let outbounds = c["outbounds"] as? [[String: Any]] {
             var newOutbounds = outbounds
             for i in outbounds.indices {
+                if (newOutbounds[i]["type"] as? String)?.lowercased() == "trojan",
+                   newOutbounds[i]["tls"] == nil {
+                    newOutbounds[i]["tls"] = ["enabled": true]
+                    fixed.append("outbounds[\(i)] (\(newOutbounds[i]["tag"] ?? "")): 补充 Trojan 必需的 TLS")
+                }
                 if var dial = newOutbounds[i]["dial"] as? [String: Any],
                    let strategy = dial["domain_strategy"] as? String {
                     dial.removeValue(forKey: "domain_strategy")

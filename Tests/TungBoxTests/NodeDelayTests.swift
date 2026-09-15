@@ -2,6 +2,25 @@ import XCTest
 @testable import TungBox
 
 final class NodeDelayTests: XCTestCase {
+    func testCompatibilityRepairRestoresMissingTrojanTLS() throws {
+        let config: [String: Any] = [
+            "outbounds": [
+                ["type": "trojan", "tag": "legacy", "server": "example.com", "server_port": 443, "password": "secret"],
+                ["type": "trojan", "tag": "custom", "server": "example.net", "server_port": 443, "password": "secret", "tls": ["enabled": true, "server_name": "sni.example"]],
+                ["type": "trojan", "tag": "plain", "server": "plain.example", "server_port": 80, "password": "secret", "tls": ["enabled": false]],
+                ["type": "hysteria2", "tag": "hy2", "server": "example.org", "server_port": 443, "password": "secret"]
+            ]
+        ]
+
+        let repaired = ConfigCompatibilityChecker.autoFix(config: config)
+        let outbounds = try XCTUnwrap(repaired.config["outbounds"] as? [[String: Any]])
+        XCTAssertEqual((outbounds[0]["tls"] as? [String: Any])?["enabled"] as? Bool, true)
+        XCTAssertEqual((outbounds[1]["tls"] as? [String: Any])?["server_name"] as? String, "sni.example")
+        XCTAssertEqual((outbounds[2]["tls"] as? [String: Any])?["enabled"] as? Bool, false)
+        XCTAssertNil(outbounds[3]["tls"])
+        XCTAssertTrue(repaired.fixed.contains { $0.contains("补充 Trojan 必需的 TLS") })
+    }
+
     func testGroupDelayUsesReselectionEndpointAndPreservesQueryURL() throws {
         let target = "https://example.com/probe?a=1&b=two#fragment"
         let path = ClashAPI.delayPath(kind: "group", tag: "自动/选择?#", url: target)

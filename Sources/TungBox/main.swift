@@ -1472,6 +1472,16 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         let url = store.configURL(for: profiles[index])
         let rawConfig = (try? String(contentsOf: url)) ?? ""
         var loaded = normalizeLatencyTestURLs(inConfigText: rawConfig) ?? rawConfig
+        // Some subscription generators have briefly returned Trojan outbounds
+        // without their TLS block. Heal persisted profiles on load as well as at
+        // runtime so an older app-created broken profile does not keep failing.
+        if let parsed = parseConfigObject(from: loaded) {
+            let repaired = ConfigCompatibilityChecker.autoFix(config: parsed)
+            if !repaired.fixed.isEmpty, let rendered = try? renderConfig(repaired.config) {
+                loaded = rendered
+                try? loaded.write(to: url, atomically: true, encoding: .utf8)
+            }
+        }
         // Repair a stale/dangling default_domain_resolver (e.g. an old "dns-cn" no
         // longer defined) so the profile passes sing-box check, and persist the fix.
         if let repaired = repairDefaultDomainResolver(inConfigText: loaded) {
