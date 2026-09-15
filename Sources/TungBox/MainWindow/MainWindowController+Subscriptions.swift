@@ -303,8 +303,18 @@ extension MainWindowController {
     @objc func deleteSubscriptionClicked() {
         guard let index = selectedSubscriptionIndex, subscriptions.indices.contains(index) else { return }
         let removed = subscriptions[index]
-        do { try store.deleteRuleSetsFolder(for: removed.id) }
-        catch { showError(error); return }
+        do {
+            if let profileID = removed.profileID,
+               let profileIndex = profiles.firstIndex(where: { $0.id == profileID }) {
+                profiles[profileIndex] = try store.detachProfile(profiles[profileIndex], from: removed.id)
+                store.saveProfiles(profiles)
+            } else {
+                let folder = store.subscriptionFolder(for: removed.id)
+                if FileManager.default.fileExists(atPath: folder.path) { try FileManager.default.removeItem(at: folder) }
+            }
+        } catch { showError(error); return }
+        customRules.removeAll { $0.subscriptionID == removed.id }
+        store.saveCustomRules(customRules)
         let name = subscriptions[index].name
         subscriptions.remove(at: index)
         selectSubscription(at: nil)
@@ -364,7 +374,8 @@ extension MainWindowController {
     }
 
     func createProfile(named name: String, content: String) {
-        let profile = ConfigProfile(id: UUID(), name: name, fileName: "\(UUID().uuidString).json", updatedAt: Date())
+        let id = UUID()
+        let profile = ConfigProfile(id: id, name: name, fileName: store.profileFileName(id: id), updatedAt: Date())
         profiles.append(profile)
         try? content.write(to: store.configURL(for: profile), atomically: true, encoding: .utf8)
         store.saveProfiles(profiles)
@@ -544,7 +555,13 @@ extension MainWindowController {
         let profileName = "订阅 - \(subscription.name)"
 
         let existingIndex = subscription.profileID.flatMap { id in profiles.firstIndex { $0.id == id } }
-        var profile = existingIndex.map { profiles[$0] } ?? ConfigProfile(id: UUID(), name: profileName, fileName: "\(UUID().uuidString).json", updatedAt: Date())
+        let newProfileID = UUID()
+        var profile = existingIndex.map { profiles[$0] } ?? ConfigProfile(
+            id: newProfileID,
+            name: profileName,
+            fileName: store.profileFileName(id: newProfileID, subscriptionID: subscription.id),
+            updatedAt: Date()
+        )
         let configURL = store.configURL(for: profile)
         let baseURL = store.ruleBaseURL(for: subscription.id)
         let projectionURL = store.ruleProjectionURL(for: subscription.id)

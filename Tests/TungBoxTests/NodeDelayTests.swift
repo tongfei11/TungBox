@@ -28,6 +28,35 @@ final class NodeDelayTests: XCTestCase {
         }
     }
 
+    func testStoreMigratesSubscriptionFilesIntoOneFolder() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let profileID = UUID()
+        let subscriptionID = UUID()
+        let legacyName = "legacy.json"
+        let profile = ConfigProfile(id: profileID, name: "订阅", fileName: legacyName, updatedAt: Date())
+        let subscription = Subscription(id: subscriptionID, name: "订阅", url: "https://example.com", profileID: profileID, updatedAt: nil)
+        try JSONEncoder().encode([profile]).write(to: directory.appendingPathComponent("profiles.json"))
+        try JSONEncoder().encode([subscription]).write(to: directory.appendingPathComponent("subscriptions.json"))
+        try Data("{}".utf8).write(to: directory.appendingPathComponent(legacyName))
+        try Data("{}".utf8).write(to: directory.appendingPathComponent("rule-base-\(subscriptionID.uuidString).json"))
+        try Data("[]".utf8).write(to: directory.appendingPathComponent("rule-projection-\(subscriptionID.uuidString).json"))
+        let oldRuleSets = directory.appendingPathComponent("custom-rulesets/\(subscriptionID.uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: oldRuleSets, withIntermediateDirectories: true)
+        try Data("name: custom".utf8).write(to: oldRuleSets.appendingPathComponent("rule.yml"))
+
+        let store = Store(baseURL: directory)
+        let migrated = try XCTUnwrap(store.loadProfiles().first)
+        let folder = directory.appendingPathComponent("subscriptions/\(subscriptionID.uuidString)", isDirectory: true)
+        XCTAssertEqual(store.configURL(for: migrated), folder.appendingPathComponent("config.json"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent("config.json").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent("rule-base.json").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent("rule-projection.json").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent("custom-rulesets/rule.yml").path))
+    }
+
     func testCompatibilityRepairRestoresMissingTrojanTLS() throws {
         let config: [String: Any] = [
             "outbounds": [

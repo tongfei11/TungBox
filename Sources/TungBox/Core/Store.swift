@@ -31,6 +31,8 @@ final class Store: @unchecked Sendable {
     let baseURL: URL
     let profilesURL: URL
     let subscriptionsURL: URL
+    let subscriptionFoldersURL: URL
+    let profileFoldersURL: URL
     let customRulesURL: URL
     let ruleSetsURL: URL
     /// Root for user-authored rule sets, one folder per subscription. Distinct from
@@ -49,6 +51,8 @@ final class Store: @unchecked Sendable {
         baseURL = overrideURL ?? appSupport.appendingPathComponent("TungBox", isDirectory: true)
         profilesURL = baseURL.appendingPathComponent("profiles.json")
         subscriptionsURL = baseURL.appendingPathComponent("subscriptions.json")
+        subscriptionFoldersURL = baseURL.appendingPathComponent("subscriptions", isDirectory: true)
+        profileFoldersURL = baseURL.appendingPathComponent("profiles", isDirectory: true)
         customRulesURL = baseURL.appendingPathComponent("custom-rules.json")
         ruleSetsURL = baseURL.appendingPathComponent("rule-sets", isDirectory: true)
         customRuleSetsURL = baseURL.appendingPathComponent("custom-rulesets", isDirectory: true)
@@ -62,7 +66,85 @@ final class Store: @unchecked Sendable {
         try? FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: ruleSetsURL, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: coreURL, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: subscriptionFoldersURL, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: profileFoldersURL, withIntermediateDirectories: true)
+        migrateLegacyConfigLayout()
         cleanupObsoleteGeneratedFiles()
+    }
+
+    private func relativePath(for url: URL) -> String {
+        String(url.standardizedFileURL.path.dropFirst(baseURL.standardizedFileURL.path.count + 1))
+    }
+
+    func subscriptionFolder(for id: UUID) -> URL {
+        let url = subscriptionFoldersURL.appendingPathComponent(id.uuidString, isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    func profileFileName(id: UUID, subscriptionID: UUID? = nil) -> String {
+        let url: URL
+        if let subscriptionID {
+            url = subscriptionFoldersURL.appendingPathComponent(subscriptionID.uuidString, isDirectory: true)
+                .appendingPathComponent("config.json")
+        } else {
+            url = profileFoldersURL.appendingPathComponent(id.uuidString, isDirectory: true)
+                .appendingPathComponent("config.json")
+        }
+        return relativePath(for: url)
+    }
+
+    private func migrateLegacyConfigLayout() {
+        var profiles = loadProfiles()
+        let subscriptions = loadSubscriptions()
+        let links = Dictionary(grouping: subscriptions.compactMap { sub in
+            sub.profileID.map { ($0, sub.id) }
+        }, by: { $0.0 })
+        var changed = false
+
+        for index in profiles.indices {
+            let profile = profiles[index]
+            let linkedSubscriptionID = links[profile.id]?.count == 1 ? links[profile.id]?.first?.1 : nil
+            let desiredName = profileFileName(id: profile.id, subscriptionID: linkedSubscriptionID)
+            guard profile.fileName != desiredName else { continue }
+            let source = baseURL.appendingPathComponent(profile.fileName)
+            let destination = baseURL.appendingPathComponent(desiredName)
+            try? FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if FileManager.default.fileExists(atPath: source.path),
+               !FileManager.default.fileExists(atPath: destination.path) {
+                try? FileManager.default.moveItem(at: source, to: destination)
+            }
+            if FileManager.default.fileExists(atPath: destination.path) {
+                profiles[index].fileName = desiredName
+                changed = true
+            }
+        }
+
+        for subscription in subscriptions {
+            let folder = subscriptionFolder(for: subscription.id)
+            migrateFile(
+                from: baseURL.appendingPathComponent("rule-base-\(subscription.id.uuidString).json"),
+                to: folder.appendingPathComponent("rule-base.json")
+            )
+            migrateFile(
+                from: baseURL.appendingPathComponent("rule-projection-\(subscription.id.uuidString).json"),
+                to: folder.appendingPathComponent("rule-projection.json")
+            )
+            let oldRuleSets = customRuleSetsURL.appendingPathComponent(subscription.id.uuidString, isDirectory: true)
+            let newRuleSets = folder.appendingPathComponent("custom-rulesets", isDirectory: true)
+            if FileManager.default.fileExists(atPath: oldRuleSets.path),
+               !FileManager.default.fileExists(atPath: newRuleSets.path) {
+                try? FileManager.default.moveItem(at: oldRuleSets, to: newRuleSets)
+            }
+        }
+        if changed { saveProfiles(profiles) }
+    }
+
+    private func migrateFile(from source: URL, to destination: URL) {
+        guard FileManager.default.fileExists(atPath: source.path),
+              !FileManager.default.fileExists(atPath: destination.path) else { return }
+        try? FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.moveItem(at: source, to: destination)
     }
 
     /// Remove diagnostic and test copies created by older builds. These files are
@@ -114,11 +196,13 @@ final class Store: @unchecked Sendable {
     }
 
     func configURL(for profile: ConfigProfile) -> URL {
-        baseURL.appendingPathComponent(profile.fileName)
+        let url = baseURL.appendingPathComponent(profile.fileName)
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        return url
     }
 
     func ruleBaseURL(for id: UUID) -> URL {
-        baseURL.appendingPathComponent("rule-base-\(id.uuidString).json")
+        subscriptionFolder(for: id).appendingPathComponent("rule-base.json")
     }
 
     func saveRuleBase(_ config: String, for id: UUID) throws {
@@ -136,7 +220,7 @@ final class Store: @unchecked Sendable {
         return (object?["route"] as? [String: Any])?["rules"] as? [[String: Any]] ?? []
     }
 
-    func ruleProjectionURL(for id: UUID) -> URL { baseURL.appendingPathComponent("rule-projection-\(id.uuidString).json") }
+    func ruleProjectionURL(for id: UUID) -> URL { subscriptionFolder(for: id).appendingPathComponent("rule-projection.json") }
 
     func saveRuleProjection(_ text: String, for id: UUID) throws {
         let object = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any]
@@ -156,7 +240,7 @@ final class Store: @unchecked Sendable {
     // MARK: - Custom rule sets (per subscription, one YAML file each)
 
     func ruleSetsFolder(for subscriptionID: UUID) -> URL {
-        customRuleSetsURL.appendingPathComponent(subscriptionID.uuidString, isDirectory: true)
+        subscriptionFolder(for: subscriptionID).appendingPathComponent("custom-rulesets", isDirectory: true)
     }
 
     func ruleSetFileURL(for set: CustomRuleSet) -> URL {
@@ -219,7 +303,10 @@ final class Store: @unchecked Sendable {
     }
 
     func deleteRuleSetFile(at url: URL) throws {
-        guard url.pathExtension.lowercased() == "yml", url.deletingLastPathComponent().deletingLastPathComponent().standardizedFileURL == customRuleSetsURL.standardizedFileURL else {
+        let folder = url.deletingLastPathComponent()
+        guard url.pathExtension.lowercased() == "yml",
+              folder.lastPathComponent == "custom-rulesets",
+              folder.deletingLastPathComponent().deletingLastPathComponent().standardizedFileURL == subscriptionFoldersURL.standardizedFileURL else {
             throw NSError.user("只能删除当前规则集目录中的 YAML 文件")
         }
         try FileManager.default.removeItem(at: url)
@@ -229,6 +316,20 @@ final class Store: @unchecked Sendable {
     func deleteRuleSetsFolder(for subscriptionID: UUID) throws {
         let folder = ruleSetsFolder(for: subscriptionID)
         if FileManager.default.fileExists(atPath: folder.path) { try FileManager.default.removeItem(at: folder) }
+    }
+
+    func detachProfile(_ profile: ConfigProfile, from subscriptionID: UUID) throws -> ConfigProfile {
+        var detached = profile
+        let source = configURL(for: profile)
+        detached.fileName = profileFileName(id: profile.id)
+        let destination = configURL(for: detached)
+        if FileManager.default.fileExists(atPath: source.path), source.standardizedFileURL != destination.standardizedFileURL {
+            if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
+            try FileManager.default.moveItem(at: source, to: destination)
+        }
+        let folder = subscriptionFolder(for: subscriptionID)
+        if FileManager.default.fileExists(atPath: folder.path) { try FileManager.default.removeItem(at: folder) }
+        return detached
     }
 
     /// Best-effort name lookup for an invalid file, so the UI can still label it.
