@@ -344,6 +344,11 @@ final class Runner: @unchecked Sendable {
             throw NSError.user("找不到 sing-box。请先安装：brew install sing-box")
         }
         let actualConfig = preprocessTestConfig(at: config, isolatingOutbound: outbound)
+        defer {
+            if actualConfig.standardizedFileURL != config.standardizedFileURL {
+                try? FileManager.default.removeItem(at: actualConfig)
+            }
+        }
         let start = Date()
         
         let result: (status: Int32, output: String) = try await withCheckedThrowingContinuation { continuation in
@@ -364,11 +369,7 @@ final class Runner: @unchecked Sendable {
         
         if result.status != 0 {
             let message = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-            // Include the test-config path so a "TLS required" / "initialize outbound"
-            // failure can be inspected against the EXACT JSON sing-box saw at that
-            // moment (race conditions during subscription swap are otherwise opaque).
-            let diag = "（测速配置：\(actualConfig.path)）"
-            throw NSError.user((message.isEmpty ? "节点延迟测试超时或失败" : message) + diag)
+            throw NSError.user(message.isEmpty ? "节点延迟测试超时或失败" : message)
         }
         return "\(Int(Date().timeIntervalSince(start) * 1000)) ms"
     }
@@ -580,16 +581,11 @@ final class Runner: @unchecked Sendable {
             }
         }
         
-        // Suffix the file by tag so concurrent tag tests never overwrite each other.
-        let suffix: String = {
-            guard let t = outboundTag, !t.isEmpty else { return "" }
-            let safe = t.unicodeScalars
-                .map { CharacterSet.alphanumerics.contains($0) ? String(Character($0)) : "_" }
-                .joined()
-                .prefix(40)
-            return "_\(safe)"
-        }()
-        let tempURL = url.deletingLastPathComponent().appendingPathComponent("test\(suffix)_\(url.lastPathComponent)")
+        // Each concurrent probe gets a private system-temporary file. urlTest removes
+        // it as soon as sing-box exits, so node names and old profiles cannot leave
+        // permanent test files in Application Support.
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tungbox-node-test-\(UUID().uuidString).json")
         if let outData = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys]) {
             try? outData.write(to: tempURL)
             return tempURL

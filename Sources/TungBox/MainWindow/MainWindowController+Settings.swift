@@ -965,10 +965,6 @@ extension MainWindowController {
         // reconcileRuntime() now (system proxy and TUN can be enabled together), so
         // enabling TUN must not force the system proxy off here.
 
-        // 调试：保存 tun-request 副本
-        let debugRequestPath = NSHomeDirectory() + "/Library/Application Support/TungBox/tun-request-debug.json"
-        try? preparedConfig.write(toFile: debugRequestPath, atomically: true, encoding: .utf8)
-
         try TunServiceManager.enable(store: store, configText: preparedConfig)
         startTunRequestHeartbeat()
         wasTunActiveInThisSession = true

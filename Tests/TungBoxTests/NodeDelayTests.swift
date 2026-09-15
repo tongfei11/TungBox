@@ -2,6 +2,32 @@ import XCTest
 @testable import TungBox
 
 final class NodeDelayTests: XCTestCase {
+    func testStoreCleansOnlyObsoleteGeneratedConfigs() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let obsolete = [
+            "test_node_profile.json",
+            "before-refresh-legacy.json",
+            "tun-config-debug.json",
+            "tun-request-debug.json"
+        ]
+        let retained = ["profile.json", "run_profile.json", "tun-request.json"]
+        for name in obsolete + retained {
+            try Data("{}".utf8).write(to: directory.appendingPathComponent(name))
+        }
+
+        _ = Store(baseURL: directory)
+
+        for name in obsolete {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent(name).path))
+        }
+        for name in retained {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent(name).path))
+        }
+    }
+
     func testCompatibilityRepairRestoresMissingTrojanTLS() throws {
         let config: [String: Any] = [
             "outbounds": [

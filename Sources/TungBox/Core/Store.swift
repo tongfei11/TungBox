@@ -62,6 +62,25 @@ final class Store: @unchecked Sendable {
         try? FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: ruleSetsURL, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: coreURL, withIntermediateDirectories: true)
+        cleanupObsoleteGeneratedFiles()
+    }
+
+    /// Remove diagnostic and test copies created by older builds. These files are
+    /// never user-authored and are not read by the current runtime.
+    private func cleanupObsoleteGeneratedFiles() {
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: baseURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        for url in files {
+            let name = url.lastPathComponent
+            let obsolete = (name.hasPrefix("test_") && url.pathExtension.lowercased() == "json")
+                || (name.hasPrefix("before-refresh-") && url.pathExtension.lowercased() == "json")
+                || name == "tun-config-debug.json"
+                || name == "tun-request-debug.json"
+            if obsolete { try? FileManager.default.removeItem(at: url) }
+        }
     }
 
     func loadProfiles() -> [ConfigProfile] {

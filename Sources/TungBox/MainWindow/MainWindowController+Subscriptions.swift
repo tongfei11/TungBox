@@ -553,10 +553,6 @@ extension MainWindowController {
             for url in [configURL, baseURL, projectionURL] {
                 snapshots.append((url, FileManager.default.fileExists(atPath: url.path) ? try Data(contentsOf: url) : nil))
             }
-            if let previous = snapshots.first?.1 {
-                let backup = store.baseURL.appendingPathComponent("before-refresh-\(UUID().uuidString).json")
-                try previous.write(to: backup, options: .atomic)
-            }
             try store.saveRuleBase(config, for: subscription.id)
             let merged = try renderConfig(try applyCustomRules(to: config, subscriptionID: subscription.id, freshSubscription: true))
             try checkRuleSetConfig(merged)
