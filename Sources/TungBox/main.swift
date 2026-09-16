@@ -1599,11 +1599,63 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         selectNode(nodes[index].tag, inGroup: TungBoxConfig.tagManual)
     }
 
+    static func optimisticSelectionState(
+        nodeGroups: [NodeGroupInfo],
+        proxiesObj: [String: Any]?,
+        nodeTag: String,
+        groupTag: String
+    ) -> (nodeGroups: [NodeGroupInfo], proxiesObj: [String: Any]?) {
+        var updatedGroups = nodeGroups
+        if let index = updatedGroups.firstIndex(where: { $0.tag == groupTag }) {
+            updatedGroups[index].current = nodeTag
+        }
+
+        var updatedProxiesObj = proxiesObj
+        if var root = updatedProxiesObj,
+           var proxies = root["proxies"] as? [String: Any] {
+            var runtimeGroup = proxies[groupTag] as? [String: Any] ?? [:]
+            runtimeGroup["now"] = nodeTag
+            proxies[groupTag] = runtimeGroup
+            root["proxies"] = proxies
+            updatedProxiesObj = root
+        }
+        return (updatedGroups, updatedProxiesObj)
+    }
+
+    func applyOptimisticNodeSelection(nodeTag: String, groupTag: String) {
+        let state = Self.optimisticSelectionState(
+            nodeGroups: nodeGroups,
+            proxiesObj: lastProxiesObj,
+            nodeTag: nodeTag,
+            groupTag: groupTag
+        )
+        nodeGroups = state.nodeGroups
+        lastProxiesObj = state.proxiesObj
+        refreshNodeGroupsView()
+
+        if groupTag == TungBoxConfig.tagManual && isProxyServiceActiveOrRequested() {
+            let active = resolveActiveOutbound(proxiesObj: lastProxiesObj)
+            currentNodeNameLabel.stringValue = active.name.isEmpty ? nodeTag : active.name
+            currentNodeAutoBadge.isHidden = !active.isAuto
+            let delay = nodes.first(where: { $0.tag == active.name })?.delay ?? "—"
+            currentNodeDelayLabel.stringValue = delay == "未测试" ? "—" : delay
+            currentNodeDelayLabel.textColor = MD3.latencyTextColor(currentNodeDelayLabel.stringValue)
+            refreshTrayIcon()
+        }
+    }
+
     func selectNode(_ nodeTag: String, inGroup groupTag: String) {
         selectorSelectionID = UUID()
         let selectionID = selectorSelectionID
         let transitionID = runtimeTransitionID
         let apiPorts = activeSelectorAPIPorts()
+        let previousNodeGroups = nodeGroups
+        let previousProxiesObj = lastProxiesObj
+
+        // Reflect the click before any control API, connection cleanup or disk I/O.
+        // The runtime/config work below remains serialized in the background task.
+        applyOptimisticNodeSelection(nodeTag: nodeTag, groupTag: groupTag)
+
         selectorSelectionTask = Task {
             guard selectorSelectionID == selectionID, runtimeTransitionID == transitionID else { return }
             var switchedByAPI = false
@@ -1622,7 +1674,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             await MainActor.run { [weak self] in
                 guard let self = self, self.selectorSelectionID == selectionID, self.runtimeTransitionID == transitionID else { return }
                 do {
-                    guard var config = self.parseConfigObject(from: self.editor.string) else { return }
+                    guard var config = self.parseConfigObject(from: self.editor.string) else {
+                        throw NSError.user("当前配置不是有效 JSON")
+                    }
                     var outbounds = config["outbounds"] as? [[String: Any]] ?? []
                     var found = false
                     for i in outbounds.indices {
@@ -1655,8 +1709,20 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                         } else {
                             self.refreshStatus()
                         }
+                    } else {
+                        throw NSError.user("当前配置中未找到节点选择组：\(groupTag)")
                     }
                 } catch {
+                    // If neither the runtime nor the persisted config accepted the
+                    // change, restore the rendered state. When the runtime switch
+                    // succeeded, keep showing that real state and only report that
+                    // persistence failed.
+                    if !switchedByAPI {
+                        self.nodeGroups = previousNodeGroups
+                        self.lastProxiesObj = previousProxiesObj
+                        self.refreshNodeGroupsView()
+                        self.refreshStatus()
+                    }
                     self.showError(error)
                 }
             }

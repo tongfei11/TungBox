@@ -56,6 +56,29 @@ let controller = MainWindowController(window: window)
 precondition(ClashAPI.endpointURL(path: "/proxies", port: 9091)?.port == 9091,
     "TUN-only control requests must target the TUN Clash API")
 
+let optimisticGroups = [
+    NodeGroupInfo(tag: "自动选择", type: "urltest", members: ["日本 03", "美国 03"], current: "日本 03"),
+    NodeGroupInfo(tag: "节点选择", type: "selector", members: ["自动选择", "日本 03", "美国 03"], current: "日本 03")
+]
+let optimisticProxies: [String: Any] = [
+    "proxies": [
+        "自动选择": ["type": "URLTest", "now": "日本 03"],
+        "节点选择": ["type": "Selector", "now": "日本 03"]
+    ]
+]
+let optimisticState = MainWindowController.optimisticSelectionState(
+    nodeGroups: optimisticGroups,
+    proxiesObj: optimisticProxies,
+    nodeTag: "美国 03",
+    groupTag: "节点选择"
+)
+precondition(optimisticState.nodeGroups.first(where: { $0.tag == "节点选择" })?.current == "美国 03",
+    "A node click must update the rendered selector state before runtime I/O")
+let optimisticRuntimeGroups = optimisticState.proxiesObj?["proxies"] as? [String: Any]
+let optimisticManual = optimisticRuntimeGroups?["节点选择"] as? [String: Any]
+precondition(optimisticManual?["now"] as? String == "美国 03",
+    "A node click must update the cached runtime selection immediately")
+
 let heartbeatDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
 let heartbeatStore = Store(baseURL: heartbeatDirectory)
 defer { try? FileManager.default.removeItem(at: heartbeatDirectory) }
