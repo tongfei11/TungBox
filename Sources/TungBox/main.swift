@@ -220,6 +220,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var selectorSelectionTask: Task<Void, Never>?
     var tunCaptureIntentID = UUID()
     var lastProxiesObj: [String: Any]? = nil
+    var lastAutomaticNodeByAPIPort: [Int: String] = [:]
     var prevConnections: [ConnectionInfo] = []
     /// 上一次拉到的 sing-box 进程级累计字节数（按端口分别记，因为用户代理 9090 和
     /// TUN 守护 9091 是独立进程）。流量累计用这两个数字相减得 delta，能算上 UDP /
@@ -1610,7 +1611,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 do {
                     for apiPort in apiPorts {
                         guard selectorSelectionID == selectionID, runtimeTransitionID == transitionID else { return }
-                        try await ClashAPI.selectProxy(group: groupTag, node: nodeTag, port: apiPort)
+                        try await ClashAPI.selectProxyAndCloseConnections(group: groupTag, node: nodeTag, port: apiPort)
                     }
                     switchedByAPI = true
                     appendLog("[节点] \(groupTag) 已通过运行时 API 切换到: \(nodeTag)\n")
@@ -2650,6 +2651,17 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         return resolveActiveOutboundForGroup(groupTag: "节点选择", proxiesObj: proxiesObj)
     }
 
+    nonisolated static func automaticSelectionTransition(
+        previous: String?,
+        currentName: String,
+        isAutomatic: Bool
+    ) -> (next: String?, didChange: Bool) {
+        guard isAutomatic, !currentName.isEmpty, currentName != "自动选择" else {
+            return (nil, false)
+        }
+        return (currentName, previous != nil && previous != currentName)
+    }
+
     func resolveActiveOutboundForGroup(groupTag: String, proxiesObj: [String: Any]?) -> (name: String, isAuto: Bool) {
         guard let proxiesObj = proxiesObj,
               let proxies = proxiesObj["proxies"] as? [String: Any] else {
@@ -2820,6 +2832,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     func stopStatsTimer() {
         statsTimer?.invalidate()
         statsTimer = nil
+        lastAutomaticNodeByAPIPort.removeAll()
         updateConnectionsCard(value: "0", detail: "服务未运行")
         uploadValueLabel.stringValue = "0 B/s"
         downloadValueLabel.stringValue = "0 B/s"

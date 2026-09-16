@@ -1,3 +1,54 @@
+final class SelectorSwitchRecordingProtocol: URLProtocol {
+    nonisolated(unsafe) static var requests: [URLRequest] = []
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.requests.append(request)
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data("{}".utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+let selectorConfiguration = URLSessionConfiguration.ephemeral
+selectorConfiguration.protocolClasses = [SelectorSwitchRecordingProtocol.self]
+let selectorSession = URLSession(configuration: selectorConfiguration)
+var selectorSwitchFinished = false
+var selectorSwitchError: Error?
+Task {
+    do {
+        try await ClashAPI.selectProxyAndCloseConnections(
+            group: "节点选择", node: "美国 03", port: 9090, session: selectorSession
+        )
+    } catch {
+        selectorSwitchError = error
+    }
+    selectorSwitchFinished = true
+}
+while !selectorSwitchFinished { RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
+precondition(selectorSwitchError == nil)
+precondition(SelectorSwitchRecordingProtocol.requests.map(\.httpMethod) == ["PUT", "DELETE"],
+    "A selector switch must close connections only after updating the selected node")
+precondition(SelectorSwitchRecordingProtocol.requests.map { $0.url?.path } == ["/proxies/节点选择", "/connections"])
+
+let firstAutomaticObservation = MainWindowController.automaticSelectionTransition(
+    previous: nil, currentName: "日本 03", isAutomatic: true
+)
+precondition(firstAutomaticObservation.next == "日本 03" && !firstAutomaticObservation.didChange,
+    "The first automatic-selection observation must establish a baseline without disconnecting")
+let changedAutomaticObservation = MainWindowController.automaticSelectionTransition(
+    previous: firstAutomaticObservation.next, currentName: "美国 03", isAutomatic: true
+)
+precondition(changedAutomaticObservation.next == "美国 03" && changedAutomaticObservation.didChange,
+    "A periodic automatic-selection change must be detected so old connections can be closed")
+let manualObservation = MainWindowController.automaticSelectionTransition(
+    previous: changedAutomaticObservation.next, currentName: "美国 03", isAutomatic: false
+)
+precondition(manualObservation.next == nil && !manualObservation.didChange,
+    "Manual selection must reset automatic-selection tracking")
+
 let app = NSApplication.shared
 app.setActivationPolicy(.prohibited)
 let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1080, height: 720), styleMask: [.titled, .resizable], backing: .buffered, defer: false)

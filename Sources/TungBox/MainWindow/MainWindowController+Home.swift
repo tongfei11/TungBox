@@ -492,6 +492,7 @@ extension MainWindowController {
         let extraPorts: [Int] = isTunRuntimeRunning() ? [TungBoxConfig.tunDaemonClashPort] : []
         let allPorts: [Int] = [9090] + extraPorts
         let proxyAPIPort = delayAPIPort()
+        let selectorAPIPorts = activeSelectorAPIPorts()
         let statsTransitionID = runtimeTransitionID
         let statsSelectionID = selectorSelectionID
         let prevTotals = prevTrafficTotals
@@ -504,7 +505,13 @@ extension MainWindowController {
             }
             let apiConnections = try? await ClashAPI.connectionsFromAll(extraPorts: extraPorts)
             let totals = (try? await ClashAPI.trafficTotals(ports: allPorts)) ?? [:]
-            let proxiesObj = (try? await ClashAPI.proxies(port: proxyAPIPort))
+            var proxiesByPort: [Int: [String: Any]] = [:]
+            for port in selectorAPIPorts {
+                if let proxies = try? await ClashAPI.proxies(port: port) {
+                    proxiesByPort[port] = proxies
+                }
+            }
+            let proxiesObj = proxiesByPort[proxyAPIPort ?? 9090]
             
             let rssValue = await withCheckedContinuation { (continuation: CheckedContinuation<String, Never>) in
                 DispatchQueue.global(qos: .background).async {
@@ -564,6 +571,20 @@ extension MainWindowController {
                 // Sync active node from Clash API. Delay values are updated only by
                 // the explicit automatic/all-node delay test, not by this poll.
                 self.lastProxiesObj = proxiesObj
+                for port in selectorAPIPorts {
+                    guard let portProxies = proxiesByPort[port] else { continue }
+                    let active = self.resolveActiveOutbound(proxiesObj: portProxies)
+                    let transition = Self.automaticSelectionTransition(
+                        previous: self.lastAutomaticNodeByAPIPort[port],
+                        currentName: active.name,
+                        isAutomatic: active.isAuto
+                    )
+                    self.lastAutomaticNodeByAPIPort[port] = transition.next
+                    if transition.didChange {
+                        self.appendLog("[节点] 自动选择已切换到 \(active.name)，正在断开旧节点连接\n")
+                        Task { _ = try? await ClashAPI.closeConnections(port: port) }
+                    }
+                }
                 if let proxies = proxiesObj?["proxies"] as? [String: Any] {
                     var changed = false
                     for index in self.nodeGroups.indices {

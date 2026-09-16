@@ -10,9 +10,25 @@ enum ClashAPI {
         return try await requestJSON(path: "/proxies/\(escaped)") as? [String: Any] ?? [:]
     }
 
-    static func selectProxy(group: String, node: String, port: Int? = nil) async throws {
+    static func selectProxy(group: String, node: String, port: Int? = nil, session: URLSession = .shared) async throws {
         let escaped = group.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? group
-        try await requestJSON(path: "/proxies/\(escaped)", method: "PUT", body: ["name": node], port: port)
+        try await requestJSON(path: "/proxies/\(escaped)", method: "PUT", body: ["name": node], port: port, session: session)
+    }
+
+    /// Selector changes affect only new connections in sing-box. Close the old
+    /// connection pool after a successful switch so browsers cannot keep using
+    /// the previous node through HTTP/2 or other persistent sessions.
+    static func selectProxyAndCloseConnections(
+        group: String,
+        node: String,
+        port: Int? = nil,
+        session: URLSession = .shared
+    ) async throws {
+        try await selectProxy(group: group, node: node, port: port, session: session)
+        // Selection is already committed at this point. Connection cleanup is
+        // best-effort and must not turn a successful instant switch into a slow
+        // full process restart when the DELETE endpoint is temporarily busy.
+        _ = try? await closeConnections(port: port, session: session)
     }
 
     static func delay(node: String, url: String, port: Int? = nil) async throws -> Int {
@@ -130,8 +146,8 @@ enum ClashAPI {
     }
 
     @discardableResult
-    static func closeConnections(port: Int? = nil) async throws -> Any {
-        try await requestJSON(path: "/connections", method: "DELETE", port: port)
+    static func closeConnections(port: Int? = nil, session: URLSession = .shared) async throws -> Any {
+        try await requestJSON(path: "/connections", method: "DELETE", port: port, session: session)
     }
 
     @discardableResult
@@ -171,7 +187,7 @@ enum ClashAPI {
     }
 
     @discardableResult
-    private static func requestJSON(path: String, method: String = "GET", body: [String: Any]? = nil, port: Int? = nil, timeout: TimeInterval = 7) async throws -> Any {
+    private static func requestJSON(path: String, method: String = "GET", body: [String: Any]? = nil, port: Int? = nil, timeout: TimeInterval = 7, session: URLSession = .shared) async throws -> Any {
         guard let url = endpointURL(path: path, port: port) else {
             throw NSError.user("Clash API 地址无效")
         }
@@ -183,7 +199,7 @@ enum ClashAPI {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         if let httpResponse = response as? HTTPURLResponse, !(200..<300).contains(httpResponse.statusCode) {
             let message = String(data: data, encoding: .utf8) ?? "HTTP \(httpResponse.statusCode)"
             throw NSError.user(message)
