@@ -6,7 +6,9 @@ cd "$ROOT_DIR"
 
 PRODUCT="TungBox"
 IDENTIFIER="com.tung.tungbox"
-APP_DIR="$ROOT_DIR/dist/${PRODUCT}.app"
+WORK_DIR="$(mktemp -d)"
+trap 'rm -rf "$WORK_DIR"' EXIT
+APP_DIR="$WORK_DIR/${PRODUCT}.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
@@ -36,8 +38,6 @@ esac
 
 RELEASE_VERSION="$(awk -F'"' '/static let release/ { print $2; exit }' Sources/TungBox/Core/AppMetadata.swift)"
 BUILD_NUMBER="$(awk -F'"' '/static let build/ { print $2; exit }' Sources/TungBox/Core/AppMetadata.swift)"
-WORK_DIR="$(mktemp -d)"
-trap 'rm -rf "$WORK_DIR"' EXIT
 
 binary_supports_arch() {
   local binary="$1"

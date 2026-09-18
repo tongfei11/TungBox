@@ -27,7 +27,17 @@ TungBox 是 [sing-box](https://github.com/SagerNet/sing-box) 的 macOS 原生客
 
 > 系统代理与 TUN 模式为两个独立开关，可同时开启；切换出站模式（直连 / 全局 / 规则）实时生效。
 
-> Release 版本 **0.3.0** · 当前编译版本 **0.3.0(0216)**
+> Release 版本 **0.3.0** · 当前编译版本 **0.3.0(0217)**
+
+## 0.3.0 更新
+
+- 升级内置 sing-box Core 至 1.14.0
+- 新增 DNS、Fake-IP、TUN 与自定义规则集的图形化配置
+- 自定义规则按订阅独立保存，订阅刷新后自动合并
+- 优化节点测速、自动选择和手动切换，点击后界面即时响应
+- 优化系统代理与 TUN 的独立运行、热重载和异常恢复
+- 修复订阅、规则和控制台页面引起的窗口尺寸变化
+- 优化状态栏速率、连接列表、日志和首页统计性能
 
 ## 开发
 
@@ -41,7 +51,7 @@ swift build              # 构建
 
 ## 安装
 
-从 [Releases](https://github.com/tongfei11/TungBox/releases/latest) 下载安装包。优先使用通用包 `TungBox-x.x.x-macos-universal.dmg`；如果单独分发，也可按机型选择 `TungBox-x.x.x-macos-arm64.dmg` 或 `TungBox-x.x.x-macos-x86_64.dmg`。挂载后将 `TungBox.app` 拖入 `/Applications`。
+从 [Releases](https://github.com/tongfei11/TungBox/releases/latest) 下载安装包：Apple Silicon（M1 及后续芯片）选择 `TungBox-x.x.x-macos-arm64.dmg`，Intel Mac 选择 `TungBox-x.x.x-macos-x86_64.dmg`。挂载后将 `TungBox.app` 拖入 `/Applications`。
 
 首次打开时，macOS Gatekeeper 可能提示"无法验证开发者"。请在 **系统设置 → 隐私与安全性** 中点击"仍要打开"。
 
