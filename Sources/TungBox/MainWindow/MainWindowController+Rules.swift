@@ -30,12 +30,12 @@ extension MainWindowController {
 
         ruleSearchField.placeholderString = "搜索规则"
         ruleSearchField.target = self
-        ruleSearchField.action = #selector(refreshRulesClicked)
+        ruleSearchField.action = #selector(filterRulesClicked)
         ruleSearchField.translatesAutoresizingMaskIntoConstraints = false
         ruleSearchField.heightAnchor.constraint(equalToConstant: 36).isActive = true
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(refreshRulesClicked),
+            selector: #selector(filterRulesClicked),
             name: NSControl.textDidChangeNotification,
             object: ruleSearchField
         )
@@ -239,9 +239,8 @@ extension MainWindowController {
         if let invalid = selectedInvalidRuleSet() { deleteInvalidRuleSet(invalid) }
     }
 
-    @objc func refreshRulesClicked() {
-        refreshRulesFromEditor()
-        showToast("规则列表已刷新", style: .info)
+    @objc func filterRulesClicked() {
+        rulesTable.reloadData()
     }
 
     /// Per-rule-type field label, input placeholder, a short description shown under
@@ -796,14 +795,16 @@ extension MainWindowController {
     }
 
     func filteredRuleRows() -> [RuleInfo] {
-        let query = ruleSearchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !query.isEmpty else { return ruleRows }
+        let query = ruleSearchField.stringValue
         return ruleRows.filter { row in
-            row.isSection ||
-            row.type.lowercased().contains(query) ||
-            row.value.lowercased().contains(query) ||
-            row.strategy.lowercased().contains(query) ||
-            row.note.lowercased().contains(query)
+            RuleSearch.matches(
+                type: row.type,
+                value: row.value,
+                strategy: row.strategy,
+                note: row.note,
+                isSection: row.isSection,
+                query: query
+            )
         }
     }
 

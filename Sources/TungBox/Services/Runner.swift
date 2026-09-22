@@ -7,6 +7,7 @@ final class Runner: @unchecked Sendable {
     private var outputPipe: Pipe?
     private var elevatedPID: Int32?
     private let store: Store
+    private let ruleSetRefreshQueue = DispatchQueue(label: "com.tungbox.rule-set-refresh", qos: .utility)
     
     private let testQueue: OperationQueue = {
         let q = OperationQueue()
@@ -174,6 +175,97 @@ final class Runner: @unchecked Sendable {
         self.process = process
         runningConfigData = configData
         outputPipe = pipe
+    }
+
+    func refreshBuiltInRuleSetsInBackground(
+        config: URL,
+        proxyPort: Int,
+        log: @escaping @Sendable (String) -> Void
+    ) {
+        guard let data = try? Data(contentsOf: config),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        let sources = RuleSetRuntime.localizeBuiltInRuleSets(
+            in: json,
+            ruleSetDirectory: store.ruleSetsURL
+        ).remoteSources
+        guard !sources.isEmpty else { return }
+
+        ruleSetRefreshQueue.async { [weak self] in
+            guard let self, let binary = self.findSingBox() else { return }
+            for (tag, url) in sources.sorted(by: { $0.key < $1.key }) {
+                let destination = RuleSetRuntime.installedURL(for: tag, in: self.store.ruleSetsURL)
+                guard RuleSetRuntime.needsRefresh(tag: tag, fileURL: destination) else { continue }
+                do {
+                    let data = try self.downloadRuleSet(from: url, proxyPort: proxyPort)
+                    try self.validateAndInstallRuleSet(data, tag: tag, destination: destination, binary: binary)
+                    log("[规则集] \(tag) 已在代理启动后完成后台更新，下次启动生效\n")
+                } catch {
+                    log("[规则集] \(tag) 后台更新失败，继续使用内置/本地版本：\(error.localizedDescription)\n")
+                }
+            }
+        }
+    }
+
+    private func downloadRuleSet(from url: URL, proxyPort: Int) throws -> Data {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 30
+        configuration.timeoutIntervalForResource = 45
+        configuration.connectionProxyDictionary = [
+            "HTTPEnable": 1,
+            "HTTPProxy": "127.0.0.1",
+            "HTTPPort": proxyPort,
+            "HTTPSEnable": 1,
+            "HTTPSProxy": "127.0.0.1",
+            "HTTPSPort": proxyPort
+        ]
+        let session = URLSession(configuration: configuration)
+        let semaphore = DispatchSemaphore(value: 0)
+        let result = LockedValue<Result<Data, Error>?>(nil)
+        let task = session.dataTask(with: url) { data, response, error in
+            defer { semaphore.signal() }
+            if let error {
+                result.set(.failure(error))
+                return
+            }
+            guard let http = response as? HTTPURLResponse,
+                  (200...299).contains(http.statusCode),
+                  let data, !data.isEmpty else {
+                result.set(.failure(NSError.user("规则集服务器返回无效响应")))
+                return
+            }
+            result.set(.success(data))
+        }
+        task.resume()
+        guard semaphore.wait(timeout: .now() + 50) == .success else {
+            task.cancel()
+            session.invalidateAndCancel()
+            throw NSError.user("规则集下载超时")
+        }
+        session.finishTasksAndInvalidate()
+        guard let completed = result.get() else { throw NSError.user("规则集下载未返回结果") }
+        return try completed.get()
+    }
+
+    private func validateAndInstallRuleSet(_ data: Data, tag: String, destination: URL, binary: String) throws {
+        let temporarySRS = destination.deletingLastPathComponent()
+            .appendingPathComponent(".\(RuleSetRuntime.safeFileName(for: tag))-\(UUID().uuidString).srs")
+        let validationJSON = temporarySRS.deletingPathExtension().appendingPathExtension("json")
+        defer {
+            try? FileManager.default.removeItem(at: temporarySRS)
+            try? FileManager.default.removeItem(at: validationJSON)
+        }
+        try data.write(to: temporarySRS, options: .atomic)
+        let validation = runAndWait(binary, ["rule-set", "decompile", temporarySRS.path, "-o", validationJSON.path], timeoutSeconds: 20)
+        guard validation.status == 0 else {
+            throw NSError.user(validation.output.isEmpty ? "规则集格式校验失败" : validation.output)
+        }
+        if FileManager.default.fileExists(atPath: destination.path) {
+            _ = try FileManager.default.replaceItemAt(destination, withItemAt: temporarySRS)
+        } else {
+            try FileManager.default.moveItem(at: temporarySRS, to: destination)
+        }
+        let cachedJSON = destination.deletingPathExtension().appendingPathExtension("json")
+        try? FileManager.default.removeItem(at: cachedJSON)
     }
 
     private func startElevated(binary: String, config: URL) throws {
@@ -439,6 +531,14 @@ final class Runner: @unchecked Sendable {
         json = fixedJson
 
         var changed = !fixes.isEmpty
+        let localizedRuleSets = RuleSetRuntime.localizeBuiltInRuleSets(
+            in: json,
+            ruleSetDirectory: store.ruleSetsURL
+        )
+        if localizedRuleSets.didChange {
+            json = localizedRuleSets.config
+            changed = true
+        }
         let userMode = getuid() != 0 && !allowTun
         var convertedTun = false
 

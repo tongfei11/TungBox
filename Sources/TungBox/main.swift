@@ -929,6 +929,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                     }
                     guard token == self.runtimeTransitionID else { return }
                     try await self.runSerializedOffMain { self.applySystemProxyBlocking(enabled: true, port: port) }
+                    if let url = userProxyURL {
+                        runnerRef.refreshBuiltInRuleSetsInBackground(config: url, proxyPort: port, log: log)
+                    }
                 } catch {
                     guard token == self.runtimeTransitionID else { return }
                     self.appendLog("[TungBox] 系统代理启动失败（\(reason)）：\(error.localizedDescription)\n")
@@ -1777,6 +1780,10 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         }
 
         config = ConfigCompatibilityChecker.autoFix(config: config).config
+        config = RuleSetRuntime.localizeBuiltInRuleSets(
+            in: config,
+            ruleSetDirectory: store.ruleSetsURL
+        ).config
 
         // 确保配置中有 direct outbound（即使原始配置没有）
         var outbounds = config["outbounds"] as? [[String: Any]] ?? []

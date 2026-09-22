@@ -67,11 +67,24 @@ final class Store: @unchecked Sendable {
         try? FileManager.default.createDirectory(at: ruleSetsURL, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: coreURL, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: subscriptionFoldersURL, withIntermediateDirectories: true)
+        installBundledRuleSetsIfNeeded()
         migrateLegacyConfigLayout()
         pruneMissingProfileRecords()
         migrateLegacyCustomRules()
         cleanupObsoleteGeneratedFiles()
         cleanupEmptyProfileFolders()
+    }
+
+    private func installBundledRuleSetsIfNeeded() {
+        guard let firstRule = AppResources.url(
+            forResource: RuleSetRuntime.safeFileName(for: TungBoxConfig.ruleSetPrivate),
+            withExtension: "srs",
+            subdirectory: "RuleSets"
+        ) else { return }
+        try? RuleSetRuntime.installBundledRuleSets(
+            from: firstRule.deletingLastPathComponent(),
+            to: ruleSetsURL
+        )
     }
 
     private func relativePath(for url: URL) -> String {

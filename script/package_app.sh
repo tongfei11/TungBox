@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
+. "$ROOT_DIR/script/core_version.sh"
 
 PRODUCT="TungBox"
 IDENTIFIER="com.tung.tungbox"
@@ -14,6 +15,7 @@ MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 CORE_DIR="$RESOURCES_DIR/Core"
 TARGET_ARCH="${1:-${TARGET_ARCH:-$(uname -m)}}"
+CORE_VERSION="${TUNGBOX_CORE_VERSION:-1.14.0}"
 
 case "$TARGET_ARCH" in
   arm64)
@@ -163,7 +165,7 @@ build_core() {
   host_goarch="$(go env GOARCH)"
 
   # Pin the bundled core to the validated stable release. Override for local testing.
-  local core_version="${TUNGBOX_CORE_VERSION:-1.14.0}"
+  local core_version="$CORE_VERSION"
   if [[ -n "$core_version" ]]; then
     echo "sing-box ${core_version} identified, building..." >&2
   else
@@ -295,6 +297,8 @@ prepare_core() {
   fi
 
   chmod +x "$CORE_DIR/sing-box"
+
+  verify_core_version "$CORE_DIR/sing-box" "$CORE_VERSION"
 
   if ! binary_supports_target "$CORE_DIR/sing-box"; then
     echo "Bundled sing-box Core does not contain expected architectures: ${TARGET_ARCHS[*]}" >&2
