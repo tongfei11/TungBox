@@ -165,6 +165,7 @@ extension MainWindowController {
         guard let url = AppResources.url(forResource: name, withExtension: "png", subdirectory: "Tray"),
               let image = NSImage(contentsOf: url) else { return nil }
         image.size = NSSize(width: 20, height: 20)
+        image.isTemplate = true
         return image
     }
 

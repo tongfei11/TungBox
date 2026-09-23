@@ -3,7 +3,7 @@ import Foundation
 
 enum TungBoxVersion {
     static let release = "0.3.1"
-    static let build = "0223"
+    static let build = "0224"
     static let current = "\(release)(\(build))"
     static let display = "TungBox v\(current)"
 }
@@ -11,6 +11,17 @@ enum TungBoxVersion {
 enum AppResources {
     static func url(forResource name: String, withExtension ext: String, subdirectory: String? = nil) -> URL? {
         let fileName = "\(name).\(ext)"
+        if let resourceURL = Bundle.module.url(forResource: name, withExtension: ext, subdirectory: subdirectory) {
+            return resourceURL
+        }
+        // SwiftPM flattens processed resource folders in packaged bundles.
+        // Keep the named-folder lookup above for layouts that preserve folders,
+        // then check the module bundle root used by the shipped app.
+        if subdirectory != nil,
+           let resourceURL = Bundle.module.url(forResource: name, withExtension: ext) {
+            return resourceURL
+        }
+
         var directories: [URL] = []
         if let resourceURL = Bundle.main.resourceURL {
             directories.append(resourceURL)
