@@ -361,14 +361,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         if let logoUrl = AppResources.url(forResource: "logo", withExtension: "png", subdirectory: "Tray"),
            let logoImage = NSImage(contentsOf: logoUrl) {
             NSApplication.shared.applicationIconImage = logoImage
-
-            // Re-apply when the app version changes so Finder picks up refreshed artwork.
-            if UserDefaults.standard.string(forKey: "finderIconAppliedVersion") != TungBoxVersion.current {
-                let iconApplied = NSWorkspace.shared.setIcon(logoImage, forFile: Bundle.main.bundlePath, options: [])
-                if iconApplied {
-                    UserDefaults.standard.set(TungBoxVersion.current, forKey: "finderIconAppliedVersion")
-                }
-            }
         }
 
         checkSingBoxInstall(showAlert: true)

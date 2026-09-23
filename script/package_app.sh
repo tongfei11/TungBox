@@ -203,7 +203,10 @@ build_core() {
 
 generate_app_icon() {
   local logo="$ROOT_DIR/Sources/TungBox/Resources/Tray/logo.png"
-  local icon_set_dir="/tmp/${PRODUCT}_AppIcon.iconset"
+  local icon_set_dir="$WORK_DIR/${PRODUCT}_AppIcon.iconset"
+  local icon_package_dir="$WORK_DIR/AppIcon.icon"
+  local icon_assets_dir="$WORK_DIR/icon-assets"
+  local icon_partial_plist="$WORK_DIR/icon-partial.plist"
   local icns_path="$RESOURCES_DIR/AppIcon.icns"
 
   if [[ "$(sips -g hasAlpha "$logo" | awk '/hasAlpha:/ { print $2 }')" != "yes" ]]; then
@@ -211,7 +214,6 @@ generate_app_icon() {
     return 1
   fi
 
-  rm -rf "$icon_set_dir"
   mkdir -p "$icon_set_dir"
 
   local sizes=(16 32 128 256 512)
@@ -224,14 +226,31 @@ generate_app_icon() {
   sips -z 1024 1024 "$logo" --out "$icon_set_dir/icon_512x512@2x.png" &>/dev/null
 
   iconutil -c icns "$icon_set_dir" -o "$icns_path" 2>/dev/null
-  rm -rf "$icon_set_dir"
-
-  if [[ -f "$icns_path" ]]; then
-    echo "Generated app icon: $icns_path"
-    return 0
+  if [[ ! -s "$icns_path" ]]; then
+    echo "Failed to generate fallback .icns: $icns_path" >&2
+    return 1
   fi
-  echo "Warning: failed to generate .icns, app will use default icon." >&2
-  return 1
+
+  # Modern Finder reads the layered icon from Assets.car. The .icns remains
+  # available to older macOS versions; both use the same checked-in artwork.
+  mkdir -p "$icon_package_dir/Assets" "$icon_assets_dir"
+  cp "$ROOT_DIR/assets/AppIcon.icon/icon.json" "$icon_package_dir/icon.json"
+  cp "$logo" "$icon_package_dir/Assets/logo.png"
+  xcrun actool \
+    --compile "$icon_assets_dir" \
+    --platform macosx \
+    --minimum-deployment-target 13.0 \
+    --app-icon AppIcon \
+    --output-partial-info-plist "$icon_partial_plist" \
+    "$icon_package_dir"
+
+  if [[ ! -s "$icon_assets_dir/Assets.car" ]] || \
+     [[ "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIconName' "$icon_partial_plist")" != "AppIcon" ]]; then
+    echo "Failed to compile modern app icon: $icon_package_dir" >&2
+    return 1
+  fi
+  cp "$icon_assets_dir/Assets.car" "$RESOURCES_DIR/Assets.car"
+  echo "Generated app icons: $icns_path and $RESOURCES_DIR/Assets.car"
 }
 
 build_app_binary() {
@@ -335,6 +354,8 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
+  <key>CFBundleIconName</key>
   <string>AppIcon</string>
   <key>CFBundleName</key>
   <string>${PRODUCT}</string>
