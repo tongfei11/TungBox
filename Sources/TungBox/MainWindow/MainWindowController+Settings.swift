@@ -1029,7 +1029,10 @@ extension MainWindowController {
                 // reverting to auto after switching into TUN). Re-assert the
                 // config's selection via the clash API so manual stays manual and
                 // auto stays auto.
-                await MainActor.run { [weak self] in self?.reconcileSelectorSelectionsToConfig() }
+                await MainActor.run { [weak self] in
+                    self?.reconcileSelectorSelectionsToConfig()
+                    self?.runDeferredNetworkChecksAfterConnection(proxyPort: nil)
+                }
                 return
             }
             let stillWanted = await MainActor.run { [weak self] in

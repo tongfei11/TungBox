@@ -61,6 +61,25 @@ enum CoreLogicTests {
         expect(!RuleSearch.matches(type: "IP-CIDR", value: "192.0.2.0/24", strategy: "直连", note: "测试", isSection: false, query: "example"), "搜索应排除不匹配规则")
         expect(RuleSearch.matches(type: "", value: "# 当前配置规则", strategy: "", note: "", isSection: true, query: "example"), "筛选结果应保留分组标题")
 
+        var connectionGate = FirstConnectionGate()
+        expect(!connectionGate.hasConnected, "首次启动前不应视为网络已就绪")
+        expect(connectionGate.markConnected(), "首次连接成功后应触发延后网络任务")
+        expect(connectionGate.hasConnected, "连接成功后应记录已就绪")
+        expect(!connectionGate.markConnected(), "同一进程后续连接不应重复触发自动检查")
+
+        let directProxyPolicy = StartupNetworkPolicy.directConnectionProxyDictionary
+        expect(directProxyPolicy["HTTPEnable"] as? Int == 0, "首次订阅下载必须禁用 HTTP 系统代理")
+        expect(directProxyPolicy["HTTPSEnable"] as? Int == 0, "首次订阅下载必须禁用 HTTPS 系统代理")
+        expect(directProxyPolicy["SOCKSEnable"] as? Int == 0, "首次订阅下载必须禁用 SOCKS 系统代理")
+        let connectedProxyPolicy = StartupNetworkPolicy.postConnectionProxyDictionary(proxyPort: 7890)
+        expect(connectedProxyPolicy["HTTPEnable"] as? Int == 1, "连接后后台请求应启用本地 HTTP 代理")
+        expect(connectedProxyPolicy["HTTPPort"] as? Int == 7890, "连接后后台请求应使用已就绪的代理端口")
+        let tunProxyPolicy = StartupNetworkPolicy.postConnectionProxyDictionary(proxyPort: nil)
+        expect(tunProxyPolicy["HTTPEnable"] as? Int == 0, "仅 TUN 模式应绕过残留系统代理")
+        expect(RuleSetRuntime.cachePreparationAction(hasLocalSRS: true, hasConnected: false) == .decompileLocal, "连接前应直接解包内置规则")
+        expect(RuleSetRuntime.cachePreparationAction(hasLocalSRS: false, hasConnected: false) == .waitForConnection, "连接前缺失规则时不得访问远程资源")
+        expect(RuleSetRuntime.cachePreparationAction(hasLocalSRS: false, hasConnected: true) == .download, "连接后才允许下载缺失规则")
+
         print("PASS: core logic tests")
     }
 }

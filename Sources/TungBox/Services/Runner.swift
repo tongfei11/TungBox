@@ -179,7 +179,7 @@ final class Runner: @unchecked Sendable {
 
     func refreshBuiltInRuleSetsInBackground(
         config: URL,
-        proxyPort: Int,
+        proxyPort: Int?,
         log: @escaping @Sendable (String) -> Void
     ) {
         guard let data = try? Data(contentsOf: config),
@@ -206,18 +206,11 @@ final class Runner: @unchecked Sendable {
         }
     }
 
-    private func downloadRuleSet(from url: URL, proxyPort: Int) throws -> Data {
+    private func downloadRuleSet(from url: URL, proxyPort: Int?) throws -> Data {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 30
         configuration.timeoutIntervalForResource = 45
-        configuration.connectionProxyDictionary = [
-            "HTTPEnable": 1,
-            "HTTPProxy": "127.0.0.1",
-            "HTTPPort": proxyPort,
-            "HTTPSEnable": 1,
-            "HTTPSProxy": "127.0.0.1",
-            "HTTPSPort": proxyPort
-        ]
+        configuration.connectionProxyDictionary = StartupNetworkPolicy.postConnectionProxyDictionary(proxyPort: proxyPort)
         let session = URLSession(configuration: configuration)
         let semaphore = DispatchSemaphore(value: 0)
         let result = LockedValue<Result<Data, Error>?>(nil)

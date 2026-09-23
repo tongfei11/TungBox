@@ -108,4 +108,46 @@ final class RuleSetRuntimeTests: XCTestCase {
         XCTAssertFalse(RuleSetRuntime.needsRefresh(tag: "geosite-private", fileURL: file, now: now))
         XCTAssertTrue(RuleSetRuntime.needsRefresh(tag: "geoip-cn", fileURL: root.appendingPathComponent("missing.srs"), now: now))
     }
+
+    func testDeferredNetworkChecksOpenOnlyAfterFirstSuccessfulConnection() {
+        var gate = FirstConnectionGate()
+
+        XCTAssertFalse(gate.hasConnected)
+        XCTAssertTrue(gate.markConnected())
+        XCTAssertTrue(gate.hasConnected)
+        XCTAssertFalse(gate.markConnected())
+    }
+
+    func testFirstSubscriptionDownloadDoesNotDependOnSystemProxy() {
+        let policy = StartupNetworkPolicy.directConnectionProxyDictionary
+
+        XCTAssertEqual(policy["HTTPEnable"] as? Int, 0)
+        XCTAssertEqual(policy["HTTPSEnable"] as? Int, 0)
+        XCTAssertEqual(policy["SOCKSEnable"] as? Int, 0)
+    }
+
+    func testPostConnectionBackgroundRequestsUseReadyProxyOrTunDirectPath() {
+        let proxy = StartupNetworkPolicy.postConnectionProxyDictionary(proxyPort: 7890)
+        XCTAssertEqual(proxy["HTTPEnable"] as? Int, 1)
+        XCTAssertEqual(proxy["HTTPPort"] as? Int, 7890)
+
+        let tun = StartupNetworkPolicy.postConnectionProxyDictionary(proxyPort: nil)
+        XCTAssertEqual(tun["HTTPEnable"] as? Int, 0)
+        XCTAssertEqual(tun["HTTPSEnable"] as? Int, 0)
+    }
+
+    func testRulePageNeverDownloadsBeforeFirstConnection() {
+        XCTAssertEqual(
+            RuleSetRuntime.cachePreparationAction(hasLocalSRS: true, hasConnected: false),
+            .decompileLocal
+        )
+        XCTAssertEqual(
+            RuleSetRuntime.cachePreparationAction(hasLocalSRS: false, hasConnected: false),
+            .waitForConnection
+        )
+        XCTAssertEqual(
+            RuleSetRuntime.cachePreparationAction(hasLocalSRS: false, hasConnected: true),
+            .download
+        )
+    }
 }

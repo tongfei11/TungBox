@@ -1,6 +1,12 @@
 import Foundation
 
 enum RuleSetRuntime {
+    enum CachePreparationAction: Equatable, Sendable {
+        case decompileLocal
+        case download
+        case waitForConnection
+    }
+
     struct LocalizationResult {
         var config: [String: Any]
         var remoteSources: [String: URL]
@@ -41,6 +47,11 @@ enum RuleSetRuntime {
               let modifiedAt = attributes[.modificationDate] as? Date else { return true }
         let interval: TimeInterval = tag == "geosite-private" ? 7 * 86_400 : 86_400
         return now.timeIntervalSince(modifiedAt) >= interval
+    }
+
+    static func cachePreparationAction(hasLocalSRS: Bool, hasConnected: Bool) -> CachePreparationAction {
+        if hasLocalSRS { return .decompileLocal }
+        return hasConnected ? .download : .waitForConnection
     }
 
     static func localizeBuiltInRuleSets(in config: [String: Any], ruleSetDirectory: URL) -> LocalizationResult {

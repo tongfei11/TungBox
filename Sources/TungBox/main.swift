@@ -232,6 +232,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     let appVersionFooter = MD3AppVersionFooter()
     var latestAppRelease: AppRelease?
     var appUpdateCheckState: AppUpdateCheckState = .notChecked
+    var firstConnectionGate = FirstConnectionGate()
     private weak var toastView: NSView?
     private var pendingStatusRefresh: DispatchWorkItem?
     private var pendingLogRefresh: DispatchWorkItem?
@@ -929,9 +930,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                     }
                     guard token == self.runtimeTransitionID else { return }
                     try await self.runSerializedOffMain { self.applySystemProxyBlocking(enabled: true, port: port) }
-                    if let url = userProxyURL {
-                        runnerRef.refreshBuiltInRuleSetsInBackground(config: url, proxyPort: port, log: log)
-                    }
+                    self.runDeferredNetworkChecksAfterConnection(proxyPort: port)
                 } catch {
                     guard token == self.runtimeTransitionID else { return }
                     self.appendLog("[TungBox] 系统代理启动失败（\(reason)）：\(error.localizedDescription)\n")
@@ -3294,7 +3293,6 @@ extension MainWindowController {
         refreshConnectionsTable()
         NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
         NSApp.activate(ignoringOtherApps: true)
-        checkAppUpdateInBackground()
         appendLog("[窗口] 已从状态栏恢复控制台。\n")
     }
 }

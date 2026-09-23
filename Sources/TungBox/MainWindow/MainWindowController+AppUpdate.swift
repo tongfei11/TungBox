@@ -176,7 +176,21 @@ struct MarkdownParser {
 }
 
 extension MainWindowController {
-    func checkAppUpdateInBackground() {
+    func runDeferredNetworkChecksAfterConnection(proxyPort: Int?) {
+        guard firstConnectionGate.markConnected() else { return }
+        appendLog("[启动] 首次代理连接已就绪，开始后台检查应用更新与规则更新\n")
+        checkAppUpdateInBackground(proxyPort: proxyPort)
+        if let selectedIndex, profiles.indices.contains(selectedIndex) {
+            runner.refreshBuiltInRuleSetsInBackground(
+                config: store.configURL(for: profiles[selectedIndex]),
+                proxyPort: proxyPort
+            ) { [weak self] text in
+                Task { @MainActor [weak self] in self?.appendLog(text) }
+            }
+        }
+    }
+
+    func checkAppUpdateInBackground(proxyPort: Int?) {
         if case .checking = appUpdateCheckState {
             return
         }
@@ -185,7 +199,7 @@ extension MainWindowController {
 
         Task {
             do {
-                let release = try await AppUpdater.latestRelease()
+                let release = try await AppUpdater.latestRelease(proxyPort: proxyPort)
                 await MainActor.run { [weak self] in
                     self?.handleAppUpdateCheck(release)
                 }
@@ -221,7 +235,7 @@ extension MainWindowController {
         case .upToDate:
             showToast("TungBox 已是最新版：\(TungBoxVersion.release)")
         case .failed, .notChecked:
-            showToast("打开控制台时会自动检查更新")
+            showToast("首次连接代理后会自动检查更新")
         }
     }
 

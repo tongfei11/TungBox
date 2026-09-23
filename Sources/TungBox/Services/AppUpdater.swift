@@ -4,11 +4,11 @@ enum AppUpdater {
     static let latestReleaseURL = URL(string: "https://github.com/tongfei11/TungBox/releases/latest")!
     static let releasesFeedURL = URL(string: "https://github.com/tongfei11/TungBox/releases.atom")!
 
-    static func latestRelease() async throws -> AppRelease {
+    static func latestRelease(proxyPort: Int?) async throws -> AppRelease {
         do {
-            return try await latestReleaseFromFeed()
+            return try await latestReleaseFromFeed(proxyPort: proxyPort)
         } catch {
-            let release = try await latestReleaseFromRedirect()
+            let release = try await latestReleaseFromRedirect(proxyPort: proxyPort)
             return release
         }
     }
@@ -17,8 +17,8 @@ enum AppUpdater {
         Runner.compareVersions(TungBoxVersion.release, release.version) == .orderedAscending
     }
 
-    private static func latestReleaseFromFeed() async throws -> AppRelease {
-        let data = try await fetchData(from: releasesFeedURL, accept: "application/atom+xml,text/xml,*/*")
+    private static func latestReleaseFromFeed(proxyPort: Int?) async throws -> AppRelease {
+        let data = try await fetchData(from: releasesFeedURL, accept: "application/atom+xml,text/xml,*/*", proxyPort: proxyPort)
         guard let entry = ReleaseFeedParser.parse(data: data) else {
             throw NSError.user("无法识别应用更新发布说明")
         }
@@ -39,8 +39,8 @@ enum AppUpdater {
         )
     }
 
-    private static func latestReleaseFromRedirect() async throws -> AppRelease {
-        let tag = try await latestReleaseTag()
+    private static func latestReleaseFromRedirect(proxyPort: Int?) async throws -> AppRelease {
+        let tag = try await latestReleaseTag(proxyPort: proxyPort)
         let version = normalizeVersion(tag)
         guard !version.isEmpty else {
             throw NSError.user("无法识别最新应用版本")
@@ -57,15 +57,15 @@ enum AppUpdater {
         )
     }
 
-    private static func latestReleaseTag() async throws -> String {
+    private static func latestReleaseTag(proxyPort: Int?) async throws -> String {
         do {
-            return try await latestReleaseTag(method: "HEAD")
+            return try await latestReleaseTag(method: "HEAD", proxyPort: proxyPort)
         } catch {
-            return try await latestReleaseTag(method: "GET")
+            return try await latestReleaseTag(method: "GET", proxyPort: proxyPort)
         }
     }
 
-    private static func latestReleaseTag(method: String) async throws -> String {
+    private static func latestReleaseTag(method: String, proxyPort: Int?) async throws -> String {
         var request = URLRequest(url: latestReleaseURL, timeoutInterval: 15)
         request.httpMethod = method
         request.setValue("TungBox/\(TungBoxVersion.current)", forHTTPHeaderField: "User-Agent")
@@ -75,6 +75,7 @@ enum AppUpdater {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 15
         config.timeoutIntervalForResource = 30
+        config.connectionProxyDictionary = StartupNetworkPolicy.postConnectionProxyDictionary(proxyPort: proxyPort)
         let session = URLSession(configuration: config)
 
         let (_, response) = try await session.data(for: request)
@@ -100,7 +101,7 @@ enum AppUpdater {
         return tag
     }
 
-    private static func fetchData(from url: URL, accept: String) async throws -> Data {
+    private static func fetchData(from url: URL, accept: String, proxyPort: Int?) async throws -> Data {
         var request = URLRequest(url: url, timeoutInterval: 15)
         request.setValue("TungBox/\(TungBoxVersion.current)", forHTTPHeaderField: "User-Agent")
         request.setValue(accept, forHTTPHeaderField: "Accept")
@@ -109,6 +110,7 @@ enum AppUpdater {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 15
         config.timeoutIntervalForResource = 30
+        config.connectionProxyDictionary = StartupNetworkPolicy.postConnectionProxyDictionary(proxyPort: proxyPort)
         let session = URLSession(configuration: config)
 
         let (data, response) = try await session.data(for: request)

@@ -1164,24 +1164,46 @@ extension MainWindowController {
         guard !ruleSets.isEmpty, let binary = runner.findSingBox() else { return }
         for ruleSet in ruleSets {
             guard let tag = ruleSet["tag"] as? String,
-                  let urlText = ruleSet["url"] as? String,
-                  let url = URL(string: urlText),
                   !ruleSetJSONURL(for: tag).path.isEmpty,
                   !FileManager.default.fileExists(atPath: ruleSetJSONURL(for: tag).path),
                   !ruleSetDownloads.contains(tag) else { continue }
-            ruleSetDownloads.insert(tag)
             let srsURL = ruleSetSRSURL(for: tag)
             let jsonURL = ruleSetJSONURL(for: tag)
+            let action = RuleSetRuntime.cachePreparationAction(
+                hasLocalSRS: FileManager.default.fileExists(atPath: srsURL.path),
+                hasConnected: firstConnectionGate.hasConnected
+            )
+            guard action != .waitForConnection else { continue }
+            let sourceURL = (ruleSet["url"] as? String).flatMap(URL.init(string:))
+            guard action != .download || sourceURL != nil else { continue }
+            ruleSetDownloads.insert(tag)
             DispatchQueue.global(qos: .utility).async { [weak self] in
-                self?.downloadAndDecompileRuleSet(tag: tag, url: url, srsURL: srsURL, jsonURL: jsonURL, singBoxBinary: binary)
+                self?.prepareRuleSetCache(
+                    tag: tag,
+                    sourceURL: sourceURL,
+                    action: action,
+                    srsURL: srsURL,
+                    jsonURL: jsonURL,
+                    singBoxBinary: binary
+                )
             }
         }
     }
 
-    nonisolated func downloadAndDecompileRuleSet(tag: String, url: URL, srsURL: URL, jsonURL: URL, singBoxBinary: String) {
+    nonisolated func prepareRuleSetCache(
+        tag: String,
+        sourceURL: URL?,
+        action: RuleSetRuntime.CachePreparationAction,
+        srsURL: URL,
+        jsonURL: URL,
+        singBoxBinary: String
+    ) {
         do {
-            let data = try Data(contentsOf: url)
-            try data.write(to: srsURL, options: .atomic)
+            if action == .download {
+                guard let sourceURL else { throw NSError.user("规则集缺少下载地址") }
+                let data = try Data(contentsOf: sourceURL)
+                try data.write(to: srsURL, options: .atomic)
+            }
 
             let process = Process()
             process.currentDirectoryURL = srsURL.deletingLastPathComponent()
@@ -1200,14 +1222,14 @@ extension MainWindowController {
 
             DispatchQueue.main.async { [weak self] in
                 self?.ruleSetDownloads.remove(tag)
-                self?.appendLog("[规则集] \(tag) 已下载并解包\n")
+                self?.appendLog("[规则集] \(tag) 已\(action == .download ? "下载并" : "从本地")解包\n")
                 self?.ruleRows = self?.buildRuleRows(from: self?.editor.string ?? "") ?? []
                 self?.rulesTable.reloadData()
             }
         } catch {
             DispatchQueue.main.async { [weak self] in
                 self?.ruleSetDownloads.remove(tag)
-                self?.appendLog("[规则集] \(tag) 下载或解包失败：\(error.localizedDescription)\n")
+                self?.appendLog("[规则集] \(tag) 缓存准备失败：\(error.localizedDescription)\n")
             }
         }
     }
