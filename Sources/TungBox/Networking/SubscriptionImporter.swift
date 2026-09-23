@@ -84,25 +84,8 @@ enum SubscriptionImporter {
         request.setValue("application/json,text/plain,*/*", forHTTPHeaderField: "Accept")
         request.cachePolicy = .reloadIgnoringLocalCacheData
 
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 60
-        config.connectionProxyDictionary = StartupNetworkPolicy.directConnectionProxyDictionary
-        let session = URLSession(configuration: config)
-        let semaphore = DispatchSemaphore(value: 0)
-        let result = LockedValue<Result<(Data, URLResponse), Error>?>(nil)
-        session.dataTask(with: request) { data, response, error in
-            if let error { result.set(.failure(error)) }
-            else { result.set(.success((data ?? Data(), response ?? URLResponse()))) }
-            semaphore.signal()
-        }.resume()
-        _ = semaphore.wait(timeout: .now() + 30)
-        guard let resolved = result.get() else { throw NSError.user("订阅下载超时，请检查网络或订阅地址") }
-        let (data, response) = try resolved.get()
+        let (data, response) = try fetchResponse(for: request)
         let http = response as? HTTPURLResponse
-        if let http, !(200..<300).contains(http.statusCode) {
-            throw NSError.user("订阅下载失败：HTTP \(http.statusCode)")
-        }
         guard let text = String(data: data, encoding: .utf8) else {
             throw NSError.user("订阅内容不是 UTF-8 文本")
         }
@@ -123,39 +106,52 @@ enum SubscriptionImporter {
         request.setValue("application/json,text/plain,*/*", forHTTPHeaderField: "Accept")
         request.cachePolicy = .reloadIgnoringLocalCacheData
 
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 60
-        // 订阅下载必须直连，不能走系统代理。否则代理开着时 URLSession 会读
-        // 系统代理设置（指向 127.0.0.1:7890）→ 订阅请求经自家代理 → 该域名若
-        // 命中代理规则又被丢回本机，自家代理空转/超时 → 刷新失败 → 触发崩溃路径。
-        config.connectionProxyDictionary = StartupNetworkPolicy.directConnectionProxyDictionary
-        let session = URLSession(configuration: config)
-
-        let semaphore = DispatchSemaphore(value: 0)
-        let result = LockedValue<Result<(Data, URLResponse), Error>?>(nil)
-        session.dataTask(with: request) { data, response, error in
-            if let error {
-                result.set(.failure(error))
-            } else {
-                result.set(.success((data ?? Data(), response ?? URLResponse())))
-            }
-            semaphore.signal()
-        }.resume()
-        // 30s timeout guard — prevents hanging if semaphore never signals
-        _ = semaphore.wait(timeout: .now() + 30)
-
-        guard let resolved = result.get() else {
-            throw NSError.user("订阅下载超时，请检查网络或订阅地址")
-        }
-        let (data, response) = try resolved.get()
-        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            throw NSError.user("订阅下载失败：HTTP \(http.statusCode)")
-        }
+        let (data, _) = try fetchResponse(for: request)
         guard let text = String(data: data, encoding: .utf8) else {
             throw NSError.user("订阅内容不是 UTF-8 文本")
         }
         return text
+    }
+
+    private static func fetchResponse(for request: URLRequest) throws -> (Data, URLResponse) {
+        let settings = CFNetworkCopySystemProxySettings()?.takeRetainedValue() as? [String: Any] ?? [:]
+        let routes = StartupNetworkPolicy.subscriptionRoutes(
+            systemProxyConfigured: StartupNetworkPolicy.systemProxyConfigured(in: settings)
+        )
+        var lastError: Error?
+
+        for route in routes {
+            do {
+                let config = URLSessionConfiguration.ephemeral
+                config.timeoutIntervalForRequest = 30
+                config.timeoutIntervalForResource = 60
+                config.connectionProxyDictionary = StartupNetworkPolicy.proxyDictionary(for: route)
+                let session = URLSession(configuration: config)
+                let semaphore = DispatchSemaphore(value: 0)
+                let result = LockedValue<Result<(Data, URLResponse), Error>?>(nil)
+                session.dataTask(with: request) { data, response, error in
+                    if let error {
+                        result.set(.failure(error))
+                    } else {
+                        result.set(.success((data ?? Data(), response ?? URLResponse())))
+                    }
+                    semaphore.signal()
+                }.resume()
+                _ = semaphore.wait(timeout: .now() + 30)
+                guard let resolved = result.get() else {
+                    throw NSError.user("订阅下载超时，请检查网络或订阅地址")
+                }
+                let response = try resolved.get()
+                if let http = response.1 as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                    throw NSError.user("订阅下载失败：HTTP \(http.statusCode)")
+                }
+                return response
+            } catch {
+                lastError = error
+            }
+        }
+
+        throw lastError ?? NSError.user("订阅下载失败")
     }
 
     static func singBoxConfig(from text: String, profileName: String) throws -> String {

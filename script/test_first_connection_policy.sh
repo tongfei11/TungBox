@@ -13,11 +13,14 @@ fi
 grep -q 'runDeferredNetworkChecksAfterConnection(proxyPort: port)' Sources/TungBox/main.swift
 grep -q 'runDeferredNetworkChecksAfterConnection(proxyPort: nil)' Sources/TungBox/MainWindow/MainWindowController+Settings.swift
 
-policy_uses="$(grep -c 'StartupNetworkPolicy.directConnectionProxyDictionary' Sources/TungBox/Networking/SubscriptionImporter.swift)"
-if [ "$policy_uses" -lt 2 ]; then
-  echo "FAIL: subscription downloads are not consistently forced onto the direct physical network" >&2
-  exit 1
-fi
+test_binary="$(mktemp /tmp/tungbox-first-connection.XXXXXX)"
+trap 'rm -f "$test_binary"' EXIT
+swiftc \
+  Sources/TungBox/Core/RuleSetRuntime.swift \
+  Sources/TungBox/Core/StartupNetworkPolicy.swift \
+  script/test_core_logic.swift \
+  -o "$test_binary"
+"$test_binary"
 
 for file in \
   geoip-cn.srs \
@@ -28,4 +31,4 @@ do
   test -s "Sources/TungBox/Resources/RuleSets/$file"
 done
 
-echo "PASS: first connection has no automatic GitHub dependency"
+echo "PASS: subscriptions can use another system proxy without adding an automatic GitHub dependency"

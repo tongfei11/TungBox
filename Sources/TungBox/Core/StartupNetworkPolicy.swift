@@ -14,9 +14,36 @@ struct FirstConnectionGate {
 }
 
 enum StartupNetworkPolicy {
-    /// Subscription endpoints are the only network dependency allowed before the
-    /// first proxy connection. Force them to use the physical network instead of a
-    /// stale 127.0.0.1 system-proxy setting left by an earlier app/session.
+    enum SubscriptionRoute: Equatable, Sendable {
+        case systemProxy
+        case direct
+    }
+
+    /// A subscription may itself require an already-running proxy app. Prefer the
+    /// current macOS proxy, but retain a direct fallback for stale proxy settings.
+    static func subscriptionRoutes(systemProxyConfigured: Bool) -> [SubscriptionRoute] {
+        systemProxyConfigured ? [.systemProxy, .direct] : [.systemProxy]
+    }
+
+    static func systemProxyConfigured(in settings: [String: Any]) -> Bool {
+        [
+            "HTTPEnable",
+            "HTTPSEnable",
+            "SOCKSEnable",
+            "ProxyAutoConfigEnable",
+            "ProxyAutoDiscoveryEnable"
+        ].contains { (settings[$0] as? Int) == 1 }
+    }
+
+    static func proxyDictionary(for route: SubscriptionRoute) -> [AnyHashable: Any]? {
+        switch route {
+        case .systemProxy: nil
+        case .direct: directConnectionProxyDictionary
+        }
+    }
+
+    /// Used only as a fallback after a configured system proxy cannot fetch the
+    /// subscription, and for TUN requests that must ignore stale system settings.
     static var directConnectionProxyDictionary: [AnyHashable: Any] {
         [
             "HTTPEnable": 0,

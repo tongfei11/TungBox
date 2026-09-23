@@ -118,12 +118,24 @@ final class RuleSetRuntimeTests: XCTestCase {
         XCTAssertFalse(gate.markConnected())
     }
 
-    func testFirstSubscriptionDownloadDoesNotDependOnSystemProxy() {
-        let policy = StartupNetworkPolicy.directConnectionProxyDictionary
+    func testFirstSubscriptionUsesOtherSystemProxyBeforeFallingBackToDirect() {
+        XCTAssertTrue(StartupNetworkPolicy.systemProxyConfigured(in: ["HTTPEnable": 1]))
+        XCTAssertTrue(StartupNetworkPolicy.systemProxyConfigured(in: ["ProxyAutoConfigEnable": 1]))
+        XCTAssertFalse(StartupNetworkPolicy.systemProxyConfigured(in: [:]))
+        XCTAssertEqual(
+            StartupNetworkPolicy.subscriptionRoutes(systemProxyConfigured: true),
+            [.systemProxy, .direct]
+        )
+        XCTAssertEqual(
+            StartupNetworkPolicy.subscriptionRoutes(systemProxyConfigured: false),
+            [.systemProxy]
+        )
 
-        XCTAssertEqual(policy["HTTPEnable"] as? Int, 0)
-        XCTAssertEqual(policy["HTTPSEnable"] as? Int, 0)
-        XCTAssertEqual(policy["SOCKSEnable"] as? Int, 0)
+        let directFallback = StartupNetworkPolicy.proxyDictionary(for: .direct)
+        XCTAssertEqual(directFallback?["HTTPEnable"] as? Int, 0)
+        XCTAssertEqual(directFallback?["HTTPSEnable"] as? Int, 0)
+        XCTAssertEqual(directFallback?["SOCKSEnable"] as? Int, 0)
+        XCTAssertNil(StartupNetworkPolicy.proxyDictionary(for: .systemProxy))
     }
 
     func testPostConnectionBackgroundRequestsUseReadyProxyOrTunDirectPath() {
