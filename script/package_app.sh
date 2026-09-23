@@ -206,6 +206,11 @@ generate_app_icon() {
   local icon_set_dir="/tmp/${PRODUCT}_AppIcon.iconset"
   local icns_path="$RESOURCES_DIR/AppIcon.icns"
 
+  if [[ "$(sips -g hasAlpha "$logo" | awk '/hasAlpha:/ { print $2 }')" != "yes" ]]; then
+    echo "App icon source must preserve transparent rounded corners: $logo" >&2
+    return 1
+  fi
+
   rm -rf "$icon_set_dir"
   mkdir -p "$icon_set_dir"
 
