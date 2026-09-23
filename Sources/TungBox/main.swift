@@ -47,6 +47,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var nodes: [NodeInfo] = []
     var nodeGroups: [NodeGroupInfo] = []
     var ruleRows: [RuleInfo] = []
+    var cachedFilteredRuleRows: [RuleInfo]?
+    var cachedRuleSearchQuery: String?
     var connections: [ConnectionInfo] = []
     var displayedConnections: [ConnectionInfo] = []
     var ruleSetDownloads = Set<String>()

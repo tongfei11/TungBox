@@ -770,6 +770,8 @@ extension MainWindowController {
     func refreshRulesFromEditor() {
         loadRuleSetsForCurrentSubscription()
         ruleRows = buildRuleRows(from: editor.string)
+        cachedRuleSearchQuery = nil
+        cachedFilteredRuleRows = nil
         rulesTable.reloadData()
         refreshRuleSetCachesIfNeeded()
     }
@@ -796,7 +798,11 @@ extension MainWindowController {
 
     func filteredRuleRows() -> [RuleInfo] {
         let query = ruleSearchField.stringValue
-        return ruleRows.filter { row in
+        if cachedRuleSearchQuery == query, let cachedFilteredRuleRows {
+            return cachedFilteredRuleRows
+        }
+
+        let filteredRows = ruleRows.filter { row in
             RuleSearch.matches(
                 type: row.type,
                 value: row.value,
@@ -806,6 +812,9 @@ extension MainWindowController {
                 query: query
             )
         }
+        cachedRuleSearchQuery = query
+        cachedFilteredRuleRows = filteredRows
+        return filteredRows
     }
 
     func customRulesForCurrentSubscription() -> [CustomRule] {
@@ -1224,6 +1233,8 @@ extension MainWindowController {
                 self?.ruleSetDownloads.remove(tag)
                 self?.appendLog("[规则集] \(tag) 已\(action == .download ? "下载并" : "从本地")解包\n")
                 self?.ruleRows = self?.buildRuleRows(from: self?.editor.string ?? "") ?? []
+                self?.cachedRuleSearchQuery = nil
+                self?.cachedFilteredRuleRows = nil
                 self?.rulesTable.reloadData()
             }
         } catch {

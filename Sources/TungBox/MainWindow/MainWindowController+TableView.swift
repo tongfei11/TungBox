@@ -56,7 +56,7 @@ extension MainWindowController {
             cell.configure(with: nodes[row])
             return cell
         } else if tableView == rulesTable {
-            let rows = filteredRuleRows()
+            let rows = cachedFilteredRuleRows ?? filteredRuleRows()
             guard rows.indices.contains(row), let columnID = tableColumn?.identifier.rawValue else { return nil }
             return makeRuleCell(for: rows[row], columnID: columnID)
         } else if tableView == connectionsTable {
