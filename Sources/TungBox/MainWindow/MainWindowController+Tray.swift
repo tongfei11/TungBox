@@ -5,12 +5,12 @@ extension MainWindowController {
     
     func setupStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        configureStatusButton(item.button)
         let menu = NSMenu()
         menu.delegate = self
         item.menu = menu
-        item.isVisible = true
         statusItem = item
+        configureStatusButton(item.button)
+        item.isVisible = true
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
@@ -22,7 +22,9 @@ extension MainWindowController {
     func rebuildTrayMenu(_ menu: NSMenu) {
         menu.removeAllItems()
         let status = isProxyServiceActiveOrRequested() ? "运行中" : "已关闭"
-        menu.addItem(NSMenuItem(title: "\(TungBoxVersion.display) \(status)", action: nil, keyEquivalent: ""))
+        let statusItem = NSMenuItem(title: "\(TungBoxVersion.display) \(status)", action: nil, keyEquivalent: "")
+        statusItem.isEnabled = false
+        menu.addItem(statusItem)
         menu.addItem(.separator())
 
         let systemProxyItem = NSMenuItem(title: "系统代理", action: #selector(toggleProxyServiceFromTray), keyEquivalent: "")
