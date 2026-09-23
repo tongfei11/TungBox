@@ -207,7 +207,7 @@ extension MainWindowController {
         // 流量累计走 totals 路径，包含 UDP/IPv6/已关闭短连接。
         let extraPorts: [Int] = isTunRuntimeRunning() ? [TungBoxConfig.tunDaemonClashPort] : []
         let allPorts: [Int] = [9090] + extraPorts
-        Task {
+        Task { [self] in
             defer {
                 Task { @MainActor [weak self] in
                     self?.isRefreshingConnections = false

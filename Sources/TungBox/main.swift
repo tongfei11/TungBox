@@ -949,9 +949,18 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 // the UI claim that the proxy is still closing.
                 self.systemProxyTransition = .none
                 self.refreshStatus()
-                try await self.runSerializedOffMain {
-                    if runnerRef.isRunning { runnerRef.stop() }
-                    self.applySystemProxyBlocking(enabled: false, port: port)
+                do {
+                    try await self.runSerializedOffMain {
+                        if runnerRef.isRunning { runnerRef.stop() }
+                        self.applySystemProxyBlocking(enabled: false, port: port)
+                    }
+                } catch {
+                    guard token == self.runtimeTransitionID else { return }
+                    self.appendLog("[TungBox] 系统代理关闭失败（\(reason)）：\(error.localizedDescription)\n")
+                    self.clearFeatureTransitions()
+                    self.refreshStatus()
+                    self.showError(error)
+                    return
                 }
             }
 

@@ -497,7 +497,7 @@ extension MainWindowController {
         let statsSelectionID = selectorSelectionID
         let prevTotals = prevTrafficTotals
         let elapsedSinceLast = max(Date().timeIntervalSince(connectionRefreshTime), 0.5)
-        Task {
+        Task { [self] in
             defer {
                 Task { @MainActor [weak self] in
                     self?.isUpdatingRunningStats = false
