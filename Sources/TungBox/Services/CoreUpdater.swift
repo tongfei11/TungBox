@@ -5,6 +5,8 @@ enum CoreUpdater {
     static let releaseBaseURL = URL(string: "https://github.com/SagerNet/sing-box/releases/download")!
     static let testOldVersion = "1.12.22"
     private static let trustedArchiveSHA256: [String: String] = [
+        "1.14.2/darwin-arm64": "925c5382eca8492b0150f868a6db20b18290a38700e621724b3703fd453e032d",
+        "1.14.2/darwin-amd64": "b0bfb0dc70a5fc708710b9f5ea98b9ee76d40fa4169928d25d73edc4331df2fe",
         "1.14.0/darwin-arm64": "a150c94012ff768b7261939cd236b9c8554127f45137230295d23a5660225cc9",
         "1.14.0/darwin-amd64": "6cf26fc3501f3117cf781e9405cf5338f60add6da5affae39421af6800ebbcb4",
         "1.12.22/darwin-arm64": "974d924c36af92a9aecab5e630555764aa665fb8210e58a48c01faec5d55de0f",
@@ -46,7 +48,7 @@ enum CoreUpdater {
         try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tempDirectory) }
 
-        let expectedSHA256 = try validateTrustedRelease(release, architecture: platformAssetArch())
+        let expectedSHA256 = try await trustedSHA256(for: release, architecture: platformAssetArch())
         let archiveURL = tempDirectory.appendingPathComponent(release.assetName)
         let data = try await fetchData(from: release.downloadURL)
         try verifyArchiveIntegrity(data, expectedSHA256: expectedSHA256)
@@ -111,6 +113,14 @@ enum CoreUpdater {
     }
 
     static func validateTrustedRelease(_ release: CoreRelease, architecture: String) throws -> String {
+        try validateReleaseIdentity(release, architecture: architecture)
+        guard let digest = trustedSHA256(version: release.version, architecture: architecture) else {
+            throw NSError.user("该 Core 版本需要先从官方 Release 获取 SHA-256")
+        }
+        return digest
+    }
+
+    static func validateReleaseIdentity(_ release: CoreRelease, architecture: String) throws {
         let expectedAssetName = "sing-box-\(release.version)-darwin-\(architecture).tar.gz"
         let expectedURL = releaseBaseURL
             .appendingPathComponent("v\(release.version)")
@@ -118,8 +128,42 @@ enum CoreUpdater {
         guard release.tag == "v\(release.version)",
               release.assetName == expectedAssetName,
               release.downloadURL == expectedURL,
-              let digest = trustedSHA256(version: release.version, architecture: architecture) else {
+              isCompatibleCoreVersion(release.version) else {
             throw NSError.user("Core 下载信息未匹配可信版本、架构、文件名和地址，已拒绝安装")
+        }
+    }
+
+    static func trustedSHA256(for release: CoreRelease, architecture: String) async throws -> String {
+        try validateReleaseIdentity(release, architecture: architecture)
+        if let embedded = trustedSHA256(version: release.version, architecture: architecture) {
+            return embedded
+        }
+
+        let apiURL = URL(string: "https://api.github.com/repos/SagerNet/sing-box/releases/tags/v\(release.version)")!
+        var request = URLRequest(url: apiURL, timeoutInterval: 20)
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.setValue("TungBox/\(TungBoxVersion.current)", forHTTPHeaderField: "User-Agent")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw NSError.user("无法读取官方 Core 摘要：HTTP \(http.statusCode)")
+        }
+        guard data.count <= 2 * 1024 * 1024 else {
+            throw NSError.user("官方 Core 摘要响应异常，已拒绝安装")
+        }
+        return try officialAssetSHA256(from: data, assetName: release.assetName)
+    }
+
+    static func officialAssetSHA256(from data: Data, assetName: String) throws -> String {
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let assets = root["assets"] as? [[String: Any]],
+              let asset = assets.first(where: { ($0["name"] as? String) == assetName }),
+              let rawDigest = asset["digest"] as? String,
+              rawDigest.hasPrefix("sha256:") else {
+            throw NSError.user("官方 Release 未提供该 Core 资产的 SHA-256，已拒绝安装")
+        }
+        let digest = String(rawDigest.dropFirst("sha256:".count)).lowercased()
+        guard digest.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil else {
+            throw NSError.user("官方 Core SHA-256 格式无效，已拒绝安装")
         }
         return digest
     }

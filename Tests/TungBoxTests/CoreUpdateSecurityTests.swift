@@ -8,6 +8,10 @@ final class CoreUpdateSecurityTests: XCTestCase {
             CoreUpdater.trustedSHA256(version: "1.14.0", architecture: "arm64"),
             "a150c94012ff768b7261939cd236b9c8554127f45137230295d23a5660225cc9"
         )
+        XCTAssertEqual(
+            CoreUpdater.trustedSHA256(version: "1.14.2", architecture: "arm64"),
+            "925c5382eca8492b0150f868a6db20b18290a38700e621724b3703fd453e032d"
+        )
         XCTAssertNil(CoreUpdater.trustedSHA256(version: "1.14.1", architecture: "arm64"))
 
         let data = Data("trusted archive".utf8)
@@ -41,10 +45,36 @@ final class CoreUpdateSecurityTests: XCTestCase {
         XCTAssertThrowsError(try CoreUpdater.validateTrustedRelease(trusted, architecture: "amd64"))
     }
 
-    func testUnlistedCompatibleReleaseCanBeDisplayedButCannotBeInstalled() async throws {
+    func testUnlistedCompatiblePatchPassesIdentityPolicy() async throws {
         let release = try await CoreUpdater.release(version: "1.14.1")
         XCTAssertEqual(release.version, "1.14.1")
-        XCTAssertThrowsError(try CoreUpdater.validateTrustedRelease(release, architecture: platformArchitecture))
+        XCTAssertNoThrow(try CoreUpdater.validateReleaseIdentity(release, architecture: platformArchitecture))
+    }
+
+    func testCurrent114PatchIsInstallableBut115RemainsBlocked() async throws {
+        let release = try await CoreUpdater.release(version: "1.14.2")
+        XCTAssertNoThrow(try CoreUpdater.validateTrustedRelease(release, architecture: platformArchitecture))
+
+        do {
+            _ = try await CoreUpdater.release(version: "1.15.0")
+            XCTFail("1.15.x 不应进入当前兼容范围")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("暂未确认兼容"))
+        }
+    }
+
+    func testOfficialReleaseDigestParserRequiresExactAssetAndSHA256() throws {
+        let data = try JSONSerialization.data(withJSONObject: [
+            "assets": [[
+                "name": "sing-box-1.13.9-darwin-arm64.tar.gz",
+                "digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+            ]]
+        ])
+        XCTAssertEqual(
+            try CoreUpdater.officialAssetSHA256(from: data, assetName: "sing-box-1.13.9-darwin-arm64.tar.gz"),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        )
+        XCTAssertThrowsError(try CoreUpdater.officialAssetSHA256(from: data, assetName: "other.tar.gz"))
     }
 
     func testArchivePathsCannotEscapeExtractionDirectory() throws {
