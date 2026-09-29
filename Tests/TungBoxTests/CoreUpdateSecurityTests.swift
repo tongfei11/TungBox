@@ -8,10 +8,8 @@ final class CoreUpdateSecurityTests: XCTestCase {
             CoreUpdater.trustedSHA256(version: "1.14.0", architecture: "arm64"),
             "a150c94012ff768b7261939cd236b9c8554127f45137230295d23a5660225cc9"
         )
-        XCTAssertEqual(
-            CoreUpdater.trustedSHA256(version: "1.14.2", architecture: "arm64"),
-            "925c5382eca8492b0150f868a6db20b18290a38700e621724b3703fd453e032d"
-        )
+        XCTAssertNil(CoreUpdater.trustedSHA256(version: "1.14.2", architecture: "arm64"))
+        XCTAssertNil(CoreUpdater.trustedSHA256(version: "1.12.22", architecture: "arm64"))
         XCTAssertNil(CoreUpdater.trustedSHA256(version: "1.14.1", architecture: "arm64"))
 
         let data = Data("trusted archive".utf8)
@@ -53,7 +51,7 @@ final class CoreUpdateSecurityTests: XCTestCase {
 
     func testCurrent114PatchIsInstallableBut115RemainsBlocked() async throws {
         let release = try await CoreUpdater.release(version: "1.14.2")
-        XCTAssertNoThrow(try CoreUpdater.validateTrustedRelease(release, architecture: platformArchitecture))
+        XCTAssertNoThrow(try CoreUpdater.validateReleaseIdentity(release, architecture: platformArchitecture))
 
         do {
             _ = try await CoreUpdater.release(version: "1.15.0")

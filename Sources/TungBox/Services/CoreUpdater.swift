@@ -5,12 +5,8 @@ enum CoreUpdater {
     static let releaseBaseURL = URL(string: "https://github.com/SagerNet/sing-box/releases/download")!
     static let testOldVersion = "1.12.22"
     private static let trustedArchiveSHA256: [String: String] = [
-        "1.14.2/darwin-arm64": "925c5382eca8492b0150f868a6db20b18290a38700e621724b3703fd453e032d",
-        "1.14.2/darwin-amd64": "b0bfb0dc70a5fc708710b9f5ea98b9ee76d40fa4169928d25d73edc4331df2fe",
         "1.14.0/darwin-arm64": "a150c94012ff768b7261939cd236b9c8554127f45137230295d23a5660225cc9",
-        "1.14.0/darwin-amd64": "6cf26fc3501f3117cf781e9405cf5338f60add6da5affae39421af6800ebbcb4",
-        "1.12.22/darwin-arm64": "974d924c36af92a9aecab5e630555764aa665fb8210e58a48c01faec5d55de0f",
-        "1.12.22/darwin-amd64": "950072cf2f1e0d4aa216116e0b1f9f7542aa953c1487b55516ea9d04bd73bbc6"
+        "1.14.0/darwin-amd64": "6cf26fc3501f3117cf781e9405cf5338f60add6da5affae39421af6800ebbcb4"
     ]
 
     static func latestStableRelease() async throws -> CoreRelease {
