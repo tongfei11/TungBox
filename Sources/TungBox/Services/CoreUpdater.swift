@@ -88,9 +88,12 @@ enum CoreUpdater {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 120
         config.timeoutIntervalForResource = 300
-        let session = URLSession(configuration: config)
-
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try BoundedRemoteDataLoader.fetch(
+            request: request,
+            configuration: config,
+            maxBytes: SecurityLimits.coreArchiveBytes,
+            timeout: 305
+        )
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             let hint: String
             switch http.statusCode {

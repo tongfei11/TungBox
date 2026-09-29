@@ -62,10 +62,16 @@ enum SubscriptionImporter {
                 let (text, header) = try fetchWithHeader(urlString: urlString, userAgent: ua)
                 let info = parseSubscriptionUserInfo(header)
                 lastFetched = (text, info)
-                if let nodes = try? extractNodesFromAnyFormat(text), !nodes.isEmpty {
-                    return (text, ua, info)
+                do {
+                    let nodes = try extractNodesFromAnyFormat(text)
+                    if !nodes.isEmpty { return (text, ua, info) }
+                } catch let error as SecurityLimitError {
+                    throw error
+                } catch {
+                    // A different User-Agent may return a supported format.
                 }
             } catch {
+                if error is SecurityLimitError { throw error }
                 lastError = error
             }
         }
@@ -126,27 +132,18 @@ enum SubscriptionImporter {
                 config.timeoutIntervalForRequest = 30
                 config.timeoutIntervalForResource = 60
                 config.connectionProxyDictionary = StartupNetworkPolicy.proxyDictionary(for: route)
-                let session = URLSession(configuration: config)
-                let semaphore = DispatchSemaphore(value: 0)
-                let result = LockedValue<Result<(Data, URLResponse), Error>?>(nil)
-                session.dataTask(with: request) { data, response, error in
-                    if let error {
-                        result.set(.failure(error))
-                    } else {
-                        result.set(.success((data ?? Data(), response ?? URLResponse())))
-                    }
-                    semaphore.signal()
-                }.resume()
-                _ = semaphore.wait(timeout: .now() + 30)
-                guard let resolved = result.get() else {
-                    throw NSError.user("订阅下载超时，请检查网络或订阅地址")
-                }
-                let response = try resolved.get()
+                let response = try BoundedRemoteDataLoader.fetch(
+                    request: request,
+                    configuration: config,
+                    maxBytes: SecurityLimits.subscriptionBytes,
+                    timeout: 35
+                )
                 if let http = response.1 as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
                     throw NSError.user("订阅下载失败：HTTP \(http.statusCode)")
                 }
                 return response
             } catch {
+                if error is SecurityLimitError { throw error }
                 lastError = error
             }
         }

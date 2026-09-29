@@ -63,12 +63,18 @@ enum SubscriptionFormatParser {
     /// `mieru` / `xhttp` / 其他未知 type 都会 fall through `clashProxyToSingBox`
     /// 的 default → nil 分支被静默丢掉。这里把这些 raw type 收集起来给导入 UI 显示。
     static func parseClashProxiesWithSummary(_ text: String) throws -> (proxies: [[String: Any]], skippedTypes: [String: Int]) {
+        guard text.utf8.count <= SecurityLimits.subscriptionBytes else {
+            throw SecurityLimitError.responseTooLarge(limit: SecurityLimits.subscriptionBytes)
+        }
         var skipped: [String: Int] = [:]
         // Preferred path: a real (zero-dependency) YAML parse that preserves nested
         // structures — tls/reality-opts/ws-opts/grpc-opts/smux/ech-opts/alpn arrays —
         // so protocol options aren't mangled by line-based heuristics.
-        if let doc = parseYAMLDocument(text) as? [String: Any],
+        if let doc = try parseYAMLDocument(text) as? [String: Any],
            let rawProxies = (doc["proxies"] as? [Any]) ?? (doc["Proxy"] as? [Any]) {
+            guard rawProxies.count <= SecurityLimits.maxProxyNodes else {
+                throw SecurityLimitError.tooManyProxyNodes(limit: SecurityLimits.maxProxyNodes)
+            }
             var proxies: [[String: Any]] = []
             for raw in rawProxies {
                 guard let dict = raw as? [String: Any] else { continue }
@@ -102,7 +108,7 @@ enum SubscriptionFormatParser {
             }
 
             if inProxies && currentIndent <= indentLevel && !trimmed.hasPrefix("- ") && !trimmed.hasPrefix("-{") && trimmed != "-" && currentIndent > 0 {
-                if !current.isEmpty { proxies.append(current) }
+                if !current.isEmpty { try appendBoundedProxy(current, to: &proxies) }
                 inProxies = false
                 continue
             }
@@ -111,14 +117,14 @@ enum SubscriptionFormatParser {
 
             // New proxy entry starting with a hyphen on a line by itself
             if trimmed == "-" {
-                if !current.isEmpty { proxies.append(current) }
+                if !current.isEmpty { try appendBoundedProxy(current, to: &proxies) }
                 current = [:]
                 continue
             }
 
             // New proxy entry
             if trimmed.hasPrefix("- ") {
-                if !current.isEmpty { proxies.append(current) }
+                if !current.isEmpty { try appendBoundedProxy(current, to: &proxies) }
                 current = [:]
                 let entry = String(trimmed.dropFirst(2))
                 if entry.hasPrefix("{") {
@@ -133,7 +139,7 @@ enum SubscriptionFormatParser {
                 continue
             }
             if trimmed.hasPrefix("-{") {
-                if !current.isEmpty { proxies.append(current) }
+                if !current.isEmpty { try appendBoundedProxy(current, to: &proxies) }
                 current = parseClashInlineProxy(String(trimmed.dropFirst()))
                 continue
             }
@@ -148,7 +154,7 @@ enum SubscriptionFormatParser {
             }
         }
 
-        if !current.isEmpty { proxies.append(current) }
+        if !current.isEmpty { try appendBoundedProxy(current, to: &proxies) }
 
         guard !proxies.isEmpty else {
             throw NSError.user("Clash YAML 中未找到代理节点（proxies 列表为空）")
@@ -419,17 +425,44 @@ enum SubscriptionFormatParser {
     /// Clash subset we care about: block mappings, block sequences (incl. compact
     /// `- key: val`), flow mappings `{a: b}`, flow sequences `[a, b]`, and quoted /
     /// unquoted scalars. Zero-dependency (no Yams) so the build never needs network.
-    static func parseYAMLDocument(_ text: String) -> Any? {
+    private final class YAMLParseBudget {
+        private var nodes = 0
+
+        func visit(depth: Int) throws {
+            guard depth <= SecurityLimits.yamlMaxDepth else {
+                throw SecurityLimitError.yamlTooDeep(limit: SecurityLimits.yamlMaxDepth)
+            }
+            try consume()
+        }
+
+        func consume() throws {
+            nodes += 1
+            guard nodes <= SecurityLimits.yamlMaxNodes else {
+                throw SecurityLimitError.yamlTooComplex(limit: SecurityLimits.yamlMaxNodes)
+            }
+        }
+    }
+
+    static func parseYAMLDocument(_ text: String) throws -> Any? {
+        guard text.utf8.count <= SecurityLimits.subscriptionBytes else {
+            throw SecurityLimitError.responseTooLarge(limit: SecurityLimits.subscriptionBytes)
+        }
         var lines: [(indent: Int, content: String)] = []
         for raw in text.components(separatedBy: .newlines) {
+            guard raw.utf8.count <= SecurityLimits.yamlMaxLineBytes else {
+                throw SecurityLimitError.yamlLineTooLong(limit: SecurityLimits.yamlMaxLineBytes)
+            }
             let noComment = stripYAMLComment(raw)
             if noComment.trimmingCharacters(in: .whitespaces).isEmpty { continue }
             let indent = noComment.prefix { $0 == " " }.count
             lines.append((indent, String(noComment.drop { $0 == " " })))
+            guard lines.count <= SecurityLimits.yamlMaxNodes else {
+                throw SecurityLimitError.yamlTooComplex(limit: SecurityLimits.yamlMaxNodes)
+            }
         }
         guard !lines.isEmpty else { return nil }
         var i = 0
-        return parseYAMLBlock(lines, &i, parentIndent: -1)
+        return try parseYAMLBlock(lines, &i, parentIndent: -1, depth: 0, budget: YAMLParseBudget())
     }
 
     private static func stripYAMLComment(_ line: String) -> String {
@@ -446,14 +479,21 @@ enum SubscriptionFormatParser {
         return out
     }
 
-    private static func parseYAMLBlock(_ lines: [(indent: Int, content: String)], _ i: inout Int, parentIndent: Int) -> Any {
+    private static func parseYAMLBlock(
+        _ lines: [(indent: Int, content: String)],
+        _ i: inout Int,
+        parentIndent: Int,
+        depth: Int,
+        budget: YAMLParseBudget
+    ) throws -> Any {
+        try budget.visit(depth: depth)
         guard i < lines.count, lines[i].indent > parentIndent else { return [String: Any]() }
         let base = lines[i].indent
         let first = lines[i].content
 
         // A whole node that is a flow value.
         if first.hasPrefix("{") || first.hasPrefix("[") {
-            let v = parseFlow(first); i += 1; return v
+            let v = try parseFlow(first, depth: depth, budget: budget); i += 1; return v
         }
 
         // Sequence
@@ -471,10 +511,11 @@ enum SubscriptionFormatParser {
                     sub.append(lines[i]); i += 1
                 }
                 if sub.isEmpty {
+                    try budget.consume()
                     arr.append("")
                 } else {
                     var j = 0
-                    arr.append(parseYAMLBlock(sub, &j, parentIndent: base + 1))
+                    arr.append(try parseYAMLBlock(sub, &j, parentIndent: base + 1, depth: depth + 1, budget: budget))
                 }
             }
             return arr
@@ -490,13 +531,15 @@ enum SubscriptionFormatParser {
             i += 1
             if rest.isEmpty {
                 if i < lines.count, lines[i].indent > base {
-                    map[key] = parseYAMLBlock(lines, &i, parentIndent: base)
+                    map[key] = try parseYAMLBlock(lines, &i, parentIndent: base, depth: depth + 1, budget: budget)
                 } else {
+                    try budget.consume()
                     map[key] = ""
                 }
             } else if rest.hasPrefix("{") || rest.hasPrefix("[") {
-                map[key] = parseFlow(rest)
+                map[key] = try parseFlow(rest, depth: depth + 1, budget: budget)
             } else {
+                try budget.consume()
                 map[key] = parseScalar(rest)
             }
         }
@@ -526,7 +569,8 @@ enum SubscriptionFormatParser {
     }
 
     /// Parse a flow scalar/sequence/mapping (`{...}` / `[...]` / bare scalar).
-    private static func parseFlow(_ raw: String) -> Any {
+    private static func parseFlow(_ raw: String, depth: Int, budget: YAMLParseBudget) throws -> Any {
+        try budget.visit(depth: depth)
         let s = raw.trimmingCharacters(in: .whitespaces)
         if s.hasPrefix("{") && s.hasSuffix("}") {
             var map: [String: Any] = [:]
@@ -535,14 +579,23 @@ enum SubscriptionFormatParser {
                 let key = unquoteYAML(String(part[..<colon]).trimmingCharacters(in: .whitespaces))
                 let val = String(part[part.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
                 if key.isEmpty { continue }
-                map[key] = (val.hasPrefix("{") || val.hasPrefix("[")) ? parseFlow(val) : parseScalar(val)
+                if val.hasPrefix("{") || val.hasPrefix("[") {
+                    map[key] = try parseFlow(val, depth: depth + 1, budget: budget)
+                } else {
+                    try budget.consume()
+                    map[key] = parseScalar(val)
+                }
             }
             return map
         }
         if s.hasPrefix("[") && s.hasSuffix("]") {
-            return splitTopLevel(String(s.dropFirst().dropLast())).map { p -> Any in
+            return try splitTopLevel(String(s.dropFirst().dropLast())).map { p -> Any in
                 let t = p.trimmingCharacters(in: .whitespaces)
-                return (t.hasPrefix("{") || t.hasPrefix("[")) ? parseFlow(t) : parseScalar(t)
+                if t.hasPrefix("{") || t.hasPrefix("[") {
+                    return try parseFlow(t, depth: depth + 1, budget: budget)
+                }
+                try budget.consume()
+                return parseScalar(t)
             }
         }
         return parseScalar(s)
@@ -574,6 +627,13 @@ enum SubscriptionFormatParser {
         if lower == "null" || lower == "~" { return "" }
         if let n = Int(s) { return n }
         return s
+    }
+
+    private static func appendBoundedProxy(_ proxy: [String: Any], to proxies: inout [[String: Any]]) throws {
+        guard proxies.count < SecurityLimits.maxProxyNodes else {
+            throw SecurityLimitError.tooManyProxyNodes(limit: SecurityLimits.maxProxyNodes)
+        }
+        proxies.append(proxy)
     }
 
     private static func unquoteYAML(_ s: String) -> String {
@@ -674,11 +734,17 @@ extension SubscriptionImporter {
     }
 
     static func extractWithSummary(_ text: String) throws -> ExtractionSummary {
+        guard text.utf8.count <= SecurityLimits.subscriptionBytes else {
+            throw SecurityLimitError.responseTooLarge(limit: SecurityLimits.subscriptionBytes)
+        }
         let format = SubscriptionFormatParser.detectFormat(text)
         switch format {
         case .singBoxJSON:
             // sing-box JSON 路径目前不主动过滤协议（透传给 Core，由 Core 校验失败时报错）。
             let nodes = try extractNodes(from: text)
+            guard nodes.count <= SecurityLimits.maxProxyNodes else {
+                throw SecurityLimitError.tooManyProxyNodes(limit: SecurityLimits.maxProxyNodes)
+            }
             return ExtractionSummary(nodes: nodes, format: format, skippedTypes: [:])
         case .clashYAML:
             let result = try SubscriptionFormatParser.parseClashProxiesWithSummary(text)

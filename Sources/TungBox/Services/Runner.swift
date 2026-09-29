@@ -207,36 +207,27 @@ final class Runner: @unchecked Sendable {
     }
 
     private func downloadRuleSet(from url: URL, proxyPort: Int?) throws -> Data {
+        guard ["http", "https"].contains(url.scheme?.lowercased()) else {
+            throw SecurityLimitError.invalidRemoteURL
+        }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 30
         configuration.timeoutIntervalForResource = 45
         configuration.connectionProxyDictionary = StartupNetworkPolicy.postConnectionProxyDictionary(proxyPort: proxyPort)
-        let session = URLSession(configuration: configuration)
-        let semaphore = DispatchSemaphore(value: 0)
-        let result = LockedValue<Result<Data, Error>?>(nil)
-        let task = session.dataTask(with: url) { data, response, error in
-            defer { semaphore.signal() }
-            if let error {
-                result.set(.failure(error))
-                return
-            }
-            guard let http = response as? HTTPURLResponse,
-                  (200...299).contains(http.statusCode),
-                  let data, !data.isEmpty else {
-                result.set(.failure(NSError.user("规则集服务器返回无效响应")))
-                return
-            }
-            result.set(.success(data))
+        var request = URLRequest(url: url, timeoutInterval: 30)
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        let (data, response) = try BoundedRemoteDataLoader.fetch(
+            request: request,
+            configuration: configuration,
+            maxBytes: SecurityLimits.ruleSetBytes,
+            timeout: 50
+        )
+        guard let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode),
+              !data.isEmpty else {
+            throw NSError.user("规则集服务器返回无效响应")
         }
-        task.resume()
-        guard semaphore.wait(timeout: .now() + 50) == .success else {
-            task.cancel()
-            session.invalidateAndCancel()
-            throw NSError.user("规则集下载超时")
-        }
-        session.finishTasksAndInvalidate()
-        guard let completed = result.get() else { throw NSError.user("规则集下载未返回结果") }
-        return try completed.get()
+        return data
     }
 
     private func validateAndInstallRuleSet(_ data: Data, tag: String, destination: URL, binary: String) throws {

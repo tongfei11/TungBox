@@ -1207,17 +1207,29 @@ extension MainWindowController {
         jsonURL: URL,
         singBoxBinary: String
     ) {
+        let temporarySRS = srsURL.deletingLastPathComponent()
+            .appendingPathComponent(".\(RuleSetRuntime.safeFileName(for: tag))-\(UUID().uuidString).srs")
+        let temporaryJSON = jsonURL.deletingLastPathComponent()
+            .appendingPathComponent(".\(RuleSetRuntime.safeFileName(for: tag))-\(UUID().uuidString).json")
+        defer {
+            try? FileManager.default.removeItem(at: temporarySRS)
+            try? FileManager.default.removeItem(at: temporaryJSON)
+        }
         do {
+            let inputSRS: URL
             if action == .download {
                 guard let sourceURL else { throw NSError.user("规则集缺少下载地址") }
-                let data = try Data(contentsOf: sourceURL)
-                try data.write(to: srsURL, options: .atomic)
+                let data = try BoundedRemoteDataLoader.fetch(url: sourceURL, maxBytes: SecurityLimits.ruleSetBytes)
+                try data.write(to: temporarySRS, options: .atomic)
+                inputSRS = temporarySRS
+            } else {
+                inputSRS = srsURL
             }
 
             let process = Process()
             process.currentDirectoryURL = srsURL.deletingLastPathComponent()
             process.executableURL = URL(fileURLWithPath: singBoxBinary)
-            process.arguments = ["rule-set", "decompile", srsURL.path, "-o", jsonURL.path]
+            process.arguments = ["rule-set", "decompile", inputSRS.path, "-o", temporaryJSON.path]
             let pipe = Pipe()
             process.standardOutput = pipe
             process.standardError = pipe
@@ -1227,6 +1239,19 @@ extension MainWindowController {
                 let data = pipe.fileHandleForReading.readDataToEndOfFile()
                 let message = String(data: data, encoding: .utf8) ?? "规则集解包失败"
                 throw NSError.user(message)
+            }
+
+            if action == .download {
+                if FileManager.default.fileExists(atPath: srsURL.path) {
+                    _ = try FileManager.default.replaceItemAt(srsURL, withItemAt: temporarySRS)
+                } else {
+                    try FileManager.default.moveItem(at: temporarySRS, to: srsURL)
+                }
+            }
+            if FileManager.default.fileExists(atPath: jsonURL.path) {
+                _ = try FileManager.default.replaceItemAt(jsonURL, withItemAt: temporaryJSON)
+            } else {
+                try FileManager.default.moveItem(at: temporaryJSON, to: jsonURL)
             }
 
             DispatchQueue.main.async { [weak self] in
