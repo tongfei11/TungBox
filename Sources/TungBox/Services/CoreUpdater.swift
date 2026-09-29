@@ -4,6 +4,12 @@ enum CoreUpdater {
     static let stableLatestURL = URL(string: "https://github.com/SagerNet/sing-box/releases/latest")!
     static let releaseBaseURL = URL(string: "https://github.com/SagerNet/sing-box/releases/download")!
     static let testOldVersion = "1.12.22"
+    private static let trustedArchiveSHA256: [String: String] = [
+        "1.14.0/darwin-arm64": "a150c94012ff768b7261939cd236b9c8554127f45137230295d23a5660225cc9",
+        "1.14.0/darwin-amd64": "6cf26fc3501f3117cf781e9405cf5338f60add6da5affae39421af6800ebbcb4",
+        "1.12.22/darwin-arm64": "974d924c36af92a9aecab5e630555764aa665fb8210e58a48c01faec5d55de0f",
+        "1.12.22/darwin-amd64": "950072cf2f1e0d4aa216116e0b1f9f7542aa953c1487b55516ea9d04bd73bbc6"
+    ]
 
     static func latestStableRelease() async throws -> CoreRelease {
         let tag = try await latestStableTag()
@@ -40,9 +46,12 @@ enum CoreUpdater {
         try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tempDirectory) }
 
+        let expectedSHA256 = try validateTrustedRelease(release, architecture: platformAssetArch())
         let archiveURL = tempDirectory.appendingPathComponent(release.assetName)
         let data = try await fetchData(from: release.downloadURL)
+        try verifyArchiveIntegrity(data, expectedSHA256: expectedSHA256)
         try data.write(to: archiveURL, options: .atomic)
+        try validateArchiveEntryPaths(try archiveEntries(at: archiveURL))
 
         let extractDirectory = tempDirectory.appendingPathComponent("extract", isDirectory: true)
         try FileManager.default.createDirectory(at: extractDirectory, withIntermediateDirectories: true)
@@ -95,6 +104,58 @@ enum CoreUpdater {
             throw NSError.user("下载失败 (HTTP \(http.statusCode))：\(hint)")
         }
         return data
+    }
+
+    static func trustedSHA256(version: String, architecture: String) -> String? {
+        trustedArchiveSHA256["\(version)/darwin-\(architecture)"]
+    }
+
+    static func validateTrustedRelease(_ release: CoreRelease, architecture: String) throws -> String {
+        let expectedAssetName = "sing-box-\(release.version)-darwin-\(architecture).tar.gz"
+        let expectedURL = releaseBaseURL
+            .appendingPathComponent("v\(release.version)")
+            .appendingPathComponent(expectedAssetName)
+        guard release.tag == "v\(release.version)",
+              release.assetName == expectedAssetName,
+              release.downloadURL == expectedURL,
+              let digest = trustedSHA256(version: release.version, architecture: architecture) else {
+            throw NSError.user("Core 下载信息未匹配可信版本、架构、文件名和地址，已拒绝安装")
+        }
+        return digest
+    }
+
+    static func verifyArchiveIntegrity(_ data: Data, expectedSHA256: String) throws {
+        let actual = CoreArtifactTrust.sha256Hex(data)
+        guard actual.caseInsensitiveCompare(expectedSHA256) == .orderedSame else {
+            throw NSError.user("Core 下载包 SHA-256 校验失败，已拒绝解压和执行")
+        }
+    }
+
+    static func validateArchiveEntryPaths(_ entries: [String]) throws {
+        for entry in entries where !entry.isEmpty {
+            let path = entry.hasSuffix("/") ? String(entry.dropLast()) : entry
+            let components = path.split(separator: "/", omittingEmptySubsequences: false)
+            guard !path.hasPrefix("/"), !components.contains("..") else {
+                throw NSError.user("Core 下载包包含越界路径，已拒绝解压")
+            }
+        }
+    }
+
+    private static func archiveEntries(at archiveURL: URL) throws -> [String] {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
+        process.arguments = ["-tzf", archiveURL.path]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        try process.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            let output = String(data: data, encoding: .utf8) ?? ""
+            throw NSError.user(output.isEmpty ? "无法读取 Core 下载包目录" : output)
+        }
+        return (String(data: data, encoding: .utf8) ?? "").components(separatedBy: .newlines)
     }
 
     private static func latestStableTag() async throws -> String {
@@ -173,11 +234,16 @@ enum CoreUpdater {
     private static func findExtractedBinary(in directory: URL) -> URL? {
         guard let enumerator = FileManager.default.enumerator(
             at: directory,
-            includingPropertiesForKeys: [.isRegularFileKey],
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
             options: [.skipsHiddenFiles]
         ) else { return nil }
 
+        let rootPath = directory.standardizedFileURL.path + "/"
         for case let url as URL in enumerator where url.lastPathComponent == "sing-box" {
+            guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]),
+                  values.isRegularFile == true,
+                  values.isSymbolicLink != true,
+                  url.standardizedFileURL.path.hasPrefix(rootPath) else { continue }
             return url
         }
         return nil
