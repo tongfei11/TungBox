@@ -12,7 +12,7 @@ enum ClashAPI {
 
     static func selectProxy(group: String, node: String, port: Int? = nil, session: URLSession = .shared) async throws {
         let escaped = group.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? group
-        try await requestJSON(path: "/proxies/\(escaped)", method: "PUT", body: ["name": node], port: port, session: session)
+        _ = try await requestJSON(path: "/proxies/\(escaped)", method: "PUT", body: ["name": node], port: port, session: session)
     }
 
     /// Selector changes affect only new connections in sing-box. Close the old
@@ -187,17 +187,55 @@ enum ClashAPI {
     }
 
     @discardableResult
-    private static func requestJSON(path: String, method: String = "GET", body: [String: Any]? = nil, port: Int? = nil, timeout: TimeInterval = 7, session: URLSession = .shared) async throws -> Any {
+    static func makeRequest(
+        path: String,
+        method: String = "GET",
+        body: [String: Any]? = nil,
+        port: Int? = nil,
+        secret: String? = nil
+    ) throws -> URLRequest {
         guard let url = endpointURL(path: path, port: port) else {
             throw NSError.user("Clash API 地址无效")
         }
         var request = URLRequest(url: url)
         request.httpMethod = method
-        request.timeoutInterval = timeout
+        let effectivePort = port ?? 9090
+        request.setValue("Bearer \(secret ?? TungBoxConfig.clashAPISecret(for: effectivePort))", forHTTPHeaderField: "Authorization")
         if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
+        return request
+    }
+
+    static func verifyAuthentication(
+        port: Int,
+        secret: String? = nil,
+        session: URLSession = .shared
+    ) async throws {
+        guard let url = endpointURL(path: "/proxies", port: port) else {
+            throw NSError.user("Clash API 地址无效")
+        }
+
+        var unauthenticated = URLRequest(url: url)
+        unauthenticated.timeoutInterval = 3
+        let (_, unauthenticatedResponse) = try await session.data(for: unauthenticated)
+        guard (unauthenticatedResponse as? HTTPURLResponse)?.statusCode == 401 else {
+            throw NSError.user("本地控制接口未拒绝无认证请求")
+        }
+
+        var authenticated = try makeRequest(path: "/proxies", port: port, secret: secret)
+        authenticated.timeoutInterval = 3
+        let (_, authenticatedResponse) = try await session.data(for: authenticated)
+        guard let status = (authenticatedResponse as? HTTPURLResponse)?.statusCode,
+              (200..<300).contains(status) else {
+            throw NSError.user("本地控制接口认证校验失败")
+        }
+    }
+
+    private static func requestJSON(path: String, method: String = "GET", body: [String: Any]? = nil, port: Int? = nil, timeout: TimeInterval = 7, session: URLSession = .shared) async throws -> Any {
+        var request = try makeRequest(path: path, method: method, body: body, port: port)
+        request.timeoutInterval = timeout
 
         let (data, response) = try await session.data(for: request)
         if let httpResponse = response as? HTTPURLResponse, !(200..<300).contains(httpResponse.statusCode) {

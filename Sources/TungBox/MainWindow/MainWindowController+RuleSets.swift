@@ -126,7 +126,7 @@ extension MainWindowController {
             let prepared = try preparedTunConfigText(from: text)
             let oldRequest = try Data(contentsOf: store.tunRequestConfigURL)
             let oldPID = TunServiceManager.activeSingBoxPID(store: store)
-            try Data(prepared.utf8).write(to: store.tunRequestConfigURL, options: .atomic)
+            try TunServiceManager.writeRequestConfig(Data(prepared.utf8), store: store)
             TunServiceManager.refreshRequestHeartbeat(store: store)
             isApplyingRuleSets = true
             ruleSetApplyStatus = "已保存，正在应用"
@@ -155,7 +155,7 @@ extension MainWindowController {
                 }
                 do {
                     guard self.isTunEnabled else { return }
-                    try oldRequest.write(to: self.store.tunRequestConfigURL, options: .atomic)
+                    try TunServiceManager.writeRequestConfig(oldRequest, store: self.store)
                     try Data().write(to: self.store.tunRequestFlagURL, options: .atomic)
                     self.startTunRequestHeartbeat()
                     TunServiceManager.refreshRequestHeartbeat(store: self.store)

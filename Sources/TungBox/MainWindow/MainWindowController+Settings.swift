@@ -979,7 +979,7 @@ extension MainWindowController {
     func reloadTunConfigInPlace(configText: String) {
         do {
             let prepared = try preparedTunConfigText(from: configText)
-            try prepared.write(to: store.tunRequestConfigURL, atomically: true, encoding: .utf8)
+            try TunServiceManager.writeRequestConfig(prepared, store: store)
             if !FileManager.default.fileExists(atPath: store.tunRequestFlagURL.path) {
                 FileManager.default.createFile(atPath: store.tunRequestFlagURL.path, contents: Data())
             }
@@ -1024,6 +1024,29 @@ extension MainWindowController {
                 }
             }
             if online {
+                do {
+                    try await ClashAPI.verifyAuthentication(port: TungBoxConfig.tunDaemonClashPort)
+                } catch {
+                    let stillWanted = await MainActor.run { [weak self] in
+                        guard let self else { return false }
+                        return self.isTunEnabled && self.runtimeTransitionID == transitionID
+                    }
+                    guard stillWanted else { return }
+                    await MainActor.run { [weak self] in
+                        guard let self else { return }
+                        self.appendLog("[TUN] 本地控制接口认证校验失败，已停止 TUN\n")
+                        self.stopTunRequestHeartbeat()
+                        try? TunServiceManager.disable(store: self.store)
+                        self.isTunEnabled = false
+                        UserDefaults.standard.set(false, forKey: "tunEnabled")
+                        self.wasTunActiveInThisSession = false
+                        self.tunTransition = .none
+                        self.syncProxyPreferenceControls()
+                        self.refreshStatus()
+                        self.showToast("TUN 控制接口认证失败")
+                    }
+                    return
+                }
                 // sing-box restores the last selector selection from cache.db,
                 // which can override the config's `default` (e.g. a manual node
                 // reverting to auto after switching into TUN). Re-assert the

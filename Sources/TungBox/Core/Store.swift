@@ -64,6 +64,7 @@ final class Store: @unchecked Sendable {
         logURL = baseURL.appendingPathComponent("sing-box.log")
         appLogURL = baseURL.appendingPathComponent("app.log")
         try? FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: baseURL.path)
         try? FileManager.default.createDirectory(at: ruleSetsURL, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: coreURL, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: subscriptionFoldersURL, withIntermediateDirectories: true)
@@ -210,6 +211,8 @@ final class Store: @unchecked Sendable {
             let name = url.lastPathComponent
             let obsolete = (name.hasPrefix("test_") && url.pathExtension.lowercased() == "json")
                 || (name.hasPrefix("before-refresh-") && url.pathExtension.lowercased() == "json")
+                || (name.hasPrefix("run_") && url.pathExtension.lowercased() == "json")
+                || (name.hasPrefix("run-") && url.pathExtension.lowercased() == "json")
                 || name == "tun-config-debug.json"
                 || name == "tun-request-debug.json"
             if obsolete { try? FileManager.default.removeItem(at: url) }

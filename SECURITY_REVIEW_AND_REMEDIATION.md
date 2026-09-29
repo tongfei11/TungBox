@@ -130,6 +130,8 @@ HTTPS 可降低传输途中被篡改的概率，但无法替代制品完整性�
 
 ## SEC-05：本地 Clash API 没有认证
 
+**状态：已修复（构建版本 0236）**
+
 **证据**
 
 - `Sources/TungBox/Core/Models.swift:187-192` 固定监听 `127.0.0.1:9090` 和 9091。
@@ -139,13 +141,13 @@ HTTPS 可降低传输途中被篡改的概率，但无法替代制品完整性�
 
 同一 macOS 机器上的其他用户或受限进程只要能访问 loopback，就可读取连接元数据、切换出口节点或关闭连接。9091 对应 root 启动的 sing-box，但暴露的是其控制面能力，不等同于获得 root 代码执行。该问题属于 CWE-306。
 
-**修复方案**
+**已实施方案**
 
-1. 首次运行生成至少 32 字节随机 secret，存入当前用户 Keychain；配置 9090 时写入 `clash_api.secret`。
-2. TUN daemon 使用独立 secret。安装时由特权 helper 创建 root-only secret 文件，权限 `0600 root:wheel`，不要复用用户 secret。
-3. 所有 API 请求统一添加 `Authorization: Bearer <secret>`；日志和错误不得输出 secret。
-4. 启动后主动验证未带 token 返回 401、正确 token 成功；失败时不要静默降级为无认证。
-5. 如果 sing-box 支持 Unix domain socket，可进一步以 socket 文件权限替代 TCP loopback 控制面。
+1. 用户代理与 TUN daemon 分别生成独立的 32 字节随机 secret；应用数据目录权限固定为 `0700`，secret 文件固定为 `0600`。
+2. 项目没有可用的 macOS 签名身份，无法可靠使用带应用身份访问控制的 Keychain 项或签名 helper；因此 secret 保存在当前用户私有目录。TUN secret 仅通过权限 `0600` 的请求配置传给 root daemon，daemon 再复制到 root-only `0600` 运行配置。
+3. 持久化订阅配置、编辑器和导出配置主动移除 `clash_api.secret`；9090 和 9091 只在各自临时运行配置中注入对应 secret。
+4. 所有 Clash API GET、PUT、DELETE 请求统一添加 `Authorization: Bearer <secret>`，错误和日志不包含 secret。
+5. 用户代理与 TUN 启动后主动验证无 token 返回 401、正确 token 返回成功；验证失败立即停止对应运行实例，不会降级为无认证接口。
 
 **回归测试**
 

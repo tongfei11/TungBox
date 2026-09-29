@@ -395,7 +395,7 @@ enum TunServiceManager {
             throw NSError.user("TUN 服务未安装。请先到 设置 > TUN 设置 安装 TUN 服务。")
         }
         try ensureRouteIsSafeToStart(store: store)
-        try configText.write(to: store.tunRequestConfigURL, atomically: true, encoding: .utf8)
+        try writeRequestConfig(configText, store: store)
         refreshRequestHeartbeat(store: store)
         if !FileManager.default.fileExists(atPath: store.tunRequestFlagURL.path) {
             FileManager.default.createFile(atPath: store.tunRequestFlagURL.path, contents: Data())
@@ -405,6 +405,28 @@ enum TunServiceManager {
         // kickstart on a system daemon needs root but we only write user-owned files,
         // so the daemon polls and picks them up on its next 1s loop iteration.
         // Launchctl kickstart without admin privs will fail → just let the poll loop handle it.
+    }
+
+    static func writeRequestConfig(_ text: String, store: Store) throws {
+        try writeRequestConfig(Data(text.utf8), store: store)
+    }
+
+    static func writeRequestConfig(_ data: Data, store: Store) throws {
+        let fileManager = FileManager.default
+        let url = store.tunRequestConfigURL
+        if fileManager.fileExists(atPath: url.path) {
+            let values = try url.resourceValues(forKeys: [.isSymbolicLinkKey, .isRegularFileKey])
+            guard values.isSymbolicLink != true, values.isRegularFile == true else {
+                throw NSError.user("TUN 请求配置路径不是普通文件，已拒绝写入")
+            }
+        }
+        try data.write(to: url, options: .atomic)
+        try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        let permissions = (try fileManager.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber)?.intValue
+        guard let permissions, permissions & 0o077 == 0 else {
+            try? fileManager.removeItem(at: url)
+            throw NSError.user("无法保护 TUN 请求配置权限，已拒绝启动")
+        }
     }
 
     static func disable(store: Store) throws {

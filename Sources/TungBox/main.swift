@@ -924,6 +924,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                         }
                     }
                     guard token == self.runtimeTransitionID else { return }
+                    try await ClashAPI.verifyAuthentication(port: 9090)
                     try await self.runSerializedOffMain { self.applySystemProxyBlocking(enabled: true, port: port) }
                     self.runDeferredNetworkChecksAfterConnection(proxyPort: port)
                 } catch {
@@ -932,6 +933,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                     self.isSystemProxyEnabled = false
                     UserDefaults.standard.set(false, forKey: "systemProxyEnabled")
                     self.systemProxyTransition = .none
+                    try? await self.runSerializedOffMain {
+                        if runnerRef.isRunning { runnerRef.stop() }
+                    }
                     try? await self.runSerializedOffMain { self.applySystemProxyBlocking(enabled: false, port: port) }
                     self.syncProxyPreferenceControls()
                     self.showError(error)
@@ -1488,8 +1492,10 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         // without their TLS block. Heal persisted profiles on load as well as at
         // runtime so an older app-created broken profile does not keep failing.
         if let parsed = parseConfigObject(from: loaded) {
-            let repaired = ConfigCompatibilityChecker.autoFix(config: parsed)
-            if !repaired.fixed.isEmpty, let rendered = try? renderConfig(repaired.config) {
+            let containedSecret = LocalAPIConfiguration.containsSecret(in: parsed)
+            let sanitized = LocalAPIConfiguration.removingSecret(from: parsed)
+            let repaired = ConfigCompatibilityChecker.autoFix(config: sanitized)
+            if (containedSecret || !repaired.fixed.isEmpty), let rendered = try? renderConfig(repaired.config) {
                 loaded = rendered
                 try? loaded.write(to: url, atomically: true, encoding: .utf8)
             }
@@ -1524,6 +1530,10 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         guard let index = selectedIndex else { throw NSError.user("请先选择一个配置") }
         if let normalized = normalizeLatencyTestURLs(inConfigText: editor.string) {
             editor.string = normalized
+        }
+        if let parsed = parseConfigObject(from: editor.string),
+           LocalAPIConfiguration.containsSecret(in: parsed) {
+            editor.string = try renderConfig(LocalAPIConfiguration.removingSecret(from: parsed))
         }
         let data = editor.string.data(using: .utf8) ?? Data()
         _ = try JSONSerialization.jsonObject(with: data)
@@ -1869,12 +1879,12 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
         // Keep clash_api (the clash_mode route rules depend on it) but on a dedicated
         // port so it never collides with the user runner's 9090.
-        if var experimental = config["experimental"] as? [String: Any],
-           var clashAPI = experimental["clash_api"] as? [String: Any] {
-            clashAPI["external_controller"] = "127.0.0.1:\(TungBoxConfig.tunDaemonClashPort)"
-            experimental["clash_api"] = clashAPI
-            config["experimental"] = experimental
-        }
+        var experimental = config["experimental"] as? [String: Any] ?? [:]
+        var clashAPI = experimental["clash_api"] as? [String: Any] ?? [:]
+        clashAPI["external_controller"] = "127.0.0.1:\(TungBoxConfig.tunDaemonClashPort)"
+        clashAPI["secret"] = TungBoxConfig.tunClashAPISecret
+        experimental["clash_api"] = clashAPI
+        config["experimental"] = experimental
         return config
     }
 
@@ -2584,6 +2594,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         if clashAPI["external_controller"] == nil {
             clashAPI["external_controller"] = "127.0.0.1:9090"
         }
+        clashAPI.removeValue(forKey: "secret")
         clashAPI["default_mode"] = mode.value
         experimental["clash_api"] = clashAPI
         config["experimental"] = experimental

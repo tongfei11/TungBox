@@ -190,6 +190,12 @@ enum TungBoxConfig {
     // The TUN daemon runs as an independent process; it keeps a clash_api for mode
     // routing but on a dedicated port so it never collides with the user proxy's 9090.
     static let tunDaemonClashPort = 9091
+    static var userClashAPISecret: String { LocalAPISecret.userProxy }
+    static var tunClashAPISecret: String { LocalAPISecret.tunDaemon }
+
+    static func clashAPISecret(for port: Int) -> String {
+        LocalAPISecret.secret(forPort: port)
+    }
 
     static func ruleSetURL(for tag: String) -> String {
         let stored = UserDefaults.standard.string(forKey: ruleSetURLKey(tag))?.trimmingCharacters(in: .whitespacesAndNewlines)

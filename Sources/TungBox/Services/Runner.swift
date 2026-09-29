@@ -6,6 +6,7 @@ final class Runner: @unchecked Sendable {
     private(set) var runningConfigData: Data?
     private var outputPipe: Pipe?
     private var elevatedPID: Int32?
+    private var runtimeConfigURL: URL?
     private let store: Store
     private let ruleSetRefreshQueue = DispatchQueue(label: "com.tungbox.rule-set-refresh", qos: .utility)
     
@@ -115,7 +116,8 @@ final class Runner: @unchecked Sendable {
         guard let binary = findSingBox() else {
             throw NSError.user("找不到 sing-box。请先安装：brew install sing-box")
         }
-        let actualConfig = preprocessConfig(at: config)
+        let actualConfig = try preprocessConfig(at: config)
+        defer { removeGeneratedRuntimeConfig(actualConfig, original: config) }
         let result = runAndWait(binary, ["check", "-c", actualConfig.path])
         if result.status != 0 {
             throw NSError.user(result.output.isEmpty ? "配置检查失败" : result.output)
@@ -145,7 +147,7 @@ final class Runner: @unchecked Sendable {
             return
         }
 
-        let actualConfig = preprocessConfig(at: config, allowTun: false)
+        let actualConfig = try preprocessConfig(at: config, allowTun: false)
         let configData = try Data(contentsOf: actualConfig)
 
         let process = Process()
@@ -166,13 +168,23 @@ final class Runner: @unchecked Sendable {
         }
 
         process.terminationHandler = { [weak self] proc in
+            self?.removeGeneratedRuntimeConfig(actualConfig, original: config)
             DispatchQueue.main.async {
+                if self?.runtimeConfigURL == actualConfig {
+                    self?.runtimeConfigURL = nil
+                }
                 self?.onOutput?("\n[sing-box exited: \(proc.terminationStatus)]\n")
             }
         }
 
-        try process.run()
+        do {
+            try process.run()
+        } catch {
+            removeGeneratedRuntimeConfig(actualConfig, original: config)
+            throw error
+        }
         self.process = process
+        runtimeConfigURL = actualConfig == config ? nil : actualConfig
         runningConfigData = configData
         outputPipe = pipe
     }
@@ -253,7 +265,7 @@ final class Runner: @unchecked Sendable {
     }
 
     private func startElevated(binary: String, config: URL) throws {
-        let actualConfig = preprocessConfig(at: config, allowTun: true)
+        let actualConfig = try preprocessConfig(at: config, allowTun: true)
         // Cap sing-box.log before the daemon starts appending — the shell `>>`
         // redirect below has no built-in rotation, so without this the file grows
         // forever across runs.
@@ -265,13 +277,16 @@ final class Runner: @unchecked Sendable {
         let appleScript = "do shell script \"\(appleScriptString(command))\" with administrator privileges"
         let result = runAndWait("/usr/bin/osascript", ["-e", appleScript])
         if result.status != 0 {
+            removeGeneratedRuntimeConfig(actualConfig, original: config)
             throw NSError.user(result.output.isEmpty ? "管理员授权启动失败" : result.output)
         }
         let pidText = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let pid = Int32(pidText) else {
+            removeGeneratedRuntimeConfig(actualConfig, original: config)
             throw NSError.user("管理员启动成功但无法读取 sing-box PID：\(pidText)")
         }
         elevatedPID = pid
+        runtimeConfigURL = actualConfig == config ? nil : actualConfig
         DispatchQueue.main.async { [weak self] in
             self?.onOutput?("[TUN] 已通过管理员权限启动 sing-box，PID \(pid)\n")
         }
@@ -322,6 +337,11 @@ final class Runner: @unchecked Sendable {
             _ = runAndWait("/usr/bin/osascript", ["-e", appleScript])
         }
         elevatedPID = nil
+        if let runtimeConfigURL {
+            try? FileManager.default.removeItem(at: runtimeConfigURL)
+            self.runtimeConfigURL = nil
+        }
+        runningConfigData = nil
     }
 
     private func waitForProcessExit(_ process: Process, timeout: TimeInterval) -> Bool {
@@ -504,7 +524,7 @@ final class Runner: @unchecked Sendable {
         }
     }
 
-    private func preprocessConfig(at url: URL, allowTun: Bool = false) -> URL {
+    private func preprocessConfig(at url: URL, allowTun: Bool = false) throws -> URL {
         guard let data = try? Data(contentsOf: url),
               var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return url
@@ -525,6 +545,15 @@ final class Runner: @unchecked Sendable {
         }
         let userMode = getuid() != 0 && !allowTun
         var convertedTun = false
+
+        if userMode {
+            json = LocalAPIConfiguration.authenticated(
+                json,
+                listen: TungBoxConfig.clashAPIListen,
+                secret: TungBoxConfig.userClashAPISecret
+            )
+            changed = true
+        }
 
         // The user (non-root) instance must NEVER use the daemon's root-owned
         // cache.db (/Library/Application Support/TungBox/cache.db) — it can only read
@@ -564,9 +593,20 @@ final class Runner: @unchecked Sendable {
             return url
         }
 
-        let tempURL = url.deletingLastPathComponent().appendingPathComponent("run_" + url.lastPathComponent)
+        let tempURL = url.deletingLastPathComponent()
+            .appendingPathComponent("run-\(UUID().uuidString).json")
         if let outData = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys]) {
-            guard (try? outData.write(to: tempURL, options: .atomic)) != nil else { return url }
+            do {
+                try outData.write(to: tempURL, options: .atomic)
+                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tempURL.path)
+                let permissions = (try FileManager.default.attributesOfItem(atPath: tempURL.path)[.posixPermissions] as? NSNumber)?.intValue
+                guard let permissions, permissions & 0o077 == 0 else {
+                    throw NSError.user("无法保护运行配置权限")
+                }
+            } catch {
+                try? FileManager.default.removeItem(at: tempURL)
+                throw NSError.user("无法安全创建运行配置：\(error.localizedDescription)")
+            }
             if convertedTun {
                 DispatchQueue.main.async { [weak self] in
                     self?.onOutput?("[TungBox] 检测到当前运行非管理员权限，已自动将配置中的 TUN 模式转换为本地混合代理模式运行。\n")
@@ -575,6 +615,11 @@ final class Runner: @unchecked Sendable {
             return tempURL
         }
         return url
+    }
+
+    private func removeGeneratedRuntimeConfig(_ candidate: URL, original: URL) {
+        guard candidate.standardizedFileURL != original.standardizedFileURL else { return }
+        try? FileManager.default.removeItem(at: candidate)
     }
 
     /// Build a SINGLE-outbound test config for `outboundTag` so `sing-box tools fetch`
