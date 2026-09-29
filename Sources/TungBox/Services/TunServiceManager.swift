@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 enum TunServiceStatus {
@@ -256,11 +257,28 @@ enum TunServiceManager {
         try? FileManager.default.removeItem(at: store.tunRequestConfigURL)
         try? FileManager.default.removeItem(at: store.tunRequestHeartbeatURL)
         try? rotateLargeLogIfNeeded()
-        let tempScript = FileManager.default.temporaryDirectory.appendingPathComponent("\(label).sh")
-        try writeServiceScript(store: store, to: tempScript)
+        let stagingDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TungBoxInstall-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: stagingDirectory, withIntermediateDirectories: false)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: stagingDirectory.path)
+        defer { try? FileManager.default.removeItem(at: stagingDirectory) }
+
+        let script = serviceScript(store: store)
+        let tempScript = stagingDirectory.appendingPathComponent("tun-service.sh")
+        try script.write(to: tempScript, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: tempScript.path)
         let plist = launchDaemonPlist(scriptPath: scriptPath)
-        let tempPlist = FileManager.default.temporaryDirectory.appendingPathComponent("\(label).plist")
+        let tempPlist = stagingDirectory.appendingPathComponent("launch-daemon.plist")
         try plist.write(to: tempPlist, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tempPlist.path)
+
+        let scriptSHA256 = sha256Hex(Data(script.utf8))
+        let plistSHA256 = sha256Hex(Data(plist.utf8))
+        let coreSHA256 = try sha256Hex(fileAt: store.coreBinaryURL)
+        let privilegedStagingPath = "\(installDirectoryPath)/.install-\(UUID().uuidString)"
+        let stagedScriptPath = "\(privilegedStagingPath)/tun-service.sh"
+        let stagedCorePath = "\(privilegedStagingPath)/sing-box"
+        let stagedPlistPath = "\(privilegedStagingPath)/launch-daemon.plist"
         let command = [
             // Tear down any existing instance and WAIT for launchd to fully unload it.
             // bootout is async; bootstrapping again before the old job is gone fails
@@ -269,9 +287,23 @@ enum TunServiceManager {
             "for i in $(seq 1 40); do launchctl print system/\(label) >/dev/null 2>&1 || break; launchctl bootout system/\(label) >/dev/null 2>&1 || true; sleep 0.25; done",
             "launchctl enable system/\(label) >/dev/null 2>&1 || true",
             "mkdir -p \(shellQuote(installDirectoryPath))",
-            "cp \(shellQuote(tempScript.path)) \(shellQuote(scriptPath))",
-            "cp \(shellQuote(store.coreBinaryURL.path)) \(shellQuote(corePath))",
-            "cp \(shellQuote(tempPlist.path)) \(shellQuote(plistPath))",
+            "chown root:wheel \(shellQuote(installDirectoryPath))",
+            "chmod 755 \(shellQuote(installDirectoryPath))",
+            "rm -rf \(shellQuote(privilegedStagingPath))",
+            "mkdir \(shellQuote(privilegedStagingPath))",
+            "chmod 700 \(shellQuote(privilegedStagingPath))",
+            privilegedStagingPrelude(path: privilegedStagingPath),
+            verifiedCopyCommand(sourcePath: tempScript.path, destinationPath: stagedScriptPath, expectedSHA256: scriptSHA256),
+            verifiedCopyCommand(sourcePath: store.coreBinaryURL.path, destinationPath: stagedCorePath, expectedSHA256: coreSHA256),
+            verifiedCopyCommand(sourcePath: tempPlist.path, destinationPath: stagedPlistPath, expectedSHA256: plistSHA256),
+            "chown root:wheel \(shellQuote(stagedScriptPath)) \(shellQuote(stagedCorePath)) \(shellQuote(stagedPlistPath))",
+            "chmod 755 \(shellQuote(stagedScriptPath)) \(shellQuote(stagedCorePath))",
+            "chmod 644 \(shellQuote(stagedPlistPath))",
+            "mv -f \(shellQuote(stagedScriptPath)) \(shellQuote(scriptPath))",
+            "mv -f \(shellQuote(stagedCorePath)) \(shellQuote(corePath))",
+            "mv -f \(shellQuote(stagedPlistPath)) \(shellQuote(plistPath))",
+            "trap - EXIT HUP INT TERM",
+            "rm -rf \(shellQuote(privilegedStagingPath))",
             "rm -f \(shellQuote(flagPath)) \(shellQuote(legacyStdoutPath)) \(shellQuote(legacyStderrPath))",
             // Nuke the old per-stream files (and any .old) — the new plist sends launchd
             // stdout/stderr to /dev/null and the daemon writes everything through $LOG,
@@ -280,7 +312,6 @@ enum TunServiceManager {
             "[ -f \(shellQuote(logPath)) ] && [ $(stat -f '%z' \(shellQuote(logPath)) 2>/dev/null || echo 0) -gt 1048576 ] && mv \(shellQuote(logPath)) \(shellQuote(logPath)).old || true",
             "touch \(shellQuote(logPath))",
             "chown root:wheel \(shellQuote(installDirectoryPath)) \(shellQuote(scriptPath)) \(shellQuote(corePath)) \(shellQuote(logPath)) \(shellQuote(plistPath))",
-            "chmod 755 \(shellQuote(installDirectoryPath))",
             "chmod 755 \(shellQuote(scriptPath)) \(shellQuote(corePath))",
             "chmod 644 \(shellQuote(logPath))",
             "chmod 644 \(shellQuote(plistPath))",
@@ -297,8 +328,6 @@ enum TunServiceManager {
         ]
         let commandText = command.joined(separator: "\n")
         let result = runAppleScript(commandText)
-        try? FileManager.default.removeItem(at: tempScript)
-        try? FileManager.default.removeItem(at: tempPlist)
         // Authoritative success check is whether the service is actually usable —
         // not the AppleScript exit status, which can be non-zero from a transient
         // `launchctl print` race even when bootstrap succeeded.
@@ -610,7 +639,7 @@ enum TunServiceManager {
         return nil
     }
 
-    private static func writeServiceScript(store: Store, to url: URL) throws {
+    private static func serviceScript(store: Store) -> String {
         let script = """
         #!/bin/sh
         CORE=\(shellQuote(corePath))
@@ -624,7 +653,7 @@ enum TunServiceManager {
         DNS_BACKUP=\(shellQuote(dnsBackupPath))
         TUN_DNS_ADDR="198.18.0.2"
         CHILD=""
-        SCRIPT_VERSION="2026-09-tun-recovery-v25"
+        SCRIPT_VERSION="2026-09-tun-recovery-v26"
         REQUEST_MAX_AGE=30
         CLEANING_UP=0
         LOG_MAX_BYTES=1048576
@@ -1011,8 +1040,26 @@ enum TunServiceManager {
           fi
         done
         """
-        try script.write(to: url, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        return script
+    }
+
+    static func verifiedCopyCommand(sourcePath: String, destinationPath: String, expectedSHA256: String) -> String {
+        let source = shellQuote(sourcePath)
+        let destination = shellQuote(destinationPath)
+        let expected = shellQuote(expectedSHA256.lowercased())
+        return "cp \(source) \(destination) && actual=$(/usr/bin/shasum -a 256 \(destination) | /usr/bin/awk '{print $1}') && [ \"$actual\" = \(expected) ] || { echo 'TUN 安装文件完整性校验失败' >&2; exit 65; }"
+    }
+
+    static func privilegedStagingPrelude(path: String) -> String {
+        "stage=\(shellQuote(path))\ntrap 'rm -rf \"$stage\"' EXIT HUP INT TERM"
+    }
+
+    private static func sha256Hex(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func sha256Hex(fileAt url: URL) throws -> String {
+        sha256Hex(try Data(contentsOf: url, options: [.mappedIfSafe]))
     }
 
     private static func launchDaemonPlist(scriptPath: String) -> String {
@@ -1061,7 +1108,7 @@ enum TunServiceManager {
             && script.contains("clean_routes")
             && script.contains("wait_for_pid_exit")
             && script.contains("stop_pid")
-            && script.contains("2026-09-tun-recovery-v25")
+            && script.contains("2026-09-tun-recovery-v26")
             && script.contains("rotate_log_if_big")
             && script.contains("clean_dns")
             && script.contains("flush_dns_after_tun_up")
