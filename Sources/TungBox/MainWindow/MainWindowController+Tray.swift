@@ -1,7 +1,20 @@
 import AppKit
 import Foundation
 
+enum TrayPresentationState {
+    static func isActive(systemProxyEnabled: Bool, tunEnabled: Bool) -> Bool {
+        systemProxyEnabled || tunEnabled
+    }
+}
+
 extension MainWindowController {
+
+    private var isTrayPresentationActive: Bool {
+        TrayPresentationState.isActive(
+            systemProxyEnabled: isSystemProxyEnabled,
+            tunEnabled: isTunEnabled
+        )
+    }
     
     func setupStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -21,7 +34,7 @@ extension MainWindowController {
 
     func rebuildTrayMenu(_ menu: NSMenu) {
         menu.removeAllItems()
-        let status = isProxyServiceActiveOrRequested() ? "运行中" : "已关闭"
+        let status = isTrayPresentationActive ? "运行中" : "已关闭"
         let statusItem = NSMenuItem(title: "\(TungBoxVersion.display) \(status)", action: nil, keyEquivalent: "")
         statusItem.isEnabled = false
         menu.addItem(statusItem)
@@ -161,7 +174,7 @@ extension MainWindowController {
     }
 
     func trayIcon() -> NSImage? {
-        let name = isProxyServiceActiveOrRequested() ? "on" : "off"
+        let name = isTrayPresentationActive ? "on" : "off"
         guard let url = AppResources.url(forResource: name, withExtension: "png", subdirectory: "Tray"),
               let image = NSImage(contentsOf: url) else { return nil }
         image.size = NSSize(width: 20, height: 20)
@@ -202,7 +215,7 @@ extension MainWindowController {
     func configureStatusButton(_ button: NSStatusBarButton?) {
         guard let button, let statusItem = self.statusItem else { return }
         let style = TrayIconStyle.current
-        let active = isProxyServiceActiveOrRequested()
+        let active = isTrayPresentationActive
         let delay = nodes.first(where: { $0.tag == resolveActiveOutbound(proxiesObj: lastProxiesObj).name })?.delay ?? ""
         let presentation = "\(style.rawValue)|\(active)|\(currentUploadSpeed)|\(currentDownloadSpeed)|\(delay)"
         if lastTrayPresentation == presentation {

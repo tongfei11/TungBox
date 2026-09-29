@@ -1,6 +1,46 @@
 import AppKit
 import Foundation
 
+@MainActor
+enum LogTextViewLayout {
+    static func configure(_ textView: NSTextView) {
+        textView.minSize = NSSize(width: 0, height: 0)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
+    }
+}
+
+enum SessionLogBuffer {
+    static let maximumCharacters = 200_000
+    static let retainedCharacters = 120_000
+
+    @discardableResult
+    static func trim(
+        _ buffer: inout String,
+        maximum: Int = maximumCharacters,
+        retained: Int = retainedCharacters
+    ) -> Bool {
+        guard maximum > 0, retained > 0, retained < maximum, buffer.count > maximum else {
+            return false
+        }
+        let start = buffer.index(buffer.endIndex, offsetBy: -min(retained, buffer.count))
+        if let newline = buffer[start...].firstIndex(of: "\n"), newline < buffer.index(before: buffer.endIndex) {
+            buffer = String(buffer[buffer.index(after: newline)...])
+        } else {
+            buffer = String(buffer[start...])
+        }
+        return true
+    }
+
+    static func lineCount(in buffer: String) -> Int {
+        buffer.components(separatedBy: .newlines).filter { !$0.isEmpty }.count
+    }
+}
+
 extension MainWindowController {
 
     func makeLogsView() -> NSView {
@@ -83,13 +123,17 @@ extension MainWindowController {
 
         logs.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         logs.isEditable = false
+        logs.isSelectable = true
+        logs.isRichText = false
         logs.backgroundColor = .clear
         logs.textColor = MD3.onSurface
+        LogTextViewLayout.configure(logs)
         registerThemeObserver { [weak self] in
             self?.logs.textColor = MD3.onSurface
         }
 
-        let countLabel = logCountLabel
+        let countLabel = NSTextField(labelWithString: "")
+        countLabel.tag = 9902
         countLabel.font = .systemFont(ofSize: 11, weight: .medium)
         countLabel.textColor = MD3.onSurfaceVariant
         countLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -171,18 +215,14 @@ extension MainWindowController {
         }
 
         logs.string = filtered.isEmpty ? "" : filtered.joined(separator: "\n")
-        logCountLabel.stringValue = filtered.count == lines.count && allLevelsOn
+        attachedLogCountLabel?.stringValue = filtered.count == lines.count && allLevelsOn
             ? "共 \(lines.filter { !$0.isEmpty }.count) 条"
             : "显示 \(filtered.count) / \(lines.filter { !$0.isEmpty }.count) 条"
     }
 
-    var logCountLabel: NSTextField {
-        if let existing = logs.superview?.subviews.first(where: { $0.tag == 9902 }) as? NSTextField {
-            return existing
-        }
-        let label = NSTextField(labelWithString: "")
-        label.tag = 9902
-        return label
+    private var attachedLogCountLabel: NSTextField? {
+        logs.enclosingScrollView?.superview?.subviews
+            .first(where: { $0.tag == 9902 }) as? NSTextField
     }
 
     // MARK: - Actions
@@ -191,7 +231,7 @@ extension MainWindowController {
         logBuffer = ""
         logLineCount = 0
         logs.string = ""
-        logCountLabel.stringValue = "显示 0 条"
+        attachedLogCountLabel?.stringValue = "显示 0 条"
         // Also wipe the on-disk log so "清空" actually frees space — otherwise the
         // file keeps growing and the user has no way to truncate it from the UI.
         try? FileManager.default.removeItem(at: store.appLogURL)
@@ -212,29 +252,15 @@ extension MainWindowController {
     }
 
     func appendLog(_ text: String) {
-        logBuffer += text
-        trimLogBufferIfNeeded()
-        logLineCount += text.components(separatedBy: .newlines).filter { !$0.isEmpty }.count
+        logBuffer.append(text)
+        if SessionLogBuffer.trim(&logBuffer) {
+            logLineCount = SessionLogBuffer.lineCount(in: logBuffer)
+        } else {
+            logLineCount += SessionLogBuffer.lineCount(in: text)
+        }
         logStatusLabel.stringValue = "日志：\(logLineCount) 行"
         appendPersistentLog(text)
         scheduleLogRefresh()
-    }
-
-    /// Keep `logBuffer` from growing unbounded over long sessions. We bound the
-    /// raw character count (cheap) rather than line count (would require splitting
-    /// the whole string on every append). When over the cap, drop the oldest half
-    /// at the nearest newline so what's left is still well-formed lines.
-    private func trimLogBufferIfNeeded() {
-        let maxChars = 800_000   // ~ a few MB of UTF-8; UI filter still snappy
-        let trimTo  = 400_000
-        guard logBuffer.count > maxChars else { return }
-        let dropCount = logBuffer.count - trimTo
-        let dropIndex = logBuffer.index(logBuffer.startIndex, offsetBy: dropCount)
-        if let newlineRange = logBuffer.range(of: "\n", range: dropIndex..<logBuffer.endIndex) {
-            logBuffer = String(logBuffer[newlineRange.upperBound...])
-        } else {
-            logBuffer = String(logBuffer[dropIndex...])
-        }
     }
 
     func appendPersistentLog(_ text: String) {
