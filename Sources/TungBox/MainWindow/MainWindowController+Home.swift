@@ -414,8 +414,8 @@ extension MainWindowController {
         let today = getTodayKey()
         var history = UserDefaults.standard.dictionary(forKey: "tungbox_traffic_history") as? [String: [String: Int]] ?? [:]
         var todayTraffic = history[today] ?? ["upload": 0, "download": 0]
-        todayTraffic["upload"] = (todayTraffic["upload"] ?? 0) + upload
-        todayTraffic["download"] = (todayTraffic["download"] ?? 0) + download
+        todayTraffic["upload"] = SaturatingArithmetic.add(todayTraffic["upload"] ?? 0, upload)
+        todayTraffic["download"] = SaturatingArithmetic.add(todayTraffic["download"] ?? 0, download)
         history[today] = todayTraffic
         UserDefaults.standard.set(history, forKey: "tungbox_traffic_history")
     }
@@ -434,8 +434,8 @@ extension MainWindowController {
                 formatter.dateFormat = "yyyy-MM-dd"
                 let key = formatter.string(from: date)
                 if let dayData = history[key] {
-                    totalUp += dayData["upload"] ?? 0
-                    totalDown += dayData["download"] ?? 0
+                    totalUp = SaturatingArithmetic.add(totalUp, dayData["upload"] ?? 0)
+                    totalDown = SaturatingArithmetic.add(totalDown, dayData["download"] ?? 0)
                 }
             }
         }
@@ -463,7 +463,7 @@ extension MainWindowController {
             down = totalDownloadBytes
         }
         
-        let total = up + down
+        let total = SaturatingArithmetic.add(up, down)
         trafficStatsValueLabel.stringValue = formatBytes(total)
         trafficStatsDetailLabel.stringValue = "上传: \(formatBytes(up))   下载: \(formatBytes(down))"
     }
@@ -556,14 +556,14 @@ extension MainWindowController {
                     var deltaUp: Int64 = 0, deltaDown: Int64 = 0
                     for (port, curr) in totals {
                         if let p = prevTotals[port], curr.upload >= p.upload, curr.download >= p.download {
-                            deltaUp += curr.upload - p.upload
-                            deltaDown += curr.download - p.download
+                            deltaUp = SaturatingArithmetic.add(deltaUp, SaturatingArithmetic.nonnegativeDifference(curr.upload, p.upload))
+                            deltaDown = SaturatingArithmetic.add(deltaDown, SaturatingArithmetic.nonnegativeDifference(curr.download, p.download))
                         }
                     }
                     self.accumulateTrafficFromTotals(totals)
                     if !prevTotals.isEmpty {
-                        let upSpeed = Int(Double(deltaUp) / elapsedSinceLast)
-                        let downSpeed = Int(Double(deltaDown) / elapsedSinceLast)
+                        let upSpeed = SaturatingArithmetic.rate(bytes: deltaUp, elapsed: elapsedSinceLast)
+                        let downSpeed = SaturatingArithmetic.rate(bytes: deltaDown, elapsed: elapsedSinceLast)
                         self.updateRealtimeSpeed(uploadSpeed: upSpeed, downloadSpeed: downSpeed)
                     }
                 }

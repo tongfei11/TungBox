@@ -246,9 +246,11 @@ extension MainWindowController {
         var speedMap: [String: (up: Int, down: Int)] = [:]
         for curr in list {
             if let prev = previousByID[curr.id] {
+                let uploadDelta = SaturatingArithmetic.nonnegativeDifference(curr.upload, prev.upload)
+                let downloadDelta = SaturatingArithmetic.nonnegativeDifference(curr.download, prev.download)
                 speedMap[curr.id] = (
-                    Int(Double(max(0, curr.upload - prev.upload)) / elapsed),
-                    Int(Double(max(0, curr.download - prev.download)) / elapsed)
+                    SaturatingArithmetic.rate(bytes: uploadDelta, elapsed: elapsed),
+                    SaturatingArithmetic.rate(bytes: downloadDelta, elapsed: elapsed)
                 )
             }
         }
@@ -281,8 +283,8 @@ extension MainWindowController {
         var deltaDown: Int64 = 0
         for (port, curr) in totals {
             if let prev = prevTrafficTotals[port], curr.upload >= prev.upload, curr.download >= prev.download {
-                deltaUp += curr.upload - prev.upload
-                deltaDown += curr.download - prev.download
+                deltaUp = SaturatingArithmetic.add(deltaUp, SaturatingArithmetic.nonnegativeDifference(curr.upload, prev.upload))
+                deltaDown = SaturatingArithmetic.add(deltaDown, SaturatingArithmetic.nonnegativeDifference(curr.download, prev.download))
             }
             // 若 sing-box 进程重启（totals 回到 0 或减小），那个端口本轮跳过，
             // 不计 delta，从下一轮重新算基准。
@@ -290,10 +292,11 @@ extension MainWindowController {
         prevTrafficTotals = totals
 
         if deltaUp > 0 || deltaDown > 0 {
-            recordTraffic(upload: Int(min(Int64(Int.max), deltaUp)),
-                          download: Int(min(Int64(Int.max), deltaDown)))
-            totalUploadBytes += Int(min(Int64(Int.max), deltaUp))
-            totalDownloadBytes += Int(min(Int64(Int.max), deltaDown))
+            let safeUp = SaturatingArithmetic.clampedInt(deltaUp)
+            let safeDown = SaturatingArithmetic.clampedInt(deltaDown)
+            recordTraffic(upload: safeUp, download: safeDown)
+            totalUploadBytes = SaturatingArithmetic.add(totalUploadBytes, safeUp)
+            totalDownloadBytes = SaturatingArithmetic.add(totalDownloadBytes, safeDown)
             updateTrafficLabels()
         }
     }

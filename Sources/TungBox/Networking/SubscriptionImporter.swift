@@ -35,17 +35,27 @@ enum SubscriptionImporter {
             let key = kv[0].trimmingCharacters(in: .whitespaces).lowercased()
             let raw = kv[1].trimmingCharacters(in: .whitespaces)
             switch key {
-            case "upload":   info.upload = Int64(raw)
-            case "download": info.download = Int64(raw)
-            case "total":    info.total = Int64(raw)
+            case "upload":   info.upload = boundedTrafficValue(raw)
+            case "download": info.download = boundedTrafficValue(raw)
+            case "total":    info.total = boundedTrafficValue(raw)
             case "expire":
                 if let ts = TimeInterval(raw), ts > 0 {
-                    info.expiresAt = Date(timeIntervalSince1970: ts)
+                    let date = Date(timeIntervalSince1970: ts)
+                    if (SecurityLimits.earliestSubscriptionExpiry...SecurityLimits.latestSubscriptionExpiry).contains(date) {
+                        info.expiresAt = date
+                    }
                 }
             default: break
             }
         }
         return info
+    }
+
+    private static func boundedTrafficValue(_ raw: String) -> Int64? {
+        guard let value = Int64(raw), (0...SecurityLimits.subscriptionTrafficMax).contains(value) else {
+            return nil
+        }
+        return value
     }
 
     /// Fetch the subscription trying multiple User-Agents until one returns content

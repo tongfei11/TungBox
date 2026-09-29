@@ -1574,15 +1574,20 @@ final class MD3SubscriptionItemView: NSView, MD3Themeable {
         domainLabel.stringValue = URL(string: sub.url)?.host ?? sub.url
 
         // 流量
-        let used = (sub.upload ?? 0) + (sub.download ?? 0)
+        let used = SubscriptionTraffic.used(upload: sub.upload, download: sub.download)
         if let total = sub.total, total > 0 {
-            trafficLabel.stringValue = "\(Self.formatBytes(used)) / \(Self.formatBytes(total))"
+            let warning = SubscriptionTraffic.isInconsistent(used: used, total: total) ? "（数据异常）" : ""
+            trafficLabel.stringValue = "\(Self.formatBytes(used)) / \(Self.formatBytes(total))\(warning)"
             let frac = max(0, min(1, Double(used) / Double(total)))
             trafficFillWidth.isActive = false
             trafficFillWidth = trafficFill.widthAnchor.constraint(equalTo: trafficBar.widthAnchor, multiplier: CGFloat(max(frac, 0.001)))
             trafficFillWidth.isActive = true
         } else {
-            trafficLabel.stringValue = used > 0 ? "已用 \(Self.formatBytes(used)) / 不限" : "未获取流量信息"
+            if let total = sub.total, SubscriptionTraffic.isInconsistent(used: used, total: total) {
+                trafficLabel.stringValue = "流量数据异常"
+            } else {
+                trafficLabel.stringValue = used > 0 ? "已用 \(Self.formatBytes(used)) / 不限" : "未获取流量信息"
+            }
             trafficFillWidth.isActive = false
             trafficFillWidth = trafficFill.widthAnchor.constraint(equalTo: trafficBar.widthAnchor, multiplier: 0)
             trafficFillWidth.isActive = true
