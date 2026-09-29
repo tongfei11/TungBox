@@ -280,13 +280,16 @@ extension MainWindowController {
                 return
             }
 
-            self.subscriptions[index] = Subscription(
-                id: subscription.id,
-                name: name,
-                url: url,
-                profileID: subscription.profileID,
-                updatedAt: subscription.updatedAt
-            )
+            self.subscriptionRefreshTracker.invalidate(subscriptionID: subscription.id)
+            var updated = subscription
+            updated.name = name
+            updated.url = url
+            updated.lastError = nil
+            updated.upload = nil
+            updated.download = nil
+            updated.total = nil
+            updated.expiresAt = nil
+            self.subscriptions[index] = updated
             self.store.saveSubscriptions(self.subscriptions)
             self.subscriptionTable.reloadData()
             refreshSubscriptionEmptyState()
@@ -303,6 +306,7 @@ extension MainWindowController {
     @objc func deleteSubscriptionClicked() {
         guard let index = selectedSubscriptionIndex, subscriptions.indices.contains(index) else { return }
         let removed = subscriptions[index]
+        subscriptionRefreshTracker.invalidate(subscriptionID: removed.id)
         do {
             if let profileID = removed.profileID,
                let profileIndex = profiles.firstIndex(where: { $0.id == profileID }) {
@@ -400,6 +404,7 @@ extension MainWindowController {
     func refreshSubscription(at index: Int) {
         guard subscriptions.indices.contains(index) else { return }
         let subscription = subscriptions[index]
+        let refreshToken = subscriptionRefreshTracker.begin(subscriptionID: subscription.id, url: subscription.url)
         appendLog("[订阅] 开始刷新 \(subscription.name)\n")
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -414,18 +419,6 @@ extension MainWindowController {
                 let skippedTotal = summary.skippedTotal
                 let skippedDetail = summary.skippedTypesDescription
                 let config = try SubscriptionImporter.singBoxConfig(from: content, profileName: subscription.name)
-                DispatchQueue.main.async { [weak self] in
-                    if ua != SubscriptionImporter.fallbackUserAgents.first {
-                        self?.appendLog("[订阅] 服务端按 UA 返回不同内容，使用「\(ua)」拉取成功\n")
-                    }
-                    // 更新流量/到期 metadata 到订阅卡片（subscription-userinfo header）
-                    if let idx = self?.subscriptions.firstIndex(where: { $0.id == subscription.id }) {
-                        self?.subscriptions[idx].upload = info.upload
-                        self?.subscriptions[idx].download = info.download
-                        self?.subscriptions[idx].total = info.total
-                        self?.subscriptions[idx].expiresAt = info.expiresAt
-                    }
-                }
                 let fixLog = SubscriptionImporter.compatibilityFixLog
                 SubscriptionImporter.compatibilityFixLog = []
                 // Check for manual-fix issues
@@ -435,55 +428,66 @@ extension MainWindowController {
                     manualIssues = ConfigCompatibilityChecker.check(config: obj).filter { !$0.autoFixed }
                 }
                 DispatchQueue.main.async {
-                    if let idx = self?.subscriptions.firstIndex(where: { $0.id == subscription.id }) {
-                        self?.subscriptions[idx].lastError = nil
-                        self?.store.saveSubscriptions(self?.subscriptions ?? [])
-                        self?.subscriptionTable.reloadData()
+                    guard let self,
+                          let idx = self.subscriptions.firstIndex(where: { $0.id == subscription.id }),
+                          self.subscriptionRefreshTracker.isCurrent(refreshToken, currentURL: self.subscriptions[idx].url) else { return }
+                    if ua != SubscriptionImporter.fallbackUserAgents.first {
+                        self.appendLog("[订阅] 服务端按 UA 返回不同内容，使用「\(ua)」拉取成功\n")
                     }
-                    self?.appendLog("[订阅] 检测到 \(format.rawValue) 格式，\(nodes.count) 个节点\n")
+                    self.subscriptions[idx].upload = info.upload
+                    self.subscriptions[idx].download = info.download
+                    self.subscriptions[idx].total = info.total
+                    self.subscriptions[idx].expiresAt = info.expiresAt
+                    self.subscriptions[idx].lastError = nil
+                    self.store.saveSubscriptions(self.subscriptions)
+                    self.subscriptionTable.reloadData()
+                    self.appendLog("[订阅] 检测到 \(format.rawValue) 格式，\(nodes.count) 个节点\n")
                     if skippedTotal > 0 {
-                        self?.appendLog("[订阅] \(skippedTotal) 个节点协议不支持已跳过（\(skippedDetail)）\n")
-                        self?.showToast("\(subscription.name): \(skippedTotal) 个节点协议不支持已跳过（\(skippedDetail)）", style: .warning, duration: 5.0)
+                        self.appendLog("[订阅] \(skippedTotal) 个节点协议不支持已跳过（\(skippedDetail)）\n")
+                        self.showToast("\(subscription.name): \(skippedTotal) 个节点协议不支持已跳过（\(skippedDetail)）", style: .warning, duration: 5.0)
                     }
-                    for fix in fixLog { self?.appendLog(fix + "\n") }
+                    for fix in fixLog { self.appendLog(fix + "\n") }
                     for issue in manualIssues {
-                        self?.appendLog("[兼容性] [\(issue.severity.rawValue)] \(issue.path): \(issue.message)\n")
+                        self.appendLog("[兼容性] [\(issue.severity.rawValue)] \(issue.path): \(issue.message)\n")
                     }
                     let errorCount = manualIssues.filter({ $0.severity == .error }).count
                     if errorCount > 0 {
-                        let dialog = self?.showMD3Dialog(
+                        let dialog = self.showMD3Dialog(
                             title: "配置兼容性警告",
                             message: "订阅包含 \(errorCount) 个已弃用的配置项，在当前 Core 版本上可能无法正常启动。\n\n是否安装兼容旧配置的 sing-box 1.11.10？\n\n（可在 设置 → Core 管理 中随时装回最新版）",
                             customView: nil,
                             confirmTitle: "安装兼容旧版 Core",
                             cancelTitle: "忽略"
                         )
-                        dialog?.onConfirm = { [weak self, weak dialog] in
+                        dialog.onConfirm = { [weak self, weak dialog] in
                             dialog?.dismiss()
                             Task {
                                 await self?.downgradeCoreForCompatibility()
                             }
                         }
-                        dialog?.onCancel = { [weak dialog] in dialog?.dismiss() }
+                        dialog.onCancel = { [weak dialog] in dialog?.dismiss() }
                     }
-                    self?.applySubscriptionConfig(config, at: index)
+                    self.applySubscriptionConfig(config, for: subscription.id, refreshToken: refreshToken)
                 }
             } catch {
                 let errorMsg = error.localizedDescription
                 DispatchQueue.main.async {
+                    guard let self,
+                          let currentIndex = self.subscriptions.firstIndex(where: { $0.id == subscription.id }),
+                          self.subscriptionRefreshTracker.isCurrent(refreshToken, currentURL: self.subscriptions[currentIndex].url) else { return }
                     // Store error on subscription card
-                    if var sub = self?.subscriptions.first(where: { $0.id == subscription.id }) {
+                    if var sub = self.subscriptions.first(where: { $0.id == subscription.id }) {
                         sub.lastError = errorMsg
-                        if let idx = self?.subscriptions.firstIndex(where: { $0.id == sub.id }) {
-                            self?.subscriptions[idx].lastError = errorMsg
-                            self?.store.saveSubscriptions(self?.subscriptions ?? [])
-                            self?.subscriptionTable.reloadData()
+                        if let idx = self.subscriptions.firstIndex(where: { $0.id == sub.id }) {
+                            self.subscriptions[idx].lastError = errorMsg
+                            self.store.saveSubscriptions(self.subscriptions)
+                            self.subscriptionTable.reloadData()
                         }
                     }
-                    self?.appendLog("[订阅] \(subscription.name) 刷新失败：\(errorMsg)\n")
+                    self.appendLog("[订阅] \(subscription.name) 刷新失败：\(errorMsg)\n")
                     // macOS notification for auto-refresh failures (not for manual refresh)
-                    self?.notifySubscriptionFailure(name: subscription.name, error: errorMsg)
-                    self?.showError(error)
+                    self.notifySubscriptionFailure(name: subscription.name, error: errorMsg)
+                    self.showError(error)
                 }
             }
         }
@@ -549,8 +553,17 @@ extension MainWindowController {
         UNUserNotificationCenter.current().add(request)
     }
 
-    func applySubscriptionConfig(_ config: String, at index: Int) {
-        guard subscriptions.indices.contains(index) else { return }
+    func applySubscriptionConfig(
+        _ config: String,
+        for subscriptionID: UUID,
+        refreshToken: SubscriptionRefreshToken? = nil
+    ) {
+        guard let index = subscriptions.firstIndex(where: { $0.id == subscriptionID }) else { return }
+        if let refreshToken,
+           !subscriptionRefreshTracker.isCurrent(refreshToken, currentURL: subscriptions[index].url) {
+            appendLog("[订阅] 已丢弃过期刷新结果\n")
+            return
+        }
         var subscription = subscriptions[index]
         let profileName = "订阅 - \(subscription.name)"
 
@@ -663,7 +676,7 @@ extension MainWindowController {
             let subscription = Subscription(id: UUID(), name: newName, url: url.absoluteString, profileID: nil, updatedAt: Date())
             subscriptions.append(subscription)
             store.saveSubscriptions(subscriptions)
-            applySubscriptionConfig(config, at: subscriptions.count - 1)
+            applySubscriptionConfig(config, for: subscription.id)
             subscriptionTable.reloadData()
             refreshSubscriptionBadge()
             appendLog("[订阅] 从文件导入 \(newName)（\(summary.nodes.count) 个节点）\n")
@@ -731,7 +744,7 @@ extension MainWindowController {
             let subscription = Subscription(id: UUID(), name: "剪贴板导入", url: "clipboard://", profileID: nil, updatedAt: Date())
             subscriptions.append(subscription)
             store.saveSubscriptions(subscriptions)
-            applySubscriptionConfig(config, at: subscriptions.count - 1)
+            applySubscriptionConfig(config, for: subscription.id)
             subscriptionTable.reloadData()
             refreshSubscriptionBadge()
             appendLog("[订阅] 从剪贴板导入（\(summary.nodes.count) 个节点）\n")

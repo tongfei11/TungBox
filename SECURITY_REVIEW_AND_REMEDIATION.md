@@ -47,6 +47,8 @@
 
 ## SEC-02：异步订阅刷新可写入错误订阅
 
+**状态：已修复（构建版本 0230）**
+
 **证据**
 
 - `Sources/TungBox/MainWindow/MainWindowController+Subscriptions.swift:400-416` 捕获订阅对象和数组索引后开始异步下载。
@@ -57,13 +59,13 @@
 
 例如 A、B 两个订阅中，A 刷新尚未完成时删除 A，B 会移动到索引 0；A 的迟到回包随后可能覆盖 B。攻击者需要控制 A 的响应及延迟，并需要用户在请求期间删除或编辑订阅。影响包括持久配置污染，以及当前用户代理被重启到攻击者提供的节点。该问题属于 CWE-367。
 
-**修复方案**
+**已实施方案**
 
-1. 为每个订阅维护单调递增的 `refreshGeneration`，请求只捕获 `subscription.id`、规范化 URL 和 generation。
-2. 回到主线程提交前，按 UUID 重新查找订阅，并同时比较 URL 与 generation；任一不一致就丢弃回包。
-3. 删除订阅、修改 URL、手动再次刷新时递增 generation，并取消旧 `URLSessionTask`。
-4. 将 `applySubscriptionConfig(_:at:)` 改为接收订阅 UUID 和请求令牌，函数内部再次验证身份；不要跨异步边界传数组位置。
-5. metadata、错误和配置成功路径使用同一套提交函数，避免一部分按 UUID、一部分按索引。
+1. 为每个订阅维护单调递增的刷新 generation，请求令牌绑定订阅 UUID、URL 和 generation。
+2. 成功与失败回到主线程时都按 UUID 重新查找订阅，并同时核对当前 URL 和 generation；删除、修改 URL、重复刷新产生的旧回包会被直接丢弃。
+3. 删除或编辑订阅会主动使当前令牌失效；手动或自动再次刷新会生成更高代次，使上一请求失效。
+4. `applySubscriptionConfig` 改为接收订阅 UUID 和可选请求令牌，落盘前再次按 UUID 查找并校验，不再跨异步边界使用旧数组位置。
+5. 流量元数据、错误状态和配置写入均使用同一个请求令牌；本地文件和剪贴板导入继续走无网络令牌的 UUID 路径。
 
 **回归测试**
 
