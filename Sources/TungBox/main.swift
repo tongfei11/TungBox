@@ -2706,14 +2706,11 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     }
 
     func parseConfigObject(from text: String) -> [String: Any]? {
-        guard let data = text.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        return object
+        ConfigCodec.parseObject(from: text)
     }
 
     func renderConfig(_ config: [String: Any]) throws -> String {
-        let data = try JSONSerialization.data(withJSONObject: config, options: [.prettyPrinted, .sortedKeys])
-        return String(data: data, encoding: .utf8) ?? ""
+        try ConfigCodec.render(config)
     }
 
     
