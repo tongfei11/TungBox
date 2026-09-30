@@ -116,7 +116,7 @@ swift build                         # 开发构建
 
 ### Core 管理
 
-- 发布包内置 sing-box 1.14.0 Core，支持 Apple Silicon 与 Intel Mac
+- 发布包内置 sing-box 1.14.2 Core，支持 Apple Silicon 与 Intel Mac
 - 自动检测系统、内置和自定义 Core，并显示实际版本
 - 安装最新版 / 旧版测试
 - Core 下载前置 SHA256 校验，未列入可信摘要的版本不会安装

@@ -5,10 +5,10 @@ import XCTest
 final class CoreUpdateSecurityTests: XCTestCase {
     func testArchiveMustMatchEmbeddedTrustedDigestBeforeExtraction() throws {
         XCTAssertEqual(
-            CoreUpdater.trustedSHA256(version: "1.14.0", architecture: "arm64"),
-            "a150c94012ff768b7261939cd236b9c8554127f45137230295d23a5660225cc9"
+            CoreUpdater.trustedSHA256(version: "1.14.2", architecture: "arm64"),
+            "925c5382eca8492b0150f868a6db20b18290a38700e621724b3703fd453e032d"
         )
-        XCTAssertNil(CoreUpdater.trustedSHA256(version: "1.14.2", architecture: "arm64"))
+        XCTAssertNil(CoreUpdater.trustedSHA256(version: "1.14.0", architecture: "arm64"))
         XCTAssertNil(CoreUpdater.trustedSHA256(version: "1.12.22", architecture: "arm64"))
         XCTAssertNil(CoreUpdater.trustedSHA256(version: "1.14.1", architecture: "arm64"))
 
@@ -20,10 +20,10 @@ final class CoreUpdateSecurityTests: XCTestCase {
 
     func testTrustBindsVersionTagArchitectureAssetNameAndOfficialURL() throws {
         let trusted = CoreRelease(
-            version: "1.14.0",
-            tag: "v1.14.0",
-            assetName: "sing-box-1.14.0-darwin-arm64.tar.gz",
-            downloadURL: URL(string: "https://github.com/SagerNet/sing-box/releases/download/v1.14.0/sing-box-1.14.0-darwin-arm64.tar.gz")!
+            version: "1.14.2",
+            tag: "v1.14.2",
+            assetName: "sing-box-1.14.2-darwin-arm64.tar.gz",
+            downloadURL: URL(string: "https://github.com/SagerNet/sing-box/releases/download/v1.14.2/sing-box-1.14.2-darwin-arm64.tar.gz")!
         )
         XCTAssertNoThrow(try CoreUpdater.validateTrustedRelease(trusted, architecture: "arm64"))
 
@@ -76,7 +76,7 @@ final class CoreUpdateSecurityTests: XCTestCase {
     }
 
     func testArchivePathsCannotEscapeExtractionDirectory() throws {
-        XCTAssertNoThrow(try CoreUpdater.validateArchiveEntryPaths(["sing-box-1.14.0/", "sing-box-1.14.0/sing-box"]))
+        XCTAssertNoThrow(try CoreUpdater.validateArchiveEntryPaths(["sing-box-1.14.2/", "sing-box-1.14.2/sing-box"]))
         XCTAssertThrowsError(try CoreUpdater.validateArchiveEntryPaths(["../../Library/LaunchDaemons/payload"]))
         XCTAssertThrowsError(try CoreUpdater.validateArchiveEntryPaths(["/tmp/payload"]))
     }

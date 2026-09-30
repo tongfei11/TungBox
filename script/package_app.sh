@@ -15,7 +15,7 @@ MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 CORE_DIR="$RESOURCES_DIR/Core"
 TARGET_ARCH="${1:-${TARGET_ARCH:-$(uname -m)}}"
-CORE_VERSION="${TUNGBOX_CORE_VERSION:-1.14.0}"
+CORE_VERSION="${TUNGBOX_CORE_VERSION:-1.14.2}"
 
 case "$TARGET_ARCH" in
   arm64)
@@ -144,61 +144,35 @@ build_core() {
     return 0
   fi
 
-  local patched_core="$ROOT_DIR/.build/patched-core/sing-box"
-  if [[ -x "$patched_core" ]]; then
-    if binary_supports_arch "$patched_core" "$target_arch"; then
-      echo "Using local patched sing-box Core: $patched_core" >&2
-      printf '%s\n' "$patched_core"
-      return 0
-    fi
-    echo "Skipping local patched sing-box Core because it does not contain architecture: $target_arch" >&2
-  fi
-
-  if ! command -v go >/dev/null 2>&1; then
-    echo "Missing Go toolchain. Install Go or set TUNGBOX_CORE_PATH to a pre-built core." >&2
+  local asset="sing-box-${CORE_VERSION}-darwin-${go_arch}.tar.gz"
+  local archive="$WORK_DIR/$asset"
+  local digest_key="${CORE_VERSION}/darwin-${go_arch}"
+  local expected_digest
+  expected_digest="$(awk -F'"' -v key="$digest_key" '$2 == key { print $4; exit }' "$ROOT_DIR/Sources/TungBox/Services/CoreUpdater.swift")"
+  if [[ ! "$expected_digest" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "No embedded trusted digest for bundled Core: $digest_key" >&2
     return 1
   fi
-
-  local gopath
-  gopath="$(go env GOPATH)"
-  local host_goarch
-  host_goarch="$(go env GOARCH)"
-
-  # Pin the bundled core to the validated stable release. Override for local testing.
-  local core_version="$CORE_VERSION"
-  if [[ -n "$core_version" ]]; then
-    echo "sing-box ${core_version} identified, building..." >&2
-  else
-    echo "Missing TUNGBOX_CORE_VERSION." >&2
+  echo "Downloading official sing-box ${CORE_VERSION} for ${target_arch}..." >&2
+  curl --fail --location --retry 3 --connect-timeout 20 --max-time 600 \
+    --output "$archive" \
+    "https://github.com/SagerNet/sing-box/releases/download/v${CORE_VERSION}/${asset}" >&2
+  local actual_digest
+  actual_digest="$(shasum -a 256 "$archive" | awk '{print $1}')"
+  if [[ "$actual_digest" != "$expected_digest" ]]; then
+    echo "Bundled Core archive SHA-256 mismatch: $asset" >&2
     return 1
   fi
-
-  local tags="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale"
-  local ldflags="-X 'github.com/sagernet/sing-box/constant.Version=${core_version}' -s -w -buildid="
-  local output_dir="$ROOT_DIR/.build/core/${target_arch}"
-  local binary="$output_dir/sing-box"
-  local installed_binary="$gopath/bin/sing-box"
-  if [[ "$go_arch" != "$host_goarch" ]]; then
-    installed_binary="$gopath/bin/darwin_${go_arch}/sing-box"
+  local extract_dir="$WORK_DIR/core-${target_arch}"
+  mkdir -p "$extract_dir"
+  tar -xzf "$archive" -C "$extract_dir"
+  local binary="$extract_dir/sing-box-${CORE_VERSION}-darwin-${go_arch}/sing-box"
+  if [[ ! -x "$binary" ]] || ! binary_supports_arch "$binary" "$target_arch"; then
+    echo "Official Core does not contain expected architecture: $target_arch" >&2
+    return 1
   fi
-  mkdir -p "$output_dir"
+  printf '%s\n' "$binary"
 
-  echo "Building stripped sing-box core for ${target_arch} (tags: ${tags}, version: ${core_version})..." >&2
-  env CGO_ENABLED=0 GOOS=darwin GOARCH="$go_arch" go install \
-    -trimpath -ldflags="$ldflags" -tags "$tags" github.com/sagernet/sing-box/cmd/sing-box@v${core_version}
-
-  if [[ -x "$installed_binary" ]]; then
-    cp "$installed_binary" "$binary"
-    chmod +x "$binary"
-  fi
-
-  if [[ -x "$binary" ]] && binary_supports_arch "$binary" "$target_arch"; then
-    printf '%s\n' "$binary"
-    return 0
-  fi
-
-  echo "Core build failed unexpectedly." >&2
-  return 1
 }
 
 generate_app_icon() {
