@@ -12,3 +12,8 @@ dist/
 test_port
 script/test.sh
 Sources/TungBox/main.swift.bak
+
+# Internal planning and review documents are kept locally.
+.local-docs/
+*_PLAN.md
+SECURITY_REVIEW_AND_REMEDIATION.md
