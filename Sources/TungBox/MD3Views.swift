@@ -2021,17 +2021,32 @@ final class MD3SidebarItem: NSView, MD3Themeable {
         isPressed = false
     }
     
+    // 背景、图标、文字和角标仅负责绘制，整行 hover 区域统一由菜单项处理点击。
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard !isHidden, !isBlockedByMD3Dialog,
+              bounds.contains(convert(point, from: superview)) else { return nil }
+        return self
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        !isBlockedByMD3Dialog
+    }
+
+    override var mouseDownCanMoveWindow: Bool { false }
+
     override func mouseDown(with event: NSEvent) {
+        guard !isBlockedByMD3Dialog,
+              bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
         isPressed = true
     }
-    
+
     override func mouseUp(with event: NSEvent) {
-        if isPressed {
-            isPressed = false
-            if let target = target, let action = action {
-                NSApplication.shared.sendAction(action, to: target, from: self)
-            }
-        }
+        let wasPressed = isPressed
+        defer { isPressed = false }
+        guard wasPressed, !isBlockedByMD3Dialog,
+              bounds.contains(convert(event.locationInWindow, from: nil)),
+              let target, let action else { return }
+        NSApplication.shared.sendAction(action, to: target, from: self)
     }
     
     private func updateState() {
