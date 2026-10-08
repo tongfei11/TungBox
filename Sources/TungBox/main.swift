@@ -1780,346 +1780,49 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     }
 
     func tunUpstreamHosts(in text: String) -> [String] {
-        let config = parseConfigObject(from: text) ?? [:]
-        let outbounds = config["outbounds"] as? [[String: Any]] ?? []
-        var seen = Set<String>()
-        return Array(outbounds.compactMap { $0["server"] as? String }
-            .filter { !$0.isEmpty && routeExcludeCIDR(for: $0) == nil && seen.insert($0).inserted }.prefix(16))
+        TUNRuntimeConfigBuilder.upstreamHosts(in: text)
     }
 
     func preparedTunConfigText(from configText: String, networkSnapshot: (String?, [String: [String]])? = nil) throws -> String {
         guard var config = parseConfigObject(from: configText) else {
             throw NSError.user("当前配置不是有效 JSON")
         }
-
         config = ConfigCompatibilityChecker.autoFix(config: config).config
         config = RuleSetRuntime.localizeBuiltInRuleSets(
             in: config,
             ruleSetDirectory: store.ruleSetsURL
         ).config
 
-        // 确保配置中有 direct outbound（即使原始配置没有）
-        var outbounds = config["outbounds"] as? [[String: Any]] ?? []
-        let hadDirect = outbounds.contains(where: { ($0["tag"] as? String) == "direct" })
-        if !hadDirect {
-            outbounds.append(["type": "direct", "tag": "direct"])
-            config["outbounds"] = outbounds
-            appendLog("[TUN] 原始配置缺少 direct outbound，已添加\n")
+        let builder = TUNRuntimeConfigBuilder(
+            tunInbound: currentTunInbound(),
+            fallbackProxyTag: nodes.first?.tag ?? "direct",
+            cachePath: TunServiceManager.cachePath,
+            clashAPIPort: TungBoxConfig.tunDaemonClashPort,
+            clashAPISecret: TungBoxConfig.tunClashAPISecret
+        )
+        let prepared = builder.prepare(config)
+        prepared.diagnostics.forEach { appendLog($0) }
+
+        // 快照中的 nil 表示已探测但没有物理接口，不能再次探测。
+        let interface: String?
+        if let networkSnapshot {
+            interface = networkSnapshot.0
         } else {
-            appendLog("[TUN] 原始配置已有 direct outbound\n")
+            interface = TunServiceManager.defaultNetworkInterface()
         }
-
-        let modeValue = readMode(from: config)
-        config = setTunEnabled(true, in: config)
-        config = ensureModeSupport(in: config, mode: Mode(value: modeValue, displayName: modeDisplayName(modeValue)))
-        config = stripLocalListenersForTunDaemon(in: config)
-        config = applyTunAutomaticEgressRouting(in: config)
-        config = applyTunPhysicalEgressBinding(in: config, interfaceSnapshot: networkSnapshot.map { $0.0 })
-        config = applyTunRuntimeRouteExclusions(in: config, resolvedSnapshot: networkSnapshot?.1)
-        config = setTunCacheFile(enabled: true, in: config)
-        try validateTunRuntimeRouting(in: config)
-
-        // 最终检查
-        let finalOutbounds = config["outbounds"] as? [[String: Any]] ?? []
-        let finalHasDirect = finalOutbounds.contains(where: { ($0["tag"] as? String) == "direct" })
-        appendLog("[TUN] 最终配置 direct outbound 状态: \(finalHasDirect ? "存在" : "缺失")\n")
-
-        // 打印所有 outbound tags 用于调试
-        let tags = finalOutbounds.compactMap { $0["tag"] as? String }
-        appendLog("[TUN] 最终配置中的所有 outbound tags: \(tags.joined(separator: ", "))\n")
-
-        let finalConfigText = try renderConfig(config)
-
-        return finalConfigText
-    }
-
-    func validateTunRuntimeRouting(in config: [String: Any]) throws {
-        let inbounds = config["inbounds"] as? [[String: Any]] ?? []
-        let hasAutoRouteTun = inbounds.contains { inbound in
-            (inbound["type"] as? String)?.lowercased() == "tun"
-                && (inbound["auto_route"] as? Bool) == true
-        }
-        guard hasAutoRouteTun else { return }
-
-        let route = config["route"] as? [String: Any] ?? [:]
-        let autoDetect = route["auto_detect_interface"] as? Bool == true
-        let hasDefaultInterface = (route["default_interface"] as? String)?.isEmpty == false
-        let outbounds = config["outbounds"] as? [[String: Any]] ?? []
-        let hasBoundOutbound = outbounds.contains { outbound in
-            (outbound["bind_interface"] as? String)?.isEmpty == false
-                || (outbound["inet4_bind_address"] as? String)?.isEmpty == false
-                || (outbound["inet6_bind_address"] as? String)?.isEmpty == false
-        }
-
-        guard autoDetect || hasDefaultInterface || hasBoundOutbound else {
-            throw NSError.user("TUN 配置缺少出口防回环设置：auto_route=true 时必须启用 auto_detect_interface、default_interface 或 outbound 绑定。")
-        }
-    }
-
-    /// The TUN daemon and the user proxy are now fully independent processes. The
-    /// daemon must NOT bind the user proxy's ports (7890 mixed + 9090 clash) — that
-    /// shared-port design forced a fragile hand-off on every TUN toggle. Here we
-    /// strip ALL local proxy inbounds from the daemon config (it only needs the TUN
-    /// inbound + utun29) and move its clash_api to a dedicated port so it never
-    /// collides with the user runner's 9090.
-    func stripLocalListenersForTunDaemon(in config: [String: Any]) -> [String: Any] {
-        var config = config
-
-        var inbounds = config["inbounds"] as? [[String: Any]] ?? []
-        let localTypes: Set<String> = ["mixed", "http", "socks"]
-        let before = inbounds.count
-        inbounds = inbounds.filter { inbound in
-            guard let type = (inbound["type"] as? String)?.lowercased() else { return true }
-            return !localTypes.contains(type)
-        }
-        config["inbounds"] = inbounds
-        if inbounds.count < before {
-            appendLog("[TUN] 守护进程不绑定本地代理端口（7890 由用户代理独占）\n")
-        }
-
-        // Keep clash_api (the clash_mode route rules depend on it) but on a dedicated
-        // port so it never collides with the user runner's 9090.
-        var experimental = config["experimental"] as? [String: Any] ?? [:]
-        var clashAPI = experimental["clash_api"] as? [String: Any] ?? [:]
-        clashAPI["external_controller"] = "127.0.0.1:\(TungBoxConfig.tunDaemonClashPort)"
-        clashAPI["secret"] = TungBoxConfig.tunClashAPISecret
-        experimental["clash_api"] = clashAPI
-        config["experimental"] = experimental
-        return config
-    }
-
-    func applyTunAutomaticEgressRouting(in config: [String: Any]) -> [String: Any] {
-        var config = config
-        var changed = false
-
-        var route = config["route"] as? [String: Any] ?? [:]
-        if route.removeValue(forKey: "default_interface") != nil {
-            changed = true
-        }
-        if route["auto_detect_interface"] as? Bool != true {
-            route["auto_detect_interface"] = true
-            changed = true
-        }
-        if !route.isEmpty {
-            config["route"] = route
-        }
-
-        if var outbounds = config["outbounds"] as? [[String: Any]] {
-            var outboundsChanged = false
-            for index in outbounds.indices {
-                if outbounds[index].removeValue(forKey: "bind_interface") != nil {
-                    outboundsChanged = true
-                }
-                if outbounds[index].removeValue(forKey: "inet4_bind_address") != nil {
-                    outboundsChanged = true
-                }
-                if outbounds[index].removeValue(forKey: "inet6_bind_address") != nil {
-                    outboundsChanged = true
-                }
-            }
-            if outboundsChanged {
-                config["outbounds"] = outbounds
-                changed = true
-            }
-        }
-
-        if var dns = config["dns"] as? [String: Any],
-           var servers = dns["servers"] as? [[String: Any]] {
-            var dnsChanged = false
-            for index in servers.indices where servers[index]["detour"] as? String == "direct" {
-                servers[index].removeValue(forKey: "detour")
-                dnsChanged = true
-            }
-            if dnsChanged {
-                dns["servers"] = servers
-                config["dns"] = dns
-                changed = true
-            }
-        }
-
-        if changed {
-            appendLog("[TUN] 已启用 auto_detect_interface，并清理固定出口绑定和 DNS direct detour\n")
-        } else {
-            appendLog("[TUN] 运行时出口：auto_detect_interface 已启用\n")
-        }
-
-        return config
-    }
-
-    func applyTunPhysicalEgressBinding(in config: [String: Any], interfaceSnapshot: String?? = nil) -> [String: Any] {
-        var config = config
-        guard let interface = interfaceSnapshot ?? TunServiceManager.defaultNetworkInterface() else {
-            appendLog("[TUN] 未找到可用物理出口接口，保留 auto_detect_interface\n")
-            return config
-        }
-
-        var route = config["route"] as? [String: Any] ?? [:]
-        route["default_interface"] = interface
-        route.removeValue(forKey: "auto_detect_interface")
-        config["route"] = route
-
-        var outbounds = config["outbounds"] as? [[String: Any]] ?? []
-        var changedOutbounds = false
-        let virtualTypes: Set<String> = ["selector", "urltest", "url-test", "direct", "block", "dns"]
-        for index in outbounds.indices {
-            let type = (outbounds[index]["type"] as? String ?? "").lowercased()
-            guard !virtualTypes.contains(type) else { continue }
-            outbounds[index]["bind_interface"] = interface
-            changedOutbounds = true
-        }
-        if changedOutbounds {
-            config["outbounds"] = outbounds
-        }
-
-        appendLog("[TUN] 已绑定 direct/节点出站到物理接口 \(interface)，避免 direct 出口无路由\n")
-        return config
-    }
-
-    func applyTunRuntimeRouteExclusions(in config: [String: Any], resolvedSnapshot: [String: [String]]? = nil) -> [String: Any] {
-        var config = config
-        var bypassCIDRs: [String] = []
-        var seen = Set<String>()
-
-        func add(_ cidr: String) {
-            if seen.insert(cidr).inserted {
-                bypassCIDRs.append(cidr)
-            }
-        }
-
-        let alwaysBypass = [
-            "1.0.0.1",
-            "1.1.1.1",
-            "8.8.4.4",
-            "8.8.8.8",
-            "114.114.114.114",
-            "119.29.29.29",
-            "120.53.53.53",
-            "180.76.76.76",
-            "223.5.5.5",
-            "223.6.6.6"
-        ]
-        for ip in alwaysBypass {
-            if let cidr = routeExcludeCIDR(for: ip) {
-                add(cidr)
-            }
-        }
-
-        if let dns = config["dns"] as? [String: Any],
-           let servers = dns["servers"] as? [[String: Any]] {
-            for server in servers {
-                if let address = server["server"] as? String,
-                   let cidr = routeExcludeCIDR(for: address) {
-                    add(cidr)
-                }
-            }
-        }
-
-        let virtualTypes: Set<String> = ["selector", "urltest", "url-test", "direct", "block", "dns"]
-        let outbounds = config["outbounds"] as? [[String: Any]] ?? []
-        // Collect the proxy-server hostnames that still need DNS resolution. Literal
-        // IPs are excluded immediately; only real hostnames go to the resolver.
-        var hostsToResolve: [String] = []
-        var seenHosts = Set<String>()
-        for outbound in outbounds {
-            let type = (outbound["type"] as? String ?? "").lowercased()
-            guard !virtualTypes.contains(type),
-                  let server = outbound["server"] as? String,
-                  !server.isEmpty else {
-                continue
-            }
-            if let cidr = routeExcludeCIDR(for: server) {
-                add(cidr)
-                continue
-            }
-            if seenHosts.insert(server).inserted {
-                hostsToResolve.append(server)
-            }
-        }
-        // Resolve concurrently instead of serially: dscacheutil can block up to
-        // ~1.5s per host, so 16 hostnames serially stalled the TUN switch for many
-        // seconds on the main thread. Concurrency caps the wait at ~one lookup.
-        let cappedHosts = Array(hostsToResolve.prefix(16))
-        let resolvedByHost = resolvedSnapshot ?? resolvePublicIPv4Addresses(forHosts: cappedHosts)
-        for host in cappedHosts {
-            for ip in (resolvedByHost[host] ?? []).prefix(4) {
-                if let cidr = routeExcludeCIDR(for: ip) {
-                    add(cidr)
-                }
-            }
-        }
-
-        guard !bypassCIDRs.isEmpty else {
-            return config
-        }
-
-        var inbounds = config["inbounds"] as? [[String: Any]] ?? []
-        var updatedTun = false
-        for index in inbounds.indices {
-            guard (inbounds[index]["type"] as? String)?.lowercased() == "tun" else {
-                continue
-            }
-            var excludes = inbounds[index]["route_exclude_address"] as? [String] ?? []
-            var excludeSet = Set(excludes)
-            var added = 0
-            for cidr in bypassCIDRs where excludeSet.insert(cidr).inserted {
-                excludes.append(cidr)
-                added += 1
-            }
-            if added > 0 {
-                inbounds[index]["route_exclude_address"] = excludes
-                updatedTun = true
-            }
-        }
-        if updatedTun {
-            config["inbounds"] = inbounds
-            appendLog("[TUN] 已排除 DNS/节点上游地址 \(bypassCIDRs.count) 个，避免代理握手被 TUN 捕获\n")
-        }
-
-        // 不再硬覆盖 dns.strategy —— 由 DNSConfig 用户设置主导。仅在调试日志里记一笔，
-        // 方便排查"明明没 IPv6 路由怎么还在查 AAAA"的问题。
-        if let dns = config["dns"] as? [String: Any],
-           let strategy = dns["strategy"] as? String {
-            appendLog("[TUN] DNS 策略：\(strategy)\n")
-        }
-
-        return config
-    }
-
-    func routeExcludeCIDR(for address: String) -> String? {
-        let trimmed = address
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
-        guard isPublicIPv4Address(trimmed) else { return nil }
-        return "\(trimmed)/32"
+        let bound = builder.bindPhysicalInterface(interface, in: prepared.config)
+        bound.diagnostics.forEach { appendLog($0) }
+        let hosts = TUNRuntimeConfigBuilder.hostsNeedingResolution(in: bound.config)
+        let addresses = networkSnapshot?.1 ?? resolvePublicIPv4Addresses(forHosts: hosts)
+        let excluded = builder.applyRouteExclusions(addresses, in: bound.config)
+        excluded.diagnostics.forEach { appendLog($0) }
+        try TUNRuntimeConfigBuilder.validateTunRuntimeRouting(in: excluded.config)
+        TUNRuntimeConfigBuilder.finalDiagnostics(in: excluded.config).forEach { appendLog($0) }
+        return try renderConfig(excluded.config)
     }
 
     nonisolated func isPublicIPv4Address(_ value: String) -> Bool {
-        let parts = value.split(separator: ".", omittingEmptySubsequences: false)
-        guard parts.count == 4 else { return false }
-        let octets = parts.compactMap { Int($0) }
-        guard octets.count == 4, octets.allSatisfy({ (0...255).contains($0) }) else {
-            return false
-        }
-        let first = octets[0]
-        let second = octets[1]
-        switch first {
-        case 0, 10, 127:
-            return false
-        case 100 where (64...127).contains(second):
-            return false
-        case 169 where second == 254:
-            return false
-        case 172 where (16...31).contains(second):
-            return false
-        case 192 where second == 168:
-            return false
-        case 198 where second == 18 || second == 19:
-            return false
-        case 224...255:
-            return false
-        default:
-            return true
-        }
+        TUNRuntimeConfigBuilder.isPublicIPv4Address(value)
     }
 
     /// Resolve several hostnames concurrently. Returns host -> public IPv4 list.
@@ -2153,80 +1856,25 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         return addresses
     }
 
+    func currentTunInbound() -> [String: Any] {
+        let base: [String: Any] = [
+            "type": "tun",
+            "tag": "tun-in",
+            "address": ["\(TunServiceManager.tunIPv4Address)/30"],
+            "interface_name": TunServiceManager.tunInterfaceName,
+            "auto_route": true
+        ]
+        return TUNConfig.applyUserFields(to: base)
+    }
+
     func setTunEnabled(_ enabled: Bool, in config: [String: Any]) -> [String: Any] {
-        var config = config
-        var inbounds = config["inbounds"] as? [[String: Any]] ?? []
-        inbounds.removeAll { ($0["type"] as? String)?.lowercased() == "tun" }
-        if enabled {
-            var log = config["log"] as? [String: Any] ?? [:]
-            log["level"] = "warn"
-            config["log"] = log
-
-            let base: [String: Any] = [
-                "type": "tun",
-                "tag": "tun-in",
-                "address": [
-                    "\(TunServiceManager.tunIPv4Address)/30"
-                ],
-                "interface_name": TunServiceManager.tunInterfaceName,
-                "auto_route": true
-            ]
-            inbounds.insert(TUNConfig.applyUserFields(to: base), at: 0)
-
-            var outbounds = config["outbounds"] as? [[String: Any]] ?? []
-
-            // 确保 direct outbound 存在
-            if !outbounds.contains(where: { ($0["tag"] as? String) == "direct" }) {
-                outbounds.append(["type": "direct", "tag": "direct"])
-            }
-
-            let proxyTag = preferredProxyTag(from: outbounds)
-            var route = config["route"] as? [String: Any] ?? [:]
-            if proxyTag != "direct" {
-                if (route["final"] as? String).map({ $0 == "direct" }) ?? true {
-                    route["final"] = proxyTag
-                }
-            }
-            config["route"] = route
-            config["outbounds"] = outbounds
-        } else {
-            if var route = config["route"] as? [String: Any] {
-                route.removeValue(forKey: "default_interface")
-                route.removeValue(forKey: "auto_detect_interface")
-                if route.isEmpty {
-                    config.removeValue(forKey: "route")
-                } else {
-                    config["route"] = route
-                }
-            }
-        }
-        config["inbounds"] = inbounds
-        config = setTunCacheFile(enabled: enabled, in: config)
-        return config
+        TUNRuntimeConfigBuilder.setTunEnabled(
+            enabled, in: config,
+            tunInbound: enabled ? currentTunInbound() : [:],
+            fallbackProxyTag: nodes.first?.tag ?? "direct",
+            cachePath: TunServiceManager.cachePath
+        )
     }
-
-    func setTunCacheFile(enabled: Bool, in config: [String: Any]) -> [String: Any] {
-        var config = config
-        var experimental = config["experimental"] as? [String: Any] ?? [:]
-        var cacheFile = experimental["cache_file"] as? [String: Any] ?? [:]
-
-        if enabled {
-            cacheFile["enabled"] = true
-            cacheFile["path"] = TunServiceManager.cachePath
-            experimental["cache_file"] = cacheFile
-            config["experimental"] = experimental
-            return config
-        }
-
-        if cacheFile["path"] as? String == TunServiceManager.cachePath {
-            cacheFile.removeValue(forKey: "path")
-            experimental["cache_file"] = cacheFile
-            config["experimental"] = experimental
-        }
-        return config
-    }
-
-    
 
     func parseNodes(from text: String) -> [NodeInfo] {
         guard let data = text.data(using: .utf8),
@@ -2576,10 +2224,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             mode: mode.value,
             fallbackProxyTag: nodes.first?.tag ?? "direct"
         )
-    }
-
-    func preferredProxyTag(from outbounds: [[String: Any]]) -> String {
-        ProxyModeConfig.preferredProxyTag(from: outbounds, fallback: nodes.first?.tag ?? "direct")
     }
 
     func parseConfigObject(from text: String) -> [String: Any]? {
