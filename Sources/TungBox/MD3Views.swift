@@ -2582,6 +2582,17 @@ final class MD3Switch: NSControl, MD3Themeable {
 
 // MARK: - MD3 Node Tile View
 final class MD3NodeTileView: NSView, MD3Themeable {
+    /// Updates latency/spinner only; preserves the existing tile and layout tree.
+    static func refreshDelays(in root: NSView, delays: [String: String]) {
+        if let tile = root as? MD3NodeTileView {
+            if let delay = delays[tile.nodeTag], tile.delayValue != delay {
+                tile.delayValue = delay
+            }
+            return
+        }
+        for child in root.subviews { refreshDelays(in: child, delays: delays) }
+    }
+
     let nameLabel = NSTextField(labelWithString: "")
     let subLabel = NSTextField(labelWithString: "")
     let actionButton = NSButton()

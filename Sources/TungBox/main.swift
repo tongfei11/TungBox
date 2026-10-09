@@ -219,7 +219,15 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var statsTimer: Timer?
     var isUpdatingRunningStats = false
     var runningStatsMissCount = 0
-    var nodeDelayTestID = UUID()
+    var nodeDelayTestState = NodeDelayTestState()
+    var nodeDelayTestTask: Task<Void, Never>?
+    var nodeDelayTestID = UUID() {
+        didSet {
+            guard oldValue != nodeDelayTestID, let requestID = nodeDelayTestState.requestID else { return }
+            nodeDelayTestTask?.cancel()
+            finishNodeDelayTest(id: requestID, succeeded: false)
+        }
+    }
     var selectorSelectionID = UUID()
     var selectorSelectionTask: Task<Void, Never>?
     var tunCaptureIntentID = UUID()

@@ -398,6 +398,7 @@ extension MainWindowController {
             let testURL = enteredURL.isEmpty ? TungBoxConfig.urlTestURL : enteredURL
             let requestID = UUID()
             nodeDelayTestID = requestID
+            nodeDelayTestState.begin(id: requestID, total: tags.count)
             let transitionID = runtimeTransitionID
             let configText = editor.string
             let profileID = selectedIndex.map { profiles[$0].id }
@@ -421,12 +422,14 @@ extension MainWindowController {
                 if nodes[index].delay == "测试中" { nodes[index].delay = "未测试" }
                 if tags.contains(nodes[index].tag) { nodes[index].delay = "测试中" }
             }
-            nodeTestStatusLabel.stringValue = "节点 URLTest：测试中，\(tags.count) 个节点"
+            nodeTestStatusLabel.stringValue = nodeDelayTestState.statusText
             refreshNodeGroupsView()
-            Task { @MainActor [weak self] in
+            appendLog("[节点] 开始测速：\(tags.count) 个节点\n")
+            nodeDelayTestTask = Task { @MainActor [weak self] in
                 guard let self else { return }
+                defer { self.finishNodeDelayTest(id: requestID, succeeded: false) }
                 @MainActor func isCurrent() -> Bool {
-                    self.nodeDelayTestID == requestID && self.runtimeTransitionID == transitionID
+                    !Task.isCancelled && self.nodeDelayTestID == requestID && self.runtimeTransitionID == transitionID
                         && self.editor.string == configText && self.selectedIndex.map { self.profiles[$0].id } == profileID
                         && !self.isProxyServiceTransitioning
                         && self.runner.isRunning == userRunning && self.isTunRuntimeRunning() == tunRunning
@@ -446,11 +449,18 @@ extension MainWindowController {
                     for await (tag, result) in tasks {
                         guard isCurrent() else { tasks.cancelAll(); continue }
                         if let index = self.nodes.firstIndex(where: { $0.tag == tag }) { self.nodes[index].delay = result }
+                        self.nodeDelayTestState.receivedResult(id: requestID)
+                        self.nodeTestStatusLabel.stringValue = self.nodeDelayTestState.statusText
+                        self.nodeTable.reloadData()
+                        self.refreshNodeDelayTiles()
                     }
                 }
                 guard isCurrent() else { return }
                 var selectionRefreshFailed = false
                 if runtimeRunning {
+                    self.nodeDelayTestState.refreshSelection(id: requestID)
+                    self.nodeTestStatusLabel.stringValue = self.nodeDelayTestState.statusText
+                    self.appendLog("[节点] 节点结果已返回，开始刷新自动选择\n")
                     // Both independent cores must retest; no selector PUT or invented minimum selection.
                     let ports: [Int?] = userRunning && tunRunning ? [nil, TungBoxConfig.tunDaemonClashPort] : [apiPort]
                     for port in ports {
@@ -484,13 +494,30 @@ extension MainWindowController {
                     }
                 }
                 guard isCurrent() else { return }
-                self.nodeTable.reloadData()
-                self.refreshNodeGroupsView()
-                self.nodeTestStatusLabel.stringValue = "节点 URLTest：已完成，\(tags.count) 个节点"
+                self.finishNodeDelayTest(id: requestID, succeeded: true)
                 let summary = self.delayTestSummary(memberTags: tags)
                 self.showToast(selectionRefreshFailed ? "测速完成，但自动选择状态刷新失败" : "\(title) 测速完成（\(summary)）", style: selectionRefreshFailed || summary.contains("可用 0") ? .warning : .success)
             }
         } catch { showError(error) }
+    }
+
+    func finishNodeDelayTest(id: UUID, succeeded: Bool) {
+        guard nodeDelayTestState.finish(id: id, succeeded: succeeded) else { return }
+        nodeDelayTestTask = nil
+        NodeDelayTestState.clearPendingDelays(in: &nodes)
+        nodeTestStatusLabel.stringValue = nodeDelayTestState.statusText
+        nodeTable.reloadData()
+        refreshNodeGroupsView()
+        appendLog(succeeded ? "[节点] 测速已完成\n" : "[节点] 测速已取消，运行状态或配置已变化\n")
+    }
+
+    func refreshNodeDelayTiles() {
+        var delays = Dictionary(nodes.map { ($0.tag, $0.delay) }, uniquingKeysWith: { first, _ in first })
+        for group in nodeGroups where ["urltest", "url-test", "fallback"].contains(group.type.lowercased()) {
+            let resolved = resolveActiveOutboundForGroup(groupTag: group.tag, proxiesObj: isProxyRuntimeRunning() ? lastProxiesObj : nil).name
+            delays[group.tag] = delays[resolved.isEmpty ? group.current : resolved]
+        }
+        MD3NodeTileView.refreshDelays(in: nodeGroupsStack, delays: delays)
     }
 
     /// 以节点服务器 TCP 连接作为稳定的可用性与延迟基准；UDP-only 节点
