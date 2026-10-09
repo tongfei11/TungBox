@@ -25,6 +25,7 @@ enum TrayIconStyle: Int {
 
 final class MainWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate, NSWindowDelegate {
     let store = Store()
+    nonisolated let systemProxyManager = SystemProxyManager()
     lazy var runner = Runner(store: store)
     var profiles: [ConfigProfile] = []
     var subscriptions: [Subscription] = []
@@ -947,22 +948,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         }
     }
 
-    /// Apply the OS system-proxy setting for every active service, off the main
-    /// thread (networksetup spawns a subprocess per call). `nonisolated`.
+    /// Blocking system operation; runtime scheduling remains in the controller.
     nonisolated func applySystemProxyBlocking(enabled: Bool, port: Int) {
-        let services = getActiveNetworkServices()
-        for service in services {
-            if enabled {
-                _ = runCommand("/usr/sbin/networksetup", args: ["-setwebproxy", service, "127.0.0.1", "\(port)"])
-                _ = runCommand("/usr/sbin/networksetup", args: ["-setsecurewebproxy", service, "127.0.0.1", "\(port)"])
-                _ = runCommand("/usr/sbin/networksetup", args: ["-setsocksfirewallproxy", service, "127.0.0.1", "\(port)"])
-                _ = runCommand("/usr/sbin/networksetup", args: ["-setwebproxystate", service, "on"])
-                _ = runCommand("/usr/sbin/networksetup", args: ["-setsecurewebproxystate", service, "on"])
-                _ = runCommand("/usr/sbin/networksetup", args: ["-setsocksfirewallproxystate", service, "on"])
-            } else {
-                disableSystemProxyIfOwned(service: service, port: port)
-            }
-        }
+        systemProxyManager.apply(enabled: enabled, port: port)
     }
 
     func stopTunBeforeStartingNormalProxy(timeout: TimeInterval) throws {
@@ -1401,19 +1389,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         if enabled {
             wasProxyActiveInThisSession = true
         }
-        let services = getActiveNetworkServices()
-        for service in services {
-            if enabled {
-                _ = runCommand("/usr/sbin/networksetup", args: ["-setwebproxy", service, "127.0.0.1", "\(port)"])
-                _ = runCommand("/usr/sbin/networksetup", args: ["-setsecurewebproxy", service, "127.0.0.1", "\(port)"])
-                _ = runCommand("/usr/sbin/networksetup", args: ["-setsocksfirewallproxy", service, "127.0.0.1", "\(port)"])
-                _ = runCommand("/usr/sbin/networksetup", args: ["-setwebproxystate", service, "on"])
-                _ = runCommand("/usr/sbin/networksetup", args: ["-setsecurewebproxystate", service, "on"])
-                _ = runCommand("/usr/sbin/networksetup", args: ["-setsocksfirewallproxystate", service, "on"])
-            } else {
-                disableSystemProxyIfOwned(service: service, port: port)
-            }
-        }
+        systemProxyManager.apply(enabled: enabled, port: port)
     }
 
     func selectProfile(at index: Int, forceReload: Bool = false) {
@@ -2316,19 +2292,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         // Run networksetup commands in background
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
-            let services = self.getActiveNetworkServices()
-            for service in services {
-                if enabled {
-                    _ = self.runCommand("/usr/sbin/networksetup", args: ["-setwebproxy", service, "127.0.0.1", "\(port)"])
-                    _ = self.runCommand("/usr/sbin/networksetup", args: ["-setsecurewebproxy", service, "127.0.0.1", "\(port)"])
-                    _ = self.runCommand("/usr/sbin/networksetup", args: ["-setsocksfirewallproxy", service, "127.0.0.1", "\(port)"])
-                    _ = self.runCommand("/usr/sbin/networksetup", args: ["-setwebproxystate", service, "on"])
-                    _ = self.runCommand("/usr/sbin/networksetup", args: ["-setsecurewebproxystate", service, "on"])
-                    _ = self.runCommand("/usr/sbin/networksetup", args: ["-setsocksfirewallproxystate", service, "on"])
-                } else {
-                    self.disableSystemProxyIfOwned(service: service, port: port)
-                }
-            }
+            self.systemProxyManager.apply(enabled: enabled, port: port)
             Task { @MainActor [weak self] in
                 if enabled {
                     self?.appendLog("[TungBox] 已自动启用系统 HTTP/HTTPS 代理，端口为: \(port)\n")
@@ -2344,7 +2308,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                           operationID == self.systemProxyOperationID,
                           self.isSystemProxyEnabled,
                           !self.isTunEnabled else { return }
-                    let status = self.currentSystemProxyStatus(expectedPort: port)
+                    let status = self.systemProxyManager.currentStatus(expectedPort: port)
                     guard status.hasExternalProxy else { return }
                     self.appendLog("[警告] 检测到系统代理指向非 TungBox 地址（\(status.message)）。如代理不可用，请检查其他代理软件设置。\n")
                     if rollbackOnMismatch {
@@ -2355,119 +2319,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         }
     }
 
-    nonisolated func disableSystemProxyIfOwned(service: String, port: Int) {
-        let checks: [(getter: String, stateArg: String)] = [
-            ("-getwebproxy", "-setwebproxystate"),
-            ("-getsecurewebproxy", "-setsecurewebproxystate"),
-            ("-getsocksfirewallproxy", "-setsocksfirewallproxystate")
-        ]
-        let matches = LockedValue<[String: Bool]>([:])
-        let group = DispatchGroup()
-        for check in checks {
-            group.enter()
-            DispatchQueue.global(qos: .utility).async {
-                let isOwned = self.proxySettingMatches(service: service, getter: check.getter, port: port)
-                matches.mutate { $0[check.getter] = isOwned }
-                group.leave()
-            }
-        }
-        // A stuck networksetup query must not hold the runtime transition forever.
-        _ = group.wait(timeout: .now() + 4)
-
-        let ownedStates = checks.filter { matches.get()[ $0.getter ] == true }
-        DispatchQueue.concurrentPerform(iterations: ownedStates.count) { index in
-            let stateArg = ownedStates[index].stateArg
-            _ = self.runCommand("/usr/sbin/networksetup", args: [stateArg, service, "off"])
-        }
-    }
-
-    nonisolated func proxySettingMatches(service: String, getter: String, port: Int) -> Bool {
-        let output = runCommand("/usr/sbin/networksetup", args: [getter, service])
-        let lines = output.components(separatedBy: .newlines)
-        let enabled = lines.contains { $0.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare("Enabled: Yes") == .orderedSame }
-        let server = lines.first { $0.hasPrefix("Server:") }?
-            .replacingOccurrences(of: "Server:", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let currentPort = lines.first { $0.hasPrefix("Port:") }?
-            .replacingOccurrences(of: "Port:", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return enabled && isLocalProxyHost(server) && currentPort == "\(port)"
-    }
-
-    nonisolated func currentSystemProxyStatus(expectedPort port: Int) -> (matches: Bool, hasExternalProxy: Bool, message: String) {
-        guard let settings = CFNetworkCopySystemProxySettings()?.takeRetainedValue() as? [String: Any] else {
-            return (false, false, "无法读取系统代理")
-        }
-        let httpEnabled = settings[kCFNetworkProxiesHTTPEnable as String] as? Int ?? 0
-        let httpHost = settings[kCFNetworkProxiesHTTPProxy as String] as? String ?? "-"
-        let httpPort = settings[kCFNetworkProxiesHTTPPort as String] as? Int ?? 0
-        let httpsEnabled = settings[kCFNetworkProxiesHTTPSEnable as String] as? Int ?? 0
-        let httpsHost = settings[kCFNetworkProxiesHTTPSProxy as String] as? String ?? "-"
-        let httpsPort = settings[kCFNetworkProxiesHTTPSPort as String] as? Int ?? 0
-        let httpMatches = httpEnabled == 1 && isLocalProxyHost(httpHost) && httpPort == port
-        let httpsMatches = httpsEnabled == 1 && isLocalProxyHost(httpsHost) && httpsPort == port
-        if httpMatches && httpsMatches {
-            return (true, false, "HTTP/HTTPS 已指向 127.0.0.1:\(port)")
-        }
-        let httpExternal = httpEnabled == 1 && !(isLocalProxyHost(httpHost) && httpPort == port)
-        let httpsExternal = httpsEnabled == 1 && !(isLocalProxyHost(httpsHost) && httpsPort == port)
-        return (false, httpExternal || httpsExternal, "HTTP \(httpHost):\(httpPort) \(httpEnabled == 1 ? "开启" : "关闭")，HTTPS \(httpsHost):\(httpsPort) \(httpsEnabled == 1 ? "开启" : "关闭")，预期 127.0.0.1:\(port)")
-    }
-
-    nonisolated func isLocalProxyHost(_ host: String) -> Bool {
-        host == "127.0.0.1" || host == "localhost" || host == "::1"
-    }
-    
-    nonisolated func getActiveNetworkServices() -> [String] {
-        let output = runCommand("/usr/sbin/networksetup", args: ["-listallnetworkservices"])
-        let lines = output.components(separatedBy: .newlines)
-        var services: [String] = []
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty || trimmed.hasPrefix("An asterisk") || trimmed.hasPrefix("*") {
-                continue
-            }
-            // Skip VPN/Proxy interfaces
-            if trimmed.lowercased().contains("tailscale") || trimmed.lowercased().contains("surge") || trimmed.lowercased().contains("vpn") {
-                continue
-            }
-            services.append(trimmed)
-        }
-        if services.isEmpty {
-            services.append("Wi-Fi")
-        }
-        return services
-    }
-    
     nonisolated func runCommand(_ binary: String, args: [String], timeoutSeconds: TimeInterval = 3) -> String {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: binary)
-        proc.arguments = args
-        let pipe = Pipe()
-        proc.standardOutput = pipe
-        proc.standardError = pipe
-        do {
-            try proc.run()
-        } catch {
-            return error.localizedDescription
-        }
-
-        let semaphore = DispatchSemaphore(value: 0)
-        DispatchQueue.global(qos: .utility).async {
-            proc.waitUntilExit()
-            semaphore.signal()
-        }
-        if semaphore.wait(timeout: .now() + timeoutSeconds) == .timedOut {
-            if proc.isRunning {
-                proc.terminate()
-                Thread.sleep(forTimeInterval: 0.2)
-                if proc.isRunning {
-                    _ = Darwin.kill(proc.processIdentifier, SIGKILL)
-                }
-            }
-        }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        return String(data: data, encoding: .utf8) ?? ""
+        SystemCommand.run(binary, args: args, timeoutSeconds: timeoutSeconds)
     }
 
     func getMixedProxyPort() -> Int {
