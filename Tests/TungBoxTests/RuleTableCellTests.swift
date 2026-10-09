@@ -10,9 +10,23 @@ final class RuleTableCellTests: XCTestCase {
               ruleSetID: isSet ? UUID() : nil, referenceError: error, strategyReferenceError: strategyError)
     }
 
+    func testMenuOffersEnableForInvalidReferencesRegardlessOfSavedPreference() {
+        for isSet in [false, true] {
+            for enabled in [false, true] {
+                let invalid = rule(isSet: isSet, enabled: enabled, error: "出站不存在：旧节点")
+                XCTAssertFalse(invalid.isEffectivelyEnabled)
+                XCTAssertEqual(invalid.enableActionTitle, "启用")
+                XCTAssertEqual(invalid.enabled, enabled)
+                let valid = rule(isSet: isSet, enabled: enabled)
+                XCTAssertEqual(valid.isEffectivelyEnabled, enabled)
+                XCTAssertEqual(valid.enableActionTitle, enabled ? "停用" : "启用")
+            }
+        }
+    }
+
     @MainActor
     func testMissingNodeShowsOrangeWarningAndStrategyForBothRuleKinds() throws {
-        let error = "出站不存在：旧节点，请重新选择"
+        let error = "出站不存在：旧节点"
         let previousTheme = MD3.isDark
         defer { MD3.isDark = previousTheme }
         for appearanceName in [NSAppearance.Name.aqua, .darkAqua] {

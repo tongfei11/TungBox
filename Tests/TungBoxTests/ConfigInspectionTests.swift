@@ -223,6 +223,50 @@ final class ConfigInspectionTests: XCTestCase {
         }
     }
 
+    func testMissingOutboundMessageDoesNotIncludeSelectionInstruction() {
+        XCTAssertEqual(RuleRouting.outboundReferenceError(strategy: "旧节点", config: [:]), "出站不存在：旧节点")
+    }
+
+    func testEnableValidationRejectsRenamedNodeWithoutChangingSavedFlags() {
+        for enabled in [true, false] {
+            let custom = customRule(strategy: "旧节点", enabled: enabled)
+            let set = ruleSet("测试", outbound: "旧节点", enabled: enabled)
+            let config: [String: Any] = ["outbounds": [["tag": "新节点"]]]
+            XCTAssertEqual(RuleRouting.enableError(for: custom, config: config), "出站不存在：旧节点")
+            XCTAssertEqual(RuleRouting.enableError(for: set, config: config), "出站不存在：旧节点")
+            XCTAssertEqual(custom.enabled, enabled)
+            XCTAssertEqual(set.enabled, enabled)
+            let restored: [String: Any] = ["outbounds": [["tag": "旧节点"]]]
+            XCTAssertNil(RuleRouting.enableError(for: custom, config: restored))
+            XCTAssertNil(RuleRouting.enableError(for: set, config: restored))
+        }
+    }
+
+    func testEnableValidationRejectsMissingRuleSetWithValidOutbound() {
+        let custom = customRule("RULE-SET", value: "removed", strategy: "有效节点")
+        let set = ruleSet("测试", outbound: "有效节点", rules: [.init(type: "RULE-SET", value: "removed")])
+        let config: [String: Any] = ["outbounds": [["tag": "有效节点"]]]
+        XCTAssertEqual(RuleRouting.enableError(for: custom, config: config), "规则集引用不存在：removed")
+        XCTAssertEqual(RuleRouting.enableError(for: set, config: config), "规则集引用不存在：removed")
+        var restored = config
+        restored["route"] = ["rule_set": [["tag": "removed"]]]
+        XCTAssertNil(RuleRouting.enableError(for: custom, config: restored))
+        XCTAssertNil(RuleRouting.enableError(for: set, config: restored))
+    }
+
+    func testEnableValidationRejectsUnreadableConfiguration() {
+        XCTAssertEqual(RuleRouting.enableError(for: customRule(strategy: "DIRECT"), config: nil), "当前配置不是有效 JSON")
+        XCTAssertEqual(RuleRouting.enableError(for: ruleSet("测试"), config: nil), "当前配置不是有效 JSON")
+    }
+
+    func testEnableValidationAcceptsSupportedStrategies() {
+        let config: [String: Any] = ["outbounds": [["tag": TungBoxConfig.tagManual], ["tag": TungBoxConfig.tagAuto], ["tag": "有效节点"]]]
+        for strategy in ["DIRECT", "REJECT", "Proxy", "AUTO", "有效节点"] {
+            XCTAssertNil(RuleRouting.enableError(for: customRule(strategy: strategy), config: config))
+            XCTAssertNil(RuleRouting.enableError(for: ruleSet("测试", outbound: strategy, rules: [.init(type: "DOMAIN", value: "demo.invalid")]), config: config))
+        }
+    }
+
     func testRuleSetStatusesPreservePerOccurrenceErrorsAndInvalidFileIdentity() throws {
         let sharedID = UUID()
         var good = ruleSet("正常")

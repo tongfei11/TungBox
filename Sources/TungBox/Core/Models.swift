@@ -61,6 +61,13 @@ struct RuleInfo {
     /// Validation is separate from the user's persisted enable preference.
     var referenceError: String? = nil
     var strategyReferenceError: String? = nil
+
+    /// Menu actions follow actual availability, rather than the saved preference alone.
+    var isEffectivelyEnabled: Bool {
+        enabled && referenceError == nil && ruleSetInvalidURL == nil
+    }
+
+    var enableActionTitle: String { isEffectivelyEnabled ? "停用" : "启用" }
 }
 
 struct CustomRule: Codable, Equatable {

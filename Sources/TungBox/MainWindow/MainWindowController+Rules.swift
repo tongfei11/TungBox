@@ -168,12 +168,12 @@ extension MainWindowController {
 
         if selected.customRuleID != nil {
             add("编辑自定义规则", #selector(editCustomRuleClicked))
-            add(selected.enabled ? "停用自定义规则" : "启用自定义规则", #selector(toggleSelectedCustomRuleEnabled))
+            add("\(selected.enableActionTitle)自定义规则", #selector(toggleSelectedCustomRuleEnabled))
             menu.addItem(.separator())
             add("删除自定义规则", #selector(deleteCustomRuleClicked))
-        } else if let setID = selected.ruleSetID, let set = customRuleSets.first(where: { $0.id == setID }) {
+        } else if let setID = selected.ruleSetID, customRuleSets.contains(where: { $0.id == setID }) {
             add("编辑规则集", #selector(editRuleSetClicked))
-            add(set.enabled ? "停用规则集" : "启用规则集", #selector(toggleRuleSetEnabledClicked))
+            add("\(selected.enableActionTitle)规则集", #selector(toggleRuleSetEnabledClicked))
             menu.addItem(.separator())
             add("删除规则集", #selector(deleteRuleSetClicked))
         } else if selected.ruleSetInvalidURL != nil {
@@ -203,7 +203,9 @@ extension MainWindowController {
     }
 
     @objc func toggleRuleSetEnabledClicked() {
-        if let set = selectedRuleSet() { setRuleSetEnabled(set, to: !set.enabled) }
+        let rows = filteredRuleRows()
+        guard rows.indices.contains(rulesTable.selectedRow), let set = selectedRuleSet() else { return }
+        setRuleSetEnabled(set, to: !rows[rulesTable.selectedRow].isEffectivelyEnabled)
     }
 
     @objc func deleteRuleSetClicked() {
@@ -728,7 +730,7 @@ extension MainWindowController {
         guard rows.indices.contains(rulesTable.selectedRow),
               let ruleID = rows[rulesTable.selectedRow].customRuleID,
               let index = customRules.firstIndex(where: { $0.id == ruleID }) else { return }
-        setCustomRuleEnabled(at: index, to: !customRules[index].enabled)
+        setCustomRuleEnabled(at: index, to: !rows[rulesTable.selectedRow].isEffectivelyEnabled)
     }
 
     /// Covers blank space around a checkbox; warning marks stay read-only.
@@ -748,6 +750,12 @@ extension MainWindowController {
 
     func setCustomRuleEnabled(at idx: Int, to enabled: Bool) {
         guard customRules.indices.contains(idx) else { return }
+        if enabled, let error = RuleRouting.enableError(for: customRules[idx], config: parseConfigObject(from: editor.string)) {
+            showError(NSError.user("启用失败：\(error)"))
+            refreshRulesFromEditor()
+            return
+        }
+        let previousEnabled = customRules[idx].enabled
         let previousConfig = editor.string
         customRules[idx].enabled = enabled
         store.saveCustomRules(customRules)
@@ -764,7 +772,7 @@ extension MainWindowController {
                 try applyRuleSetRuntime(editor.string, previous: Data(previousConfig.utf8), configURL: url)
             } catch {
                 // Rollback
-                customRules[idx].enabled.toggle()
+                customRules[idx].enabled = previousEnabled
                 store.saveCustomRules(customRules)
                 editor.string = previousConfig
                 _ = try? saveCurrent()

@@ -41,8 +41,7 @@ extension MainWindowController {
     // MARK: - Config regeneration
 
     func ruleSetReferenceError(_ set: CustomRuleSet, config: [String: Any]) -> String? {
-        if let error = RuleRouting.outboundReferenceError(strategy: set.outbound, config: config) { return error }
-        return set.rules.compactMap { RuleRouting.referenceError(type: $0.type, value: $0.value, strategy: set.outbound, config: config) }.first
+        RuleRouting.referenceError(for: set, config: config)
     }
 
     func checkRuleSetConfig(_ text: String) throws {
@@ -267,12 +266,14 @@ extension MainWindowController {
     }
 
     func setRuleSetEnabled(_ set: CustomRuleSet, to enabled: Bool) {
+        if enabled, let error = RuleRouting.enableError(for: set, config: parseConfigObject(from: editor.string)) {
+            showError(NSError.user("启用失败：\(error)"))
+            refreshRulesFromEditor()
+            return
+        }
         var updated = set
         updated.enabled = enabled
         do {
-            if enabled, let config = parseConfigObject(from: editor.string), let error = ruleSetReferenceError(updated, config: config) {
-                throw NSError.user(error)
-            }
             try changeRuleSetFile(at: store.ruleSetFileURL(for: set)) { try store.saveRuleSet(updated) }
         } catch { showError(error) }
     }

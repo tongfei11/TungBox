@@ -100,7 +100,7 @@ enum RuleRouting {
         if !["DIRECT", "REJECT"].contains(strategy) {
             let tag = outboundForStrategy(strategy)
             let tags = (config["outbounds"] as? [[String: Any]] ?? []).compactMap { $0["tag"] as? String }
-            if !tags.contains(tag) { return "出站不存在：\(strategy)，请重新选择" }
+            if !tags.contains(tag) { return "出站不存在：\(strategy)" }
         }
         return nil
     }
@@ -114,6 +114,24 @@ enum RuleRouting {
             if !tags.contains(tag) { return "规则集引用不存在：\(tag)" }
         }
         return nil
+    }
+
+    static func referenceError(for set: CustomRuleSet, config: [String: Any]) -> String? {
+        if let error = outboundReferenceError(strategy: set.outbound, config: config) { return error }
+        return set.rules.compactMap {
+            referenceError(type: $0.type, value: $0.value, strategy: set.outbound, config: config)
+        }.first
+    }
+
+    // These checks run before any enable-state, file, configuration or runtime mutation.
+    static func enableError(for rule: CustomRule, config: [String: Any]?) -> String? {
+        guard let config else { return "当前配置不是有效 JSON" }
+        return referenceError(type: rule.type, value: rule.value, strategy: rule.strategy, config: config)
+    }
+
+    static func enableError(for set: CustomRuleSet, config: [String: Any]?) -> String? {
+        guard let config else { return "当前配置不是有效 JSON" }
+        return referenceError(for: set, config: config)
     }
 
     static func rebuild(base: [[String: Any]], generated: [[String: Any]]) -> [[String: Any]] {
