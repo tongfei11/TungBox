@@ -850,10 +850,6 @@ extension MainWindowController {
         return config
     }
 
-    private func customRuleMatches(_ customRule: CustomRule, _ routeRule: [String: Any]) -> Bool {
-        let expected = customRouteRule(type: customRule.type, value: customRule.value, strategy: customRule.strategy)
-        return NSDictionary(dictionary: expected).isEqual(to: routeRule)
-    }
 
     func removeCustomRule(_ customRule: CustomRule, from text: String) throws -> String {
         // Rebuild uses the independent base; content equality cannot identify ownership.
@@ -862,286 +858,24 @@ extension MainWindowController {
 
     func buildRuleRows(from text: String) -> [RuleInfo] {
         guard let config = parseConfigObject(from: text) else {
-            return [sectionRule("当前配置不是可读取的 JSON")]
+            return ConfigInspection.ruleRows(in: nil)
         }
-
-        var rows: [RuleInfo] = []
-        var nextID = 1
-
-        func append(_ type: String, _ value: String, _ strategy: String, _ note: String = "", enabled: Bool = true, count: String = "0") {
-            rows.append(RuleInfo(
-                customRuleID: nil,
-                enabled: enabled,
-                id: "\(nextID)",
-                type: type,
-                value: value,
-                strategy: strategy,
-                count: count,
-                note: note,
-                isSection: false
-            ))
-            nextID += 1
-        }
-
-        func appendCustom(_ rule: CustomRule) {
-            rows.append(RuleInfo(
-                customRuleID: rule.id,
-                enabled: rule.enabled,
-                id: "\(nextID)",
-                type: rule.type,
-                value: rule.value,
-                strategy: displayStrategy(outboundForStrategy(rule.strategy)),
-                count: "0",
-                note: rule.note.isEmpty ? "自定义规则" : rule.note,
-                isSection: false
-            ))
-            nextID += 1
-        }
-
-        let currentCustomRules = customRulesForCurrentSubscription()
-        rows.append(sectionRule("自定义规则"))
-        if currentCustomRules.isEmpty {
-            append("CUSTOM", "当前订阅还没有自定义规则", "未设置", "通过上方输入框添加", enabled: false)
-        } else {
-            for rule in currentCustomRules {
-                appendCustom(rule)
-            }
-        }
-
-        // 规则集（分流方案）
         let sets = ruleSetsForCurrentSubscription()
-        if !sets.isEmpty || !invalidRuleSets.isEmpty {
-            rows.append(sectionRule("规则集"))
-            for set in sets {
-                rows.append(RuleInfo(
-                    customRuleID: nil,
-                    enabled: set.enabled && ruleSetReferenceError(set, config: config) == nil,
-                    id: "\(nextID)",
-                    type: "规则集",
-                    value: set.name,
-                    strategy: displayStrategy(outboundForStrategy(set.outbound)),
-                    count: "\(set.rules.count) 条",
-                    note: ruleSetReferenceError(set, config: config) ?? (set.enabled ? ruleSetApplyStatus : "已停用"),
-                    isSection: false,
-                    ruleSetID: set.id
-                ))
-                nextID += 1
-            }
-            for invalid in invalidRuleSets {
-                rows.append(RuleInfo(
-                    customRuleID: nil,
-                    enabled: false,
-                    id: "\(nextID)",
-                    type: "规则集",
-                    value: invalid.name,
-                    strategy: "—",
-                    count: "!",
-                    note: "⚠️ \(invalid.reason)",
-                    isSection: false,
-                    ruleSetInvalidURL: invalid.fileURL
-                ))
-                nextID += 1
+        var entriesByTag: [String: [RuleSetEntry]] = [:]
+        for tag in ConfigInspection.referencedRuleSetTags(in: config) {
+            if let data = try? Data(contentsOf: ruleSetJSONURL(for: tag)) {
+                entriesByTag[tag] = ConfigInspection.ruleSetEntries(from: data)
             }
         }
-
-        // Route rules injected by enabled rule sets — hidden from "当前配置规则" so they
-        // don't duplicate the rule-set section above.
-        let ruleSetGenerated: [[String: Any]] = sets.filter { $0.enabled }.flatMap { set in
-            set.rules.map { customRouteRule(type: $0.type, value: $0.value, strategy: set.outbound) }
-        }
-
-        let route = config["route"] as? [String: Any] ?? [:]
-        let rules = route["rules"] as? [[String: Any]] ?? []
-        rows.append(sectionRule("当前配置规则"))
-        for rule in rules {
-            if currentCustomRules.contains(where: { customRuleMatches($0, rule) }) {
-                continue
-            }
-            if ruleSetGenerated.contains(where: { NSDictionary(dictionary: $0).isEqual(to: rule) }) {
-                continue
-            }
-            if let action = rule["action"] as? String {
-                let protocolValue = (rule["protocol"] as? String) ?? "ALL"
-                append("ACTION", protocolValue, action.uppercased(), "sing-box action")
-                continue
-            }
-            let strategy = displayStrategy((rule["outbound"] as? String) ?? (rule["server"] as? String) ?? "")
-            if let clashMode = rule["clash_mode"] as? String {
-                append("MODE", modeDisplayName(clashMode), strategy, "模式规则")
-            }
-            if let ruleSet = rule["rule_set"] {
-                appendExpandedRuleSetRows(ruleSet, strategy: strategy, rows: &rows, nextID: &nextID)
-            }
-            if let cidr = rule["ip_cidr"] {
-                append("IP-CIDR", compactDescription(cidr), strategy, "IP 段")
-            }
-            if let priv = rule["ip_is_private"] as? Bool, priv {
-                append("LAN", "内网 / 私有地址", strategy, "内网")
-            }
-            if let domains = rule["domain"] {
-                appendEachRuleValue(type: "DOMAIN", values: domains, strategy: strategy, note: "显式域名", append: append)
-            }
-            if let suffixes = rule["domain_suffix"] {
-                appendEachRuleValue(type: "DOMAIN-SUFFIX", values: suffixes, strategy: strategy, note: "域名后缀", append: append)
-            }
-            if let keywords = rule["domain_keyword"] {
-                appendEachRuleValue(type: "DOMAIN-KEYWORD", values: keywords, strategy: strategy, note: "域名关键字", append: append)
-            }
-            if let regexes = rule["domain_regex"] {
-                appendEachRuleValue(type: "DOMAIN-REGEX", values: regexes, strategy: strategy, note: "域名正则", append: append)
-            }
-            if let sourceCIDR = rule["source_ip_cidr"] {
-                appendEachRuleValue(type: "SRC-IP", values: sourceCIDR, strategy: strategy, note: "源 IP", append: append)
-            }
-            if let processName = rule["process_name"] {
-                appendEachRuleValue(type: "PROCESS-NAME", values: processName, strategy: strategy, note: "进程", append: append)
-            }
-            if let processPath = rule["process_path"] {
-                appendEachRuleValue(type: "PROCESS-PATH", values: processPath, strategy: strategy, note: "进程路径", append: append)
-            }
-            if let port = rule["port"] {
-                appendEachRuleValue(type: "DEST-PORT", values: port, strategy: strategy, note: "端口", append: append)
-            }
-            if let network = rule["network"] {
-                appendEachRuleValue(type: "NETWORK", values: network, strategy: strategy, note: "网络类型", append: append)
-            }
-        }
-
-        if let final = route["final"] as? String {
-            append("FINAL", "未命中以上规则", displayStrategy(final), "默认策略")
-        }
-
-        let dns = config["dns"] as? [String: Any] ?? [:]
-        let dnsRules = dns["rules"] as? [[String: Any]] ?? []
-        if !dnsRules.isEmpty {
-            rows.append(sectionRule("DNS 规则"))
-            for rule in dnsRules {
-                let server = (rule["server"] as? String) ?? "未设置"
-                if let clashMode = rule["clash_mode"] as? String {
-                    append("DNS-MODE", modeDisplayName(clashMode), server, "DNS 模式规则")
-                }
-                if let ruleSet = rule["rule_set"] {
-                    appendExpandedRuleSetRows(ruleSet, strategy: server, rows: &rows, nextID: &nextID, notePrefix: "DNS")
-                }
-            }
-            if let final = dns["final"] as? String {
-                append("DNS-FINAL", "未命中以上 DNS 规则", final, "默认 DNS")
-            }
-        }
-
-        return rows
-    }
-
-    private func sectionRule(_ title: String) -> RuleInfo {
-        RuleInfo(customRuleID: nil, enabled: false, id: "", type: "", value: "# \(title)", strategy: "", count: "", note: "", isSection: true)
-    }
-
-    private func appendExpandedRuleSetRows(
-        _ ruleSetValue: Any,
-        strategy: String,
-        rows: inout [RuleInfo],
-        nextID: inout Int,
-        notePrefix: String = "规则集"
-    ) {
-        let tags: [String]
-        if let values = ruleSetValue as? [String] {
-            tags = values
-        } else if let value = ruleSetValue as? String {
-            tags = [value]
-        } else {
-            tags = []
-        }
-
-        for tag in tags {
-            let entries = decompiledRuleSetEntries(tag: tag, strategy: strategy, notePrefix: notePrefix)
-            if entries.isEmpty {
-                rows.append(RuleInfo(
-                    customRuleID: nil,
-                    enabled: true,
-                    id: "\(nextID)",
-                    type: "RULE-SET",
-                    value: tag,
-                    strategy: strategy,
-                    count: "0",
-                    note: ruleSetDownloads.contains(tag) ? "下载中" : "等待下载",
-                    isSection: false
-                ))
-                nextID += 1
-            } else {
-                rows.append(sectionRule("\(notePrefix)内容：\(tag)"))
-                for entry in entries {
-                    rows.append(RuleInfo(
-                        customRuleID: nil,
-                        enabled: true,
-                        id: "\(nextID)",
-                        type: entry.type,
-                        value: entry.value,
-                        strategy: strategy,
-                        count: "0",
-                        note: tag,
-                        isSection: false
-                    ))
-                    nextID += 1
-                }
-            }
-        }
-    }
-
-    private func decompiledRuleSetEntries(tag: String, strategy: String, notePrefix: String) -> [(type: String, value: String)] {
-        let url = ruleSetJSONURL(for: tag)
-        guard let data = try? Data(contentsOf: url),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let rules = object["rules"] as? [[String: Any]] else { return [] }
-
-        var entries: [(type: String, value: String)] = []
-        for rule in rules {
-            appendRuleSetValues(type: "DOMAIN", key: "domain", from: rule, to: &entries)
-            appendRuleSetValues(type: "DOMAIN-SUFFIX", key: "domain_suffix", from: rule, to: &entries)
-            appendRuleSetValues(type: "DOMAIN-KEYWORD", key: "domain_keyword", from: rule, to: &entries)
-            appendRuleSetValues(type: "DOMAIN-REGEX", key: "domain_regex", from: rule, to: &entries)
-            appendRuleSetValues(type: "IP-CIDR", key: "ip_cidr", from: rule, to: &entries)
-            appendRuleSetValues(type: "SRC-IP", key: "source_ip_cidr", from: rule, to: &entries)
-            appendRuleSetValues(type: "PROCESS-NAME", key: "process_name", from: rule, to: &entries)
-        }
-        return entries
-    }
-
-    private func appendRuleSetValues(type: String, key: String, from rule: [String: Any], to entries: inout [(type: String, value: String)]) {
-        if let values = rule[key] as? [String] {
-            for value in values {
-                entries.append((type, value))
-            }
-        } else if let value = rule[key] as? String {
-            entries.append((type, value))
-        }
-    }
-
-    private func displayStrategy(_ strategy: String) -> String {
-        switch strategy {
-        case TungBoxConfig.tagDirect: return "DIRECT"
-        case TungBoxConfig.tagBlock: return "REJECT"
-        case TungBoxConfig.tagManual: return "Proxy"
-        case TungBoxConfig.tagAuto: return "AUTO"
-        default: return strategy.isEmpty ? "未设置" : strategy
-        }
-    }
-
-    private func appendEachRuleValue(
-        type: String,
-        values: Any,
-        strategy: String,
-        note: String,
-        append: (String, String, String, String, Bool, String) -> Void
-    ) {
-        if let list = values as? [String] {
-            for value in list {
-                append(type, value, strategy, note, true, "0")
-            }
-        } else if let value = values as? String {
-            append(type, value, strategy, note, true, "0")
-        } else {
-            append(type, compactDescription(values), strategy, note, true, "0")
-        }
+        let context = ConfigInspection.RuleContext(
+            customRules: customRulesForCurrentSubscription(),
+            ruleSets: sets.map { .init(ruleSet: $0, referenceError: ruleSetReferenceError($0, config: config)) },
+            invalidRuleSets: invalidRuleSets,
+            ruleSetApplyStatus: ruleSetApplyStatus,
+            cachedRuleSetEntries: entriesByTag,
+            downloadingRuleSets: ruleSetDownloads
+        )
+        return ConfigInspection.ruleRows(in: config, context: context)
     }
 
     func customRouteRule(type: String, value: String, strategy: String) -> [String: Any] {
