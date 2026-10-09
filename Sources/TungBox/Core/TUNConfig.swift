@@ -10,7 +10,7 @@ import Foundation
 /// - DNS 劫持 —— 已在路由规则里硬编码 `protocol: dns, action: hijack-dns`
 enum TUNConfig {
 
-    enum Stack: String, CaseIterable {
+    enum Stack: String, CaseIterable, Sendable {
         case system
         case gvisor
         case mixed
@@ -57,13 +57,7 @@ enum TUNConfig {
     // MARK: - 存取
 
     static var stack: Stack {
-        get {
-            if let raw = UserDefaults.standard.string(forKey: kStack),
-               let v = Stack(rawValue: raw) {
-                return v
-            }
-            return defaultStack
-        }
+        get { readStack(from: .standard) }
         set {
             if newValue == defaultStack {
                 UserDefaults.standard.removeObject(forKey: kStack)
@@ -74,10 +68,7 @@ enum TUNConfig {
     }
 
     static var mtu: Int {
-        get {
-            let v = UserDefaults.standard.integer(forKey: kMTU)
-            return v > 0 ? v : defaultMTU
-        }
+        get { readMTU(from: .standard) }
         set {
             if newValue == defaultMTU || newValue <= 0 {
                 UserDefaults.standard.removeObject(forKey: kMTU)
@@ -88,12 +79,7 @@ enum TUNConfig {
     }
 
     static var strictRoute: Bool {
-        get {
-            if let v = UserDefaults.standard.object(forKey: kStrictRoute) as? Bool {
-                return v
-            }
-            return defaultStrictRoute
-        }
+        get { readStrictRoute(from: .standard) }
         set {
             if newValue == defaultStrictRoute {
                 UserDefaults.standard.removeObject(forKey: kStrictRoute)
@@ -104,12 +90,7 @@ enum TUNConfig {
     }
 
     static var endpointIndependentNAT: Bool {
-        get {
-            if let v = UserDefaults.standard.object(forKey: kEIN) as? Bool {
-                return v
-            }
-            return defaultEndpointIndependentNAT
-        }
+        get { readEndpointIndependentNAT(from: .standard) }
         set {
             if newValue == defaultEndpointIndependentNAT {
                 UserDefaults.standard.removeObject(forKey: kEIN)
@@ -120,12 +101,7 @@ enum TUNConfig {
     }
 
     static var routeExclude: [String] {
-        get {
-            if let arr = UserDefaults.standard.array(forKey: kRouteExclude) as? [String] {
-                return arr
-            }
-            return defaultRouteExclude
-        }
+        get { readRouteExclude(from: .standard) }
         set {
             let cleaned = newValue
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -139,7 +115,7 @@ enum TUNConfig {
     }
 
     static var includeInterface: [String] {
-        get { UserDefaults.standard.array(forKey: kIncludeIface) as? [String] ?? defaultIncludeInterface }
+        get { readIncludeInterface(from: .standard) }
         set {
             let cleaned = newValue
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -153,7 +129,7 @@ enum TUNConfig {
     }
 
     static var excludeInterface: [String] {
-        get { UserDefaults.standard.array(forKey: kExcludeIface) as? [String] ?? defaultExcludeInterface }
+        get { readExcludeInterface(from: .standard) }
         set {
             let cleaned = newValue
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -171,19 +147,80 @@ enum TUNConfig {
             .forEach { UserDefaults.standard.removeObject(forKey: $0) }
     }
 
-    /// 把用户设置注入一个 sing-box TUN inbound dict（已包含 type / tag / address /
-    /// interface_name / auto_route）。改字段在 setTunEnabled 主体外做，方便复用。
-    static func applyUserFields(to inbound: [String: Any]) -> [String: Any] {
-        var out = inbound
-        out["stack"] = stack.rawValue
-        out["mtu"] = mtu
-        out["strict_route"] = strictRoute
-        out["endpoint_independent_nat"] = endpointIndependentNAT
-        out["route_exclude_address"] = routeExclude
-        let inc = includeInterface
-        if !inc.isEmpty { out["include_interface"] = inc } else { out.removeValue(forKey: "include_interface") }
-        let exc = excludeInterface
-        if !exc.isEmpty { out["exclude_interface"] = exc } else { out.removeValue(forKey: "exclude_interface") }
-        return out
+    /// 一次读取设置；生成配置只依赖这个不可变快照，不再访问 UserDefaults。
+    static func snapshot(from defaults: UserDefaults = .standard) -> Settings {
+        Settings(
+            stack: readStack(from: defaults),
+            mtu: readMTU(from: defaults),
+            strictRoute: readStrictRoute(from: defaults),
+            endpointIndependentNAT: readEndpointIndependentNAT(from: defaults),
+            routeExclude: readRouteExclude(from: defaults),
+            includeInterface: readIncludeInterface(from: defaults),
+            excludeInterface: readExcludeInterface(from: defaults)
+        )
+    }
+
+    struct Settings: Equatable, Sendable {
+        var stack: Stack = defaultStack
+        var mtu: Int = defaultMTU
+        var strictRoute: Bool = defaultStrictRoute
+        var endpointIndependentNAT: Bool = defaultEndpointIndependentNAT
+        var routeExclude: [String] = defaultRouteExclude
+        var includeInterface: [String] = defaultIncludeInterface
+        var excludeInterface: [String] = defaultExcludeInterface
+
+        func applying(to inbound: [String: Any]) -> [String: Any] {
+            var out = inbound
+            out["stack"] = stack.rawValue
+            out["mtu"] = mtu
+            out["strict_route"] = strictRoute
+            out["endpoint_independent_nat"] = endpointIndependentNAT
+            out["route_exclude_address"] = routeExclude
+            if !includeInterface.isEmpty { out["include_interface"] = includeInterface } else { out.removeValue(forKey: "include_interface") }
+            if !excludeInterface.isEmpty { out["exclude_interface"] = excludeInterface } else { out.removeValue(forKey: "exclude_interface") }
+            return out
+        }
+    }
+
+    private static func readStack(from defaults: UserDefaults) -> Stack {
+        if let raw = defaults.string(forKey: kStack),
+           let v = Stack(rawValue: raw) {
+            return v
+        }
+        return defaultStack
+    }
+
+    private static func readMTU(from defaults: UserDefaults) -> Int {
+        let v = defaults.integer(forKey: kMTU)
+        return v > 0 ? v : defaultMTU
+    }
+
+    private static func readStrictRoute(from defaults: UserDefaults) -> Bool {
+        if let v = defaults.object(forKey: kStrictRoute) as? Bool {
+            return v
+        }
+        return defaultStrictRoute
+    }
+
+    private static func readEndpointIndependentNAT(from defaults: UserDefaults) -> Bool {
+        if let v = defaults.object(forKey: kEIN) as? Bool {
+            return v
+        }
+        return defaultEndpointIndependentNAT
+    }
+
+    private static func readRouteExclude(from defaults: UserDefaults) -> [String] {
+        if let arr = defaults.array(forKey: kRouteExclude) as? [String] {
+            return arr
+        }
+        return defaultRouteExclude
+    }
+
+    private static func readIncludeInterface(from defaults: UserDefaults) -> [String] {
+        defaults.array(forKey: kIncludeIface) as? [String] ?? defaultIncludeInterface
+    }
+
+    private static func readExcludeInterface(from defaults: UserDefaults) -> [String] {
+        defaults.array(forKey: kExcludeIface) as? [String] ?? defaultExcludeInterface
     }
 }

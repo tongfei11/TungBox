@@ -874,7 +874,10 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                         let upstreamHosts = self.tunUpstreamHosts(in: source)
                         let discoveryStarted = Date()
                         let network = try await self.runSerializedOffMain {
-                            (TunServiceManager.defaultNetworkInterface(), self.resolvePublicIPv4Addresses(forHosts: upstreamHosts))
+                            TUNRuntimeConfigBuilder.NetworkSnapshot(
+                                physicalInterface: TunServiceManager.defaultNetworkInterface(),
+                                resolvedAddressesByHost: self.resolvePublicIPv4Addresses(forHosts: upstreamHosts)
+                            )
                         }
                         guard token == self.runtimeTransitionID else { return }
                         self.appendLog("[性能] TUN 后台出口探测：\(Int(Date().timeIntervalSince(discoveryStarted) * 1000)) ms\n")
@@ -1783,7 +1786,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         TUNRuntimeConfigBuilder.upstreamHosts(in: text)
     }
 
-    func preparedTunConfigText(from configText: String, networkSnapshot: (String?, [String: [String]])? = nil) throws -> String {
+    func preparedTunConfigText(from configText: String, networkSnapshot: TUNRuntimeConfigBuilder.NetworkSnapshot? = nil) throws -> String {
         guard var config = parseConfigObject(from: configText) else {
             throw NSError.user("当前配置不是有效 JSON")
         }
@@ -1794,7 +1797,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         ).config
 
         let builder = TUNRuntimeConfigBuilder(
-            tunInbound: currentTunInbound(),
+            settings: TUNConfig.snapshot(),
+            device: currentTunDevice(),
             fallbackProxyTag: nodes.first?.tag ?? "direct",
             cachePath: TunServiceManager.cachePath,
             clashAPIPort: TungBoxConfig.tunDaemonClashPort,
@@ -1806,19 +1810,17 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         // 快照中的 nil 表示已探测但没有物理接口，不能再次探测。
         let interface: String?
         if let networkSnapshot {
-            interface = networkSnapshot.0
+            interface = networkSnapshot.physicalInterface
         } else {
             interface = TunServiceManager.defaultNetworkInterface()
         }
         let bound = builder.bindPhysicalInterface(interface, in: prepared.config)
         bound.diagnostics.forEach { appendLog($0) }
         let hosts = TUNRuntimeConfigBuilder.hostsNeedingResolution(in: bound.config)
-        let addresses = networkSnapshot?.1 ?? resolvePublicIPv4Addresses(forHosts: hosts)
-        let excluded = builder.applyRouteExclusions(addresses, in: bound.config)
-        excluded.diagnostics.forEach { appendLog($0) }
-        try TUNRuntimeConfigBuilder.validateTunRuntimeRouting(in: excluded.config)
-        TUNRuntimeConfigBuilder.finalDiagnostics(in: excluded.config).forEach { appendLog($0) }
-        return try renderConfig(excluded.config)
+        let addresses = networkSnapshot?.resolvedAddressesByHost ?? resolvePublicIPv4Addresses(forHosts: hosts)
+        let output = builder.finish(bound.config, resolvedAddresses: addresses)
+        output.diagnostics.forEach { appendLog($0) }
+        return try output.text.get()
     }
 
     nonisolated func isPublicIPv4Address(_ value: String) -> Bool {
@@ -1856,21 +1858,15 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         return addresses
     }
 
-    func currentTunInbound() -> [String: Any] {
-        let base: [String: Any] = [
-            "type": "tun",
-            "tag": "tun-in",
-            "address": ["\(TunServiceManager.tunIPv4Address)/30"],
-            "interface_name": TunServiceManager.tunInterfaceName,
-            "auto_route": true
-        ]
-        return TUNConfig.applyUserFields(to: base)
+    func currentTunDevice() -> TUNRuntimeConfigBuilder.Device {
+        .init(ipv4Address: TunServiceManager.tunIPv4Address, interfaceName: TunServiceManager.tunInterfaceName)
     }
 
     func setTunEnabled(_ enabled: Bool, in config: [String: Any]) -> [String: Any] {
         TUNRuntimeConfigBuilder.setTunEnabled(
             enabled, in: config,
-            tunInbound: enabled ? currentTunInbound() : [:],
+            settings: enabled ? TUNConfig.snapshot() : .init(),
+            device: currentTunDevice(),
             fallbackProxyTag: nodes.first?.tag ?? "direct",
             cachePath: TunServiceManager.cachePath
         )

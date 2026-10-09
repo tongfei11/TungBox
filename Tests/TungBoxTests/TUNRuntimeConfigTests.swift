@@ -12,8 +12,14 @@ final class TUNRuntimeConfigTests: XCTestCase {
          "strict_route": false, "endpoint_independent_nat": false,
          "route_exclude_address": ["10.0.0.0/8", "::1/128", "fc00::/7", "fe80::/10"]]
     }
-    private func builder(tunInbound: [String: Any]? = nil, fallback: String = "snapshot-node") -> TUNRuntimeConfigBuilder {
-        TUNRuntimeConfigBuilder(tunInbound: tunInbound ?? inbound, fallbackProxyTag: fallback,
+    private var settingsSnapshot: TUNConfig.Settings {
+        .init(routeExclude: ["10.0.0.0/8", "::1/128", "fc00::/7", "fe80::/10"])
+    }
+    private var device: TUNRuntimeConfigBuilder.Device {
+        .init(ipv4Address: "198.19.0.1", interfaceName: "utun29")
+    }
+    private func builder(settings: TUNConfig.Settings? = nil, fallback: String = "snapshot-node") -> TUNRuntimeConfigBuilder {
+        TUNRuntimeConfigBuilder(settings: settings ?? settingsSnapshot, device: device, fallbackProxyTag: fallback,
                                 cachePath: cachePath, clashAPIPort: 9091, clashAPISecret: secret)
     }
     private func build(_ source: [String: Any], interface: String? = "en0", addresses: [String: [String]] = [:],
@@ -21,11 +27,10 @@ final class TUNRuntimeConfigTests: XCTestCase {
         let builder = builder ?? self.builder()
         let prepared = builder.prepare(source)
         let bound = builder.bindPhysicalInterface(interface, in: prepared.config)
-        let excluded = builder.applyRouteExclusions(addresses, in: bound.config)
-        try TUNRuntimeConfigBuilder.validateTunRuntimeRouting(in: excluded.config)
-        return .init(config: excluded.config,
-                     diagnostics: prepared.diagnostics + bound.diagnostics + excluded.diagnostics
-                        + TUNRuntimeConfigBuilder.finalDiagnostics(in: excluded.config))
+        let output = builder.finish(bound.config, resolvedAddresses: addresses)
+        _ = try output.text.get()
+        return .init(config: output.config,
+                     diagnostics: prepared.diagnostics + bound.diagnostics + output.diagnostics)
     }
     private func object(_ text: String) throws -> [String: Any] {
         try XCTUnwrap(ConfigCodec.parseObject(from: text))
@@ -93,7 +98,10 @@ final class TUNRuntimeConfigTests: XCTestCase {
         settings["include_interface"] = ["en0", "en1"]
         settings["exclude_interface"] = ["utun7"]
         let result = try build(["inbounds": [["type": "tun", "stack": "system", "future": "old"]]],
-                               using: builder(tunInbound: settings))
+                               using: builder(settings: .init(
+                                   stack: .gvisor, mtu: 1400, strictRoute: true, endpointIndependentNAT: true,
+                                   routeExclude: settingsSnapshot.routeExclude,
+                                   includeInterface: ["en0", "en1"], excludeInterface: ["utun7"])))
         let resultTun = try tun(result.config)
         for key in ["stack", "mtu", "strict_route", "endpoint_independent_nat", "include_interface", "exclude_interface",
                     "address", "interface_name", "auto_route"] {
@@ -102,7 +110,9 @@ final class TUNRuntimeConfigTests: XCTestCase {
             XCTAssertTrue(NSDictionary(dictionary: [key: actual]).isEqual(to: [key: expected]), key)
         }
         XCTAssertNil(resultTun["future"])
-        let alternate = TUNRuntimeConfigBuilder(tunInbound: settings, fallbackProxyTag: "direct",
+        let alternate = TUNRuntimeConfigBuilder(settings: .init(stack: .gvisor, mtu: 1400, strictRoute: true,
+                                               endpointIndependentNAT: true, routeExclude: settingsSnapshot.routeExclude,
+                                               includeInterface: ["en0", "en1"], excludeInterface: ["utun7"]), device: device, fallbackProxyTag: "direct",
                                                cachePath: "/another/cache.db", clashAPIPort: 9991, clashAPISecret: "another-secret")
         let other = try build([:], using: alternate)
         let experimental = try dictionary(other.config, "experimental")
@@ -151,8 +161,6 @@ final class TUNRuntimeConfigTests: XCTestCase {
     }
 
     func testRouteExclusionsPreserveExistingIPv6OrderAndDuplicates() throws {
-        var settings = inbound
-        settings["route_exclude_address"] = ["fc00::/7", "9.9.9.9/32", "fc00::/7", "10.0.0.0/8"]
         let source = try object(#"""
         {"dns":{"strategy":"ipv4_only","servers":[{"server":"9.9.9.9"},{"server":"8.8.8.8"},
                    {"server":"10.1.1.1"},{"server":"2001:4860:4860::8888"}]},
@@ -161,7 +169,7 @@ final class TUNRuntimeConfigTests: XCTestCase {
                       {"type":"direct","tag":"direct","server":"12.12.12.12"}]}
         """#)
         let result = try build(source, addresses: ["node.test": ["13.14.15.16", "10.1.1.1", "2001:db8::1", "13.14.15.16"]],
-                               using: builder(tunInbound: settings))
+                               using: builder(settings: .init(routeExclude: ["fc00::/7", "9.9.9.9/32", "fc00::/7", "10.0.0.0/8"])))
         let excludes = try XCTUnwrap(tun(result.config)["route_exclude_address"] as? [String])
         XCTAssertEqual(excludes, ["fc00::/7", "9.9.9.9/32", "fc00::/7", "10.0.0.0/8",
                                   "1.0.0.1/32", "1.1.1.1/32", "8.8.4.4/32", "8.8.8.8/32", "114.114.114.114/32",
@@ -224,11 +232,11 @@ final class TUNRuntimeConfigTests: XCTestCase {
     func testToggleUsesSnapshotFallbackAndPreservesCustomFinal() throws {
         for final: String? in [nil, "direct", "custom"] {
             let result = TUNRuntimeConfigBuilder.setTunEnabled(true, in: ["route": final.map { ["final": $0] } ?? [:]],
-                                                              tunInbound: inbound, fallbackProxyTag: "snapshot-node", cachePath: cachePath)
+                                                              settings: settingsSnapshot, device: device, fallbackProxyTag: "snapshot-node", cachePath: cachePath)
             XCTAssertEqual(try dictionary(result, "route")["final"] as? String, final == "custom" ? "custom" : "snapshot-node")
         }
         let selector: [[String: Any]] = [["type": "selector", "tag": "selected"]]
-        let result = TUNRuntimeConfigBuilder.setTunEnabled(true, in: ["outbounds": selector], tunInbound: inbound,
+        let result = TUNRuntimeConfigBuilder.setTunEnabled(true, in: ["outbounds": selector], settings: settingsSnapshot, device: device,
                                                           fallbackProxyTag: "snapshot-node", cachePath: cachePath)
         XCTAssertEqual(try dictionary(result, "route")["final"] as? String, "selected")
     }
@@ -240,7 +248,7 @@ final class TUNRuntimeConfigTests: XCTestCase {
          "route":{"default_interface":"en0","auto_detect_interface":true,"final":"node","future":true},
          "experimental":{"future":true,"cache_file":{"enabled":true,"path":"/fixture/tun/cache.db","store_rdrc":true}}}
         """#)
-        let result = TUNRuntimeConfigBuilder.setTunEnabled(false, in: source, tunInbound: [:],
+        let result = TUNRuntimeConfigBuilder.setTunEnabled(false, in: source, settings: .init(), device: device,
                                                           fallbackProxyTag: "unused", cachePath: cachePath)
         let inbounds = try XCTUnwrap(result["inbounds"] as? [[String: Any]])
         XCTAssertEqual(inbounds.compactMap { $0["tag"] as? String }, ["local"])
@@ -256,12 +264,12 @@ final class TUNRuntimeConfigTests: XCTestCase {
         XCTAssertEqual(cache["enabled"] as? Bool, true)
         XCTAssertEqual(cache["store_rdrc"] as? Bool, true)
         let emptyRoute = TUNRuntimeConfigBuilder.setTunEnabled(false, in: ["route": ["auto_detect_interface": true]],
-                                                              tunInbound: [:], fallbackProxyTag: "unused", cachePath: cachePath)
+                                                              settings: .init(), device: device, fallbackProxyTag: "unused", cachePath: cachePath)
         XCTAssertNil(emptyRoute["route"])
         XCTAssertNil(emptyRoute["experimental"])
         for path: String? in ["/foreign/cache.db", nil] {
             let original: [String: Any] = ["experimental": ["cache_file": path.map { ["path": $0] } ?? [:]]]
-            let disabled = TUNRuntimeConfigBuilder.setTunEnabled(false, in: original, tunInbound: [:],
+            let disabled = TUNRuntimeConfigBuilder.setTunEnabled(false, in: original, settings: .init(), device: device,
                                                                 fallbackProxyTag: "unused", cachePath: cachePath)
             XCTAssertTrue(NSDictionary(dictionary: try dictionary(disabled, "experimental"))
                 .isEqual(to: try dictionary(original, "experimental")))
@@ -319,5 +327,132 @@ final class TUNRuntimeConfigTests: XCTestCase {
         ])
         let again = try build(result.config, interface: nil)
         XCTAssertEqual(again.diagnostics.first, "[TUN] 原始配置已有 direct outbound\n")
+    }
+
+    private func withIsolatedDefaults(_ body: (UserDefaults) throws -> Void) throws {
+        let name = "TungBoxTests.TUNSettings.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        try body(defaults)
+    }
+
+    func testSettingsSnapshotKeepsDefaultsAndInvalidValueFallbacks() throws {
+        try withIsolatedDefaults { defaults in
+            XCTAssertEqual(TUNConfig.snapshot(from: defaults), .init())
+            defaults.set("unknown", forKey: "tunStack")
+            defaults.set(-100, forKey: "tunMTU")
+            defaults.set("invalid", forKey: "tunStrictRoute")
+            defaults.set("invalid", forKey: "tunEndpointIndependentNAT")
+            defaults.set([1, 2], forKey: "tunRouteExclude")
+            defaults.set("invalid", forKey: "tunIncludeInterface")
+            defaults.set([1], forKey: "tunExcludeInterface")
+            XCTAssertEqual(TUNConfig.snapshot(from: defaults), .init())
+            defaults.set(0, forKey: "tunMTU")
+            XCTAssertEqual(TUNConfig.snapshot(from: defaults).mtu, 9000)
+        }
+    }
+
+    func testSettingsSnapshotPreservesExplicitEmptyAndUncleanedArrays() throws {
+        try withIsolatedDefaults { defaults in
+            defaults.set("system", forKey: "tunStack")
+            defaults.set(1500, forKey: "tunMTU")
+            defaults.set(true, forKey: "tunStrictRoute")
+            defaults.set(true, forKey: "tunEndpointIndependentNAT")
+            defaults.set([], forKey: "tunRouteExclude")
+            defaults.set([" en0 ", "en0", ""], forKey: "tunIncludeInterface")
+            defaults.set(["utun7", "utun7"], forKey: "tunExcludeInterface")
+            let snapshot = TUNConfig.snapshot(from: defaults)
+            XCTAssertEqual(snapshot.stack, .system)
+            XCTAssertEqual(snapshot.mtu, 1500)
+            XCTAssertTrue(snapshot.strictRoute)
+            XCTAssertTrue(snapshot.endpointIndependentNAT)
+            XCTAssertEqual(snapshot.routeExclude, [])
+            XCTAssertEqual(snapshot.includeInterface, [" en0 ", "en0", ""])
+            XCTAssertEqual(snapshot.excludeInterface, ["utun7", "utun7"])
+        }
+    }
+
+    func testCapturedSettingsRemainStableAfterPreferencesChange() throws {
+        try withIsolatedDefaults { defaults in
+            defaults.set("gvisor", forKey: "tunStack")
+            defaults.set(1400, forKey: "tunMTU")
+            defaults.set(["fc00::/7"], forKey: "tunRouteExclude")
+            let captured = TUNConfig.snapshot(from: defaults)
+            let capturedBuilder = builder(settings: captured)
+            defaults.set("system", forKey: "tunStack")
+            defaults.set(1600, forKey: "tunMTU")
+            defaults.set(["10.0.0.0/8"], forKey: "tunRouteExclude")
+            let config = try build([:], using: capturedBuilder).config
+            let resultTun = try tun(config)
+            XCTAssertEqual(resultTun["stack"] as? String, "gvisor")
+            XCTAssertEqual(resultTun["mtu"] as? Int, 1400)
+            XCTAssertEqual((resultTun["route_exclude_address"] as? [String])?.first, "fc00::/7")
+            XCTAssertEqual(captured.stack, .gvisor)
+            XCTAssertEqual(TUNConfig.snapshot(from: defaults).stack, .system)
+            XCTAssertEqual(TUNConfig.snapshot(from: defaults).mtu, 1600)
+        }
+    }
+
+    func testSettingsApplicationPreservesUnknownFieldsAndRemovesEmptyInterfaceFilters() throws {
+        let base: [String: Any] = ["type": "tun", "future": [2, 1], "stack": "old", "mtu": 1,
+                                   "include_interface": ["old"], "exclude_interface": ["old"]]
+        let result = TUNConfig.Settings().applying(to: base)
+        XCTAssertEqual(result["type"] as? String, "tun")
+        XCTAssertEqual(result["future"] as? [Int], [2, 1])
+        XCTAssertEqual(result["stack"] as? String, "mixed")
+        XCTAssertEqual(result["mtu"] as? Int, 9000)
+        XCTAssertEqual(result["route_exclude_address"] as? [String],
+                       ["10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12",
+                        "192.168.0.0/16", "::1/128", "fc00::/7", "fe80::/10"])
+        XCTAssertNil(result["include_interface"])
+        XCTAssertNil(result["exclude_interface"])
+        let explicitEmpty = TUNConfig.Settings(routeExclude: []).applying(to: base)
+        XCTAssertEqual(explicitEmpty["route_exclude_address"] as? [String], [])
+    }
+
+    func testCompletedOutputIncludesRenderedConfigAndOrderedDiagnostics() throws {
+        let builder = builder()
+        let prepared = builder.prepare(["dns": ["strategy": "prefer_ipv4"]])
+        let bound = builder.bindPhysicalInterface(nil, in: prepared.config)
+        let output = builder.finish(bound.config, resolvedAddresses: [:])
+        let text = try output.text.get()
+        let reparsed = try object(text)
+        XCTAssertTrue(NSDictionary(dictionary: output.config).isEqual(to: reparsed))
+        XCTAssertEqual(output.diagnostics, [
+            "[TUN] 已排除 DNS/节点上游地址 10 个，避免代理握手被 TUN 捕获\n",
+            "[TUN] DNS 策略：prefer_ipv4\n",
+            "[TUN] 最终配置 direct outbound 状态: 存在\n",
+            "[TUN] 最终配置中的所有 outbound tags: direct\n"
+        ])
+        XCTAssertFalse(output.diagnostics.joined().contains(secret))
+    }
+
+    func testCompletedFailureRetainsPriorDiagnosticsAndOriginalRoutingError() throws {
+        let builder = builder()
+        let prepared = builder.prepare(["dns": ["strategy": "prefer_ipv6"]])
+        let bound = builder.bindPhysicalInterface("", in: prepared.config)
+        let output = builder.finish(bound.config, resolvedAddresses: [:])
+        XCTAssertThrowsError(try output.text.get()) { error in
+            XCTAssertEqual((error as NSError).domain, "TungBox")
+            XCTAssertEqual((error as NSError).code, 1)
+            XCTAssertEqual(error.localizedDescription,
+                           "TUN 配置缺少出口防回环设置：auto_route=true 时必须启用 auto_detect_interface、default_interface 或 outbound 绑定。")
+        }
+        XCTAssertEqual(output.diagnostics, [
+            "[TUN] 已排除 DNS/节点上游地址 10 个，避免代理握手被 TUN 捕获\n",
+            "[TUN] DNS 策略：prefer_ipv6\n"
+        ])
+        XCTAssertFalse(output.diagnostics.joined().contains("最终配置"))
+    }
+
+    func testDeviceSnapshotControlsOnlyTunAddressAndInterface() throws {
+        let custom = TUNRuntimeConfigBuilder(settings: settingsSnapshot,
+                                            device: .init(ipv4Address: "198.19.2.1", interfaceName: "utun99"),
+                                            fallbackProxyTag: "direct", cachePath: cachePath,
+                                            clashAPIPort: 9091, clashAPISecret: secret)
+        let resultTun = try tun(build([:], using: custom).config)
+        XCTAssertEqual(resultTun["address"] as? [String], ["198.19.2.1/30"])
+        XCTAssertEqual(resultTun["interface_name"] as? String, "utun99")
+        XCTAssertEqual(resultTun["auto_route"] as? Bool, true)
     }
 }

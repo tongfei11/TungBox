@@ -7,7 +7,31 @@ struct TUNRuntimeConfigBuilder {
         let diagnostics: [String]
     }
 
-    let tunInbound: [String: Any]
+    struct Device: Equatable, Sendable {
+        let ipv4Address: String
+        let interfaceName: String
+    }
+
+    /// nil 接口是一次已完成的探测结果，不代表需要再次探测。
+    struct NetworkSnapshot: Equatable, Sendable {
+        let physicalInterface: String?
+        let resolvedAddressesByHost: [String: [String]]
+    }
+
+    /// 失败时也保留此前的诊断，调用方先展示日志，再取 text 或抛出原错误。
+    struct Output {
+        let config: [String: Any]
+        let diagnostics: [String]
+        fileprivate let routingValidation: Result<Void, Error>
+
+        // 取文本时才序列化，让调用方先显示诊断，保持原有日志与渲染的顺序。
+        var text: Result<String, Error> {
+            routingValidation.flatMap { Result { try ConfigCodec.render(config) } }
+        }
+    }
+
+    let settings: TUNConfig.Settings
+    let device: Device
     let fallbackProxyTag: String
     let cachePath: String
     let clashAPIPort: Int
@@ -27,7 +51,7 @@ struct TUNRuntimeConfigBuilder {
         }
         let mode = ProxyModeConfig.readMode(from: config)
         config = Self.setTunEnabled(
-            true, in: config, tunInbound: tunInbound,
+            true, in: config, settings: settings, device: device,
             fallbackProxyTag: fallbackProxyTag, cachePath: cachePath
         )
         config = ProxyModeConfig.ensureModeSupport(in: config, mode: mode, fallbackProxyTag: fallbackProxyTag)
@@ -42,14 +66,18 @@ struct TUNRuntimeConfigBuilder {
         return Transformation(config: config, diagnostics: diagnostics)
     }
 
-    func applyRouteExclusions(_ resolvedAddresses: [String: [String]], in source: [String: Any]) -> Transformation {
+    func finish(_ source: [String: Any], resolvedAddresses: [String: [String]]) -> Output {
         var diagnostics: [String] = []
         var config = applyTunRuntimeRouteExclusions(in: source, resolvedByHost: resolvedAddresses, diagnostics: &diagnostics)
         config = Self.setTunCacheFile(enabled: true, in: config, cachePath: cachePath)
-        return Transformation(config: config, diagnostics: diagnostics)
+        let validation = Result { try Self.validateTunRuntimeRouting(in: config) }
+        if case .success = validation {
+            diagnostics += Self.finalDiagnostics(in: config)
+        }
+        return Output(config: config, diagnostics: diagnostics, routingValidation: validation)
     }
 
-    static func finalDiagnostics(in config: [String: Any]) -> [String] {
+    private static func finalDiagnostics(in config: [String: Any]) -> [String] {
         let outbounds = config["outbounds"] as? [[String: Any]] ?? []
         let hasDirect = outbounds.contains { ($0["tag"] as? String) == "direct" }
         let tags = outbounds.compactMap { $0["tag"] as? String }
@@ -362,7 +390,8 @@ struct TUNRuntimeConfigBuilder {
     static func setTunEnabled(
         _ enabled: Bool,
         in config: [String: Any],
-        tunInbound: [String: Any],
+        settings: TUNConfig.Settings,
+        device: Device,
         fallbackProxyTag: String,
         cachePath: String
     ) -> [String: Any] {
@@ -374,7 +403,14 @@ struct TUNRuntimeConfigBuilder {
             log["level"] = "warn"
             config["log"] = log
 
-            inbounds.insert(tunInbound, at: 0)
+            let base: [String: Any] = [
+                "type": "tun",
+                "tag": "tun-in",
+                "address": ["\(device.ipv4Address)/30"],
+                "interface_name": device.interfaceName,
+                "auto_route": true
+            ]
+            inbounds.insert(settings.applying(to: base), at: 0)
 
             var outbounds = config["outbounds"] as? [[String: Any]] ?? []
 
