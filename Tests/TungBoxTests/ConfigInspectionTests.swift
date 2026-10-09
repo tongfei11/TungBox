@@ -144,7 +144,7 @@ final class ConfigInspectionTests: XCTestCase {
         var extra = generated
         extra["future"] = true
         let context = ConfigInspection.RuleContext(customRules: [custom], ruleSets: [.init(ruleSet: set, referenceError: nil)], ruleSetApplyStatus: "已应用")
-        let rows = ConfigInspection.ruleRows(in: ["route": ["rules": [generated, generatedSet, extra]]], context: context)
+        let rows = ConfigInspection.ruleRows(in: ["outbounds": [["tag": TungBoxConfig.tagManual]], "route": ["rules": [generated, generatedSet, extra]]], context: context)
         let actual = rows.filter { !$0.isSection }
         XCTAssertEqual(actual.count, 3)
         XCTAssertEqual(actual[0].customRuleID, custom.id)
@@ -155,6 +155,72 @@ final class ConfigInspectionTests: XCTestCase {
         XCTAssertEqual(actual[2].type, "ACTION")
         XCTAssertEqual(actual[2].strategy, "ROUTE")
         XCTAssertEqual(actual.map(\.id), ["1", "2", "3"])
+    }
+
+    func testMissingNodePreservesEnablePreferenceAndReportsCustomRuleError() throws {
+        let config: [String: Any] = ["outbounds": [["tag": "新节点", "type": "trojan"]]]
+        let custom = customRule(strategy: "旧节点")
+        let set = ruleSet("节点已改名", outbound: "旧节点")
+        let error = try XCTUnwrap(RuleRouting.referenceError(type: "LAN", value: "", strategy: set.outbound, config: config))
+        let context = ConfigInspection.RuleContext(customRules: [custom], ruleSets: [.init(ruleSet: set, referenceError: error)])
+        let rows = ConfigInspection.ruleRows(in: config, context: context)
+        let customRow = try XCTUnwrap(rows.first { $0.customRuleID == custom.id })
+        let setRow = try XCTUnwrap(rows.first { $0.ruleSetID == set.id })
+        XCTAssertEqual(customRow.note, error)
+        XCTAssertTrue(customRow.enabled)
+        XCTAssertTrue(setRow.enabled, "引用失效不能伪装成用户已停用")
+        for row in [customRow, setRow] {
+            XCTAssertEqual(row.referenceError, error)
+            XCTAssertEqual(row.strategyReferenceError, error)
+            XCTAssertEqual(row.strategy, "旧节点")
+        }
+
+        let restoredConfig: [String: Any] = ["outbounds": [["tag": "旧节点", "type": "trojan"]]]
+        let restored = ConfigInspection.ruleRows(in: restoredConfig, context: .init(
+            customRules: [custom], ruleSets: [.init(ruleSet: set, referenceError: nil)]))
+        for row in restored.filter({ $0.customRuleID != nil || $0.ruleSetID != nil }) {
+            XCTAssertTrue(row.enabled)
+            XCTAssertNil(row.referenceError)
+            XCTAssertNil(row.strategyReferenceError)
+        }
+    }
+
+    func testMissingReferencesWarnForDisabledRulesWithoutChangingPreference() {
+        let custom = customRule(strategy: "已删除节点", enabled: false)
+        let set = ruleSet("已停用规则集", outbound: "已删除节点", enabled: false)
+        let rows = ConfigInspection.ruleRows(in: [:], context: .init(
+            customRules: [custom], ruleSets: [.init(ruleSet: set, referenceError: nil)]))
+        for row in rows.filter({ $0.customRuleID != nil || $0.ruleSetID != nil }) {
+            XCTAssertFalse(row.enabled)
+            XCTAssertNotNil(row.referenceError)
+            XCTAssertNotNil(row.strategyReferenceError)
+        }
+    }
+
+    func testMissingRuleSetReferenceDoesNotMarkValidOutboundAsInvalid() {
+        let custom = customRule("RULE-SET", value: "removed", strategy: "有效节点")
+        let config: [String: Any] = ["outbounds": [["tag": "有效节点"]]]
+        let error = RuleRouting.referenceError(type: custom.type, value: custom.value, strategy: custom.strategy, config: config)
+        let set = ruleSet("丢失规则集引用", outbound: custom.strategy)
+        let rows = ConfigInspection.ruleRows(in: config, context: .init(
+            customRules: [custom], ruleSets: [.init(ruleSet: set, referenceError: error)]))
+        for row in rows.filter({ $0.customRuleID != nil || $0.ruleSetID != nil }) {
+            XCTAssertTrue(row.enabled)
+            XCTAssertEqual(row.referenceError, "规则集引用不存在：removed")
+            XCTAssertNil(row.strategyReferenceError)
+        }
+    }
+
+    func testBuiltInStrategiesValidateMappedOutboundTags() {
+        let config: [String: Any] = ["outbounds": [["tag": TungBoxConfig.tagManual], ["tag": TungBoxConfig.tagAuto]]]
+        for strategy in ["DIRECT", "REJECT", "AUTO", "Proxy"] {
+            let custom = customRule(strategy: strategy)
+            let rows = ConfigInspection.ruleRows(in: config, context: .init(customRules: [custom]))
+            let row = rows.first { $0.customRuleID == custom.id }
+            XCTAssertNotNil(row)
+            XCTAssertNil(row?.referenceError)
+            XCTAssertNil(row?.strategyReferenceError)
+        }
     }
 
     func testRuleSetStatusesPreservePerOccurrenceErrorsAndInvalidFileIdentity() throws {
@@ -171,7 +237,8 @@ final class ConfigInspectionTests: XCTestCase {
         let rows = ConfigInspection.ruleRows(in: [:], context: context)
         let sets = rows.filter { $0.type == "规则集" }
         XCTAssertEqual(sets.map(\.value), ["正常", "错误", "停用", "损坏"])
-        XCTAssertEqual(sets.map(\.enabled), [true, false, false, false])
+        XCTAssertEqual(sets.map(\.enabled), [true, true, false, false])
+        XCTAssertEqual(sets.map(\.referenceError), [nil, "出站不存在", nil, nil])
         XCTAssertEqual(sets.map(\.note), ["正在应用", "出站不存在", "已停用", "⚠️ 格式错误"])
         XCTAssertEqual(sets.map(\.count), ["0 条", "0 条", "0 条", "!"])
         XCTAssertEqual(sets[0].ruleSetID, sharedID)

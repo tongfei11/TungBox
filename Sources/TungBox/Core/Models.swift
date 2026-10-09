@@ -58,6 +58,9 @@ struct RuleInfo {
     var ruleSetID: UUID? = nil
     /// Set when this row represents a rule-set file that failed to load.
     var ruleSetInvalidURL: URL? = nil
+    /// Validation is separate from the user's persisted enable preference.
+    var referenceError: String? = nil
+    var strategyReferenceError: String? = nil
 }
 
 struct CustomRule: Codable, Equatable {

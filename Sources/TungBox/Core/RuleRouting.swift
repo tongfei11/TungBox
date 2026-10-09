@@ -96,12 +96,17 @@ enum RuleRouting {
     }
 
 
-    static func referenceError(type: String, value: String, strategy: String, config: [String: Any]) -> String? {
+    static func outboundReferenceError(strategy: String, config: [String: Any]) -> String? {
         if !["DIRECT", "REJECT"].contains(strategy) {
             let tag = outboundForStrategy(strategy)
             let tags = (config["outbounds"] as? [[String: Any]] ?? []).compactMap { $0["tag"] as? String }
             if !tags.contains(tag) { return "出站不存在：\(strategy)，请重新选择" }
         }
+        return nil
+    }
+
+    static func referenceError(type: String, value: String, strategy: String, config: [String: Any]) -> String? {
+        if let error = outboundReferenceError(strategy: strategy, config: config) { return error }
         if type == "RULE-SET" || type == "GEOIP" {
             let tag = type == "GEOIP" ? (value.hasPrefix("geoip-") ? value : "geoip-\(value.lowercased())") : value
             let route = config["route"] as? [String: Any] ?? [:]

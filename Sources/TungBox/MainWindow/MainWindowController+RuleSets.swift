@@ -41,7 +41,7 @@ extension MainWindowController {
     // MARK: - Config regeneration
 
     func ruleSetReferenceError(_ set: CustomRuleSet, config: [String: Any]) -> String? {
-        if let error = RuleRouting.referenceError(type: "LAN", value: "", strategy: set.outbound, config: config) { return error }
+        if let error = RuleRouting.outboundReferenceError(strategy: set.outbound, config: config) { return error }
         return set.rules.compactMap { RuleRouting.referenceError(type: $0.type, value: $0.value, strategy: set.outbound, config: config) }.first
     }
 

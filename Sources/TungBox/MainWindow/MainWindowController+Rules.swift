@@ -168,6 +168,7 @@ extension MainWindowController {
 
         if selected.customRuleID != nil {
             add("编辑自定义规则", #selector(editCustomRuleClicked))
+            add(selected.enabled ? "停用自定义规则" : "启用自定义规则", #selector(toggleSelectedCustomRuleEnabled))
             menu.addItem(.separator())
             add("删除自定义规则", #selector(deleteCustomRuleClicked))
         } else if let setID = selected.ruleSetID, let set = customRuleSets.first(where: { $0.id == setID }) {
@@ -722,11 +723,16 @@ extension MainWindowController {
         setCustomRuleEnabled(at: sender.tag, to: sender.state == .on)
     }
 
-    /// Table-level fallback: a click landing in the 启用 column toggles that rule.
-    /// On selected rows the drag-tracking machinery can swallow the checkbox's own
-    /// mouseDown, so the click falls through to the table — this action catches it.
-    /// The two paths are mutually exclusive (the checkbox consumes its event when it
-    /// does receive it), so a single click never toggles twice.
+    @objc func toggleSelectedCustomRuleEnabled() {
+        let rows = filteredRuleRows()
+        guard rows.indices.contains(rulesTable.selectedRow),
+              let ruleID = rows[rulesTable.selectedRow].customRuleID,
+              let index = customRules.firstIndex(where: { $0.id == ruleID }) else { return }
+        setCustomRuleEnabled(at: index, to: !customRules[index].enabled)
+    }
+
+    /// Covers blank space around a checkbox; warning marks stay read-only.
+    /// The checkbox consumes its own click so these paths never toggle twice.
     @objc func rulesTableClicked(_ sender: NSTableView) {
         let row = sender.clickedRow
         let column = sender.clickedColumn
@@ -734,6 +740,7 @@ extension MainWindowController {
               sender.tableColumns[column].identifier.rawValue == "enabled" else { return }
         let rows = filteredRuleRows()
         guard rows.indices.contains(row),
+              rows[row].referenceError == nil,
               let ruleID = rows[row].customRuleID,
               let idx = customRules.firstIndex(where: { $0.id == ruleID }) else { return }
         setCustomRuleEnabled(at: idx, to: !customRules[idx].enabled)

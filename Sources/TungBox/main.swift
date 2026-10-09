@@ -629,77 +629,12 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     
 
     func makeRuleCell(for rule: RuleInfo, columnID: String) -> NSView {
-        // Rule-set rows are managed via right-click / edit dialog, not the inline
-        // checkbox — show a read-only status mark in the 启用 column instead.
-        if columnID == "enabled" && !rule.isSection && (rule.ruleSetID != nil || rule.ruleSetInvalidURL != nil) {
-            let mark = rule.ruleSetInvalidURL != nil ? "⚠" : (rule.enabled ? "●" : "○")
-            let label = NSTextField(labelWithString: mark)
-            label.font = .systemFont(ofSize: 13)
-            label.textColor = rule.ruleSetInvalidURL != nil ? .systemRed : (rule.enabled ? MD3.primary : MD3.onSurfaceVariant)
-            label.alignment = .center
-            label.translatesAutoresizingMaskIntoConstraints = false
-            let container = NSView()
-            container.addSubview(label)
-            NSLayoutConstraint.activate([
-                label.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-                label.centerYAnchor.constraint(equalTo: container.centerYAnchor)
-            ])
-            return container
+        RuleTableCell.make(for: rule, columnID: columnID) { [self] button, ruleID in
+            // The action indexes persisted rules, not display rows with section headers.
+            button.tag = customRules.firstIndex(where: { $0.id == ruleID }) ?? -1
+            button.target = self
+            button.action = #selector(toggleRuleEnabled(_:))
         }
-        if columnID == "enabled" && !rule.isSection {
-            let button = MD3Checkbox(checkboxWithTitle: "", target: nil, action: nil)
-            button.state = rule.enabled ? .on : .off
-            button.isEnabled = rule.customRuleID != nil
-            if let ruleID = rule.customRuleID {
-                // tag must index into `customRules` (toggleRuleEnabled uses customRules[tag]),
-                // NOT into the display rows which also contain section headers and
-                // subscription rules — otherwise the toggle silently no-ops.
-                button.tag = customRules.firstIndex(where: { $0.id == ruleID }) ?? -1
-                button.target = self
-                button.action = #selector(toggleRuleEnabled(_:))
-            }
-            button.translatesAutoresizingMaskIntoConstraints = false
-            let container = NSView()
-            container.addSubview(button)
-            // Keep the checkbox compact and centered (not the whole column), but let
-            // it span the full row height so it's an easy target. MD3Checkbox toggles
-            // on any in-bounds click and consumes the event, so a click on it wins
-            // over table row selection.
-            NSLayoutConstraint.activate([
-                button.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-                button.topAnchor.constraint(equalTo: container.topAnchor),
-                button.bottomAnchor.constraint(equalTo: container.bottomAnchor)
-            ])
-            return container
-        }
-
-        let text: String
-        switch columnID {
-        case "enabled": text = rule.isSection ? "#" : ""
-        case "id": text = rule.id
-        case "type": text = rule.type
-        case "value": text = rule.value
-        case "strategy": text = rule.strategy
-        case "count": text = rule.count
-        case "note": text = rule.note
-        default: text = ""
-        }
-
-        let label = NSTextField(labelWithString: text)
-        label.font = rule.isSection ? .systemFont(ofSize: 13, weight: .bold) : .systemFont(ofSize: 13)
-        label.textColor = rule.isSection ? MD3.onSurfaceVariant : MD3.onSurface
-        label.lineBreakMode = .byTruncatingTail
-        label.maximumNumberOfLines = 2
-        label.translatesAutoresizingMaskIntoConstraints = false
-
-        let container = NSView()
-        container.addSubview(label)
-        NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
-            label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
-            label.centerYAnchor.constraint(equalTo: container.centerYAnchor)
-        ])
-        return container
     }
     @objc func navClicked(_ sender: MD3SidebarItem) {
         selectPage(at: sender.tag)

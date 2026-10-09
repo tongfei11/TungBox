@@ -257,6 +257,7 @@ enum ConfigInspection {
         }
 
         func appendCustom(_ rule: CustomRule) {
+            let error = RuleRouting.referenceError(type: rule.type, value: rule.value, strategy: rule.strategy, config: config)
             rows.append(RuleInfo(
                 customRuleID: rule.id,
                 enabled: rule.enabled,
@@ -265,8 +266,10 @@ enum ConfigInspection {
                 value: rule.value,
                 strategy: displayStrategy(RuleRouting.outboundForStrategy(rule.strategy)),
                 count: "0",
-                note: rule.note.isEmpty ? "自定义规则" : rule.note,
-                isSection: false
+                note: error ?? (rule.note.isEmpty ? "自定义规则" : rule.note),
+                isSection: false,
+                referenceError: error,
+                strategyReferenceError: RuleRouting.outboundReferenceError(strategy: rule.strategy, config: config)
             ))
             nextID += 1
         }
@@ -287,17 +290,21 @@ enum ConfigInspection {
             rows.append(sectionRule("规则集"))
             for snapshot in context.ruleSets {
                 let set = snapshot.ruleSet
+                let strategyError = RuleRouting.outboundReferenceError(strategy: set.outbound, config: config)
+                let error = snapshot.referenceError ?? strategyError
                 rows.append(RuleInfo(
                     customRuleID: nil,
-                    enabled: set.enabled && snapshot.referenceError == nil,
+                    enabled: set.enabled,
                     id: "\(nextID)",
                     type: "规则集",
                     value: set.name,
                     strategy: displayStrategy(RuleRouting.outboundForStrategy(set.outbound)),
                     count: "\(set.rules.count) 条",
-                    note: snapshot.referenceError ?? (set.enabled ? context.ruleSetApplyStatus : "已停用"),
+                    note: error ?? (set.enabled ? context.ruleSetApplyStatus : "已停用"),
                     isSection: false,
-                    ruleSetID: set.id
+                    ruleSetID: set.id,
+                    referenceError: error,
+                    strategyReferenceError: strategyError
                 ))
                 nextID += 1
             }
