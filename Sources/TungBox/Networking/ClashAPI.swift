@@ -1,6 +1,17 @@
 import Foundation
 
 enum ClashAPI {
+    static func setModeAndCloseConnections(_ mode: String, port: Int, session: URLSession = .shared) async throws {
+        _ = try await requestJSON(path: "/configs", method: "PATCH", body: ["mode": mode], port: port, session: session)
+        guard let config = try await requestJSON(path: "/configs", port: port, session: session) as? [String: Any],
+              let actualMode = config["mode"] as? String,
+              actualMode.caseInsensitiveCompare(mode) == .orderedSame else {
+            throw NSError.user("Core 未应用请求的出站模式")
+        }
+        // Existing connections retain their previous route after a mode switch.
+        _ = try? await closeConnections(port: port, session: session)
+    }
+
     static func proxies(port: Int? = nil) async throws -> [String: Any] {
         try await requestJSON(path: "/proxies", port: port) as? [String: Any] ?? [:]
     }

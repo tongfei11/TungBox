@@ -12,6 +12,10 @@ struct NodeDelayTestState: Sendable {
 
     var isActive: Bool { requestID != nil }
 
+    func covers(_ tags: [String]) -> Bool {
+        isActive && Set(tags).isSubset(of: requestedTags)
+    }
+
     @discardableResult
     mutating func begin(id: UUID, tags: [String]) -> Bool {
         guard !isActive, !tags.isEmpty else { return false }

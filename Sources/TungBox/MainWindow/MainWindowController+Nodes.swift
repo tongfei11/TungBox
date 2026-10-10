@@ -405,6 +405,7 @@ extension MainWindowController {
             guard nodeDelayTestState.begin(id: requestID, tags: tags) else { return }
             let transitionID = runtimeTransitionID
             let configText = editor.string
+            let configIdentity = NodeDelayTestPolicy.configurationIdentity(configText)
             let profileID = selectedIndex.map { profiles[$0].id }
             let runtimeRunning = isProxyRuntimeRunning()
             let apiPort = delayAPIPort()
@@ -434,7 +435,8 @@ extension MainWindowController {
                 defer { self.finishNodeDelayTest(id: requestID, succeeded: false) }
                 @MainActor func isCurrent() -> Bool {
                     !Task.isCancelled && self.nodeDelayTestID == requestID && self.runtimeTransitionID == transitionID
-                        && self.editor.string == configText && self.selectedIndex.map { self.profiles[$0].id } == profileID
+                        && (self.editor.string == configText || (configIdentity != nil && NodeDelayTestPolicy.configurationIdentity(self.editor.string) == configIdentity))
+                        && self.selectedIndex.map { self.profiles[$0].id } == profileID
                         && !self.isProxyServiceTransitioning
                         && self.runner.isRunning == userRunning && self.isTunRuntimeRunning() == tunRunning
                         && self.delayAPIPort() == apiPort

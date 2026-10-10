@@ -1005,10 +1005,11 @@ extension MainWindowController {
     /// while nothing works. If the TUN does not come online in time, surface the
     /// last error from the daemon log instead of failing silently. Runs entirely
     /// off the main thread, so it adds no switch latency.
-    func verifyTunStartupAsync() {
+    @discardableResult
+    func verifyTunStartupAsync() -> Task<Bool, Never> {
         let store = self.store
         let transitionID = runtimeTransitionID
-        Task.detached { [weak self] in
+        return Task.detached { [weak self] in
             let deadline = Date().addingTimeInterval(8)
             var online = false
             while Date() < deadline {
@@ -1017,7 +1018,7 @@ extension MainWindowController {
                     guard let self else { return false }
                     return self.isTunEnabled && self.runtimeTransitionID == transitionID
                 }
-                guard stillWanted else { return }
+                guard stillWanted else { return false }
                 if TunServiceManager.activeSingBoxPID(store: store, allowScan: false) != nil,
                    TunServiceManager.tunInterfaceIsActive() {
                     online = true
@@ -1032,7 +1033,7 @@ extension MainWindowController {
                         guard let self else { return false }
                         return self.isTunEnabled && self.runtimeTransitionID == transitionID
                     }
-                    guard stillWanted else { return }
+                    guard stillWanted else { return false }
                     await MainActor.run { [weak self] in
                         guard let self else { return }
                         self.appendLog("[TUN] 本地控制接口认证校验失败，已停止 TUN\n")
@@ -1046,24 +1047,25 @@ extension MainWindowController {
                         self.refreshStatus()
                         self.showToast("TUN 控制接口认证失败")
                     }
-                    return
+                    return false
                 }
                 // sing-box restores the last selector selection from cache.db,
                 // which can override the config's `default` (e.g. a manual node
                 // reverting to auto after switching into TUN). Re-assert the
                 // config's selection via the clash API so manual stays manual and
                 // auto stays auto.
-                await MainActor.run { [weak self] in
-                    self?.reconcileSelectorSelectionsToConfig()
-                    self?.runDeferredNetworkChecksAfterConnection(proxyPort: nil)
+                return await MainActor.run { [weak self] in
+                    guard let self, self.isTunEnabled, self.runtimeTransitionID == transitionID else { return false }
+                    self.reconcileSelectorSelectionsToConfig()
+                    self.runDeferredNetworkChecksAfterConnection(proxyPort: nil)
+                    return true
                 }
-                return
             }
             let stillWanted = await MainActor.run { [weak self] in
                 guard let self else { return false }
                 return self.isTunEnabled && self.runtimeTransitionID == transitionID
             }
-            guard stillWanted else { return }
+            guard stillWanted else { return false }
             let reason = TunServiceManager.lastDaemonErrorLine() ?? "未知原因，请查看 TUN 日志"
             await MainActor.run { [weak self] in
                 guard let self else { return }
@@ -1078,6 +1080,7 @@ extension MainWindowController {
                 self.refreshStatus()
                 self.showToast("TUN 启动失败：\(reason)")
             }
+            return false
         }
     }
 

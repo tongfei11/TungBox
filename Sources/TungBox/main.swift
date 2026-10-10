@@ -62,6 +62,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             if oldValue != selectedIndex {
                 nodeDelayTestID = UUID()
                 selectorSelectionID = UUID()
+                modeChangeTask?.cancel()
+                modeChangeID = UUID()
+                modeChangeNeedsDelayRefresh = false
             }
         }
     }
@@ -221,6 +224,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var runningStatsMissCount = 0
     var nodeDelayTestState = NodeDelayTestState()
     var nodeDelayTestTask: Task<Void, Never>?
+    var modeChangeID = UUID()
+    var modeChangeTask: Task<Void, Never>?
+    var modeChangeNeedsDelayRefresh = false
     var nodeDelayTestID = UUID() {
         didSet {
             guard oldValue != nodeDelayTestID else { return }
@@ -423,7 +429,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         refreshStatus()
         // Defer convergence by one run-loop cycle so the window/tray paint first.
         DispatchQueue.main.async { [weak self] in
-            self?.reconcileRuntime(reason: "启动")
+            guard let self else { return }
+            self.reconcileRuntime(reason: "启动", refreshNodeDelays: self.isSystemProxyEnabled || self.isTunEnabled)
         }
     }
 
@@ -744,9 +751,11 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     /// separate processes that never share a port — so each switch only ever
     /// starts/stops its own thing, and toggling TUN never disturbs the user proxy
     /// (no hand-off, no race, no "关闭TUN把代理也关了").
-    func reconcileRuntime(reason: String, forceRestart: Bool = false) {
+    func reconcileRuntime(reason: String, forceRestart: Bool = false, refreshNodeDelays: Bool = true) {
         let port = getMixedProxyPort()
         runtimeTransitionID += 1
+        modeChangeTask?.cancel()
+        modeChangeNeedsDelayRefresh = false
         nodeDelayTestID = UUID()
         let token = runtimeTransitionID
         let wantSystemProxy = isSystemProxyEnabled
@@ -800,6 +809,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         appendLog("[TungBox] 正在切换运行状态（\(reason)）...\n")
         Task { @MainActor [weak self] in
             guard let self, token == self.runtimeTransitionID else { return }
+            var tunStartup: Task<Bool, Never>?
 
             // ===== 1) Converge the TUN daemon (utun29) — independent of the proxy =====
             if wantTun {
@@ -808,7 +818,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                     // request files are still fresh, resume this process's heartbeat
                     // immediately or the daemon will expire the request after 30s.
                     self.startTunRequestHeartbeat()
-                    self.verifyTunStartupAsync()
+                    tunStartup = self.verifyTunStartupAsync()
                     self.appendLog("[TungBox] TUN 已在运行，系统代理切换不重启 TUN\n")
                 } else {
                     do {
@@ -835,7 +845,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                         guard token == self.runtimeTransitionID else { return }
                         self.startTunRequestHeartbeat()
                         self.wasTunActiveInThisSession = true
-                        self.verifyTunStartupAsync()
+                        tunStartup = self.verifyTunStartupAsync()
                         self.appendLog("[TungBox] TUN 已启用（\(reason)）\n")
                     } catch {
                         guard token == self.runtimeTransitionID else { return }
@@ -912,17 +922,17 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 }
             }
 
+            let readyForTest = await NodeDelayTestPolicy.runtimeIsReady(tunStartup: tunStartup) {
+                token == self.runtimeTransitionID && wantSystemProxy == self.isSystemProxyEnabled && wantTun == self.isTunEnabled
+            }
             guard token == self.runtimeTransitionID else { return }
             self.appendLog("[性能] 运行状态切换完成（\(reason)）：\(Int(Date().timeIntervalSince(transitionStarted) * 1000)) ms，UI 保持异步\n")
             self.reconcileSelectorSelectionsToConfig()
             self.clearFeatureTransitions()
             self.refreshStatus()
             self.scheduleConnectionsRefreshAfterStart()
-            // Refresh the selected URLTest group after the system proxy is ready
-            // so the Nodes page does not retain pre-start results.
-            if wantSystemProxy,
-               let autoGroup = self.nodeGroups.first(where: { $0.tag == TungBoxConfig.tagAuto }) {
-                self.testGroupNodes(autoGroup)
+            if refreshNodeDelays, readyForTest {
+                self.testAllNodesClicked()
             }
         }
     }
@@ -1846,7 +1856,12 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         guard var config = parseConfigObject(from: editor.string) else {
             throw NSError.user("当前配置不是有效 JSON")
         }
+        let previousMode = readMode(from: config)
         let mode = selectedMode()
+        let refreshDelays = NodeDelayTestPolicy.refreshAfterModeChange(
+            from: previousMode, to: mode.value,
+            pendingRefresh: modeChangeNeedsDelayRefresh
+        )
         config = ensureModeSupport(in: config, mode: mode)
         editor.string = try renderConfig(config)
         let url = try saveCurrent()
@@ -1855,8 +1870,61 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         refreshModeFromEditor()
         refreshNodeGroupsView()   // re-filter shown groups for the new mode
 
-        if isProxyRuntimeRunning() {
-            reconcileRuntime(reason: "模式切换", forceRestart: true)
+        if isProxyServiceActiveOrRequested() {
+            applyRuntimeMode(mode.value, refreshNodeDelays: refreshDelays)
+        } else if refreshDelays {
+            testAllNodesClicked()
+        }
+    }
+
+    func applyRuntimeMode(_ mode: String, refreshNodeDelays: Bool) {
+        let previousTask = modeChangeTask
+        previousTask?.cancel()
+        modeChangeID = UUID()
+        let id = modeChangeID
+        let transitionID = runtimeTransitionID
+        modeChangeNeedsDelayRefresh = refreshNodeDelays
+        modeChangeTask = Task { @MainActor [weak self] in
+            // Wait for cancelled work to settle before applying the latest mode,
+            // so rapid mode clicks cannot leave a late older PATCH as the winner.
+            await previousTask?.value
+            guard let self else { return }
+            defer {
+                if self.modeChangeID == id {
+                    self.modeChangeTask = nil
+                }
+            }
+            @MainActor func isCurrent() -> Bool {
+                !Task.isCancelled && self.modeChangeID == id && self.runtimeTransitionID == transitionID
+            }
+            guard isCurrent() else { return }
+            do {
+                // If a switch is still starting a Core, apply the saved mode once
+                // its startup has finished instead of restarting it again.
+                while self.isProxyServiceTransitioning {
+                    try await Task.sleep(for: .milliseconds(100))
+                    guard isCurrent() else { return }
+                }
+                let ports = self.activeSelectorAPIPorts()
+                for port in ports {
+                    guard isCurrent() else { return }
+                    try await ClashAPI.setModeAndCloseConnections(mode, port: port)
+                }
+                guard isCurrent() else { return }
+                self.appendLog(ports.isEmpty ? "[模式] 运行态已关闭，模式已保存\n" : "[模式] 已同步到运行中的 Core：\(mode)\n")
+                if refreshNodeDelays, !self.nodeDelayTestState.covers(self.nodes.map(\.tag)) {
+                    while self.nodeDelayTestState.isActive {
+                        try await Task.sleep(for: .milliseconds(100))
+                        guard isCurrent() else { return }
+                    }
+                    self.testAllNodesClicked()
+                }
+                self.modeChangeNeedsDelayRefresh = false
+            } catch {
+                guard isCurrent() else { return }
+                self.appendLog("[模式] 运行态模式同步失败：\(error.localizedDescription)\n")
+                self.showError(NSError.user("模式未能同步到运行中的 Core，请重试：\(error.localizedDescription)"))
+            }
         }
     }
 

@@ -3,6 +3,18 @@ import XCTest
 @testable import TungBox
 
 final class NodeDelayTestStateTests: XCTestCase {
+    func testModeRefreshCanReuseActiveAllNodeTestThroughSelectionRefresh() {
+        let id = UUID()
+        var state = NodeDelayTestState()
+        state.begin(id: id, tags: ["first", "second"])
+        XCTAssertTrue(state.covers(["first", "second"]))
+        XCTAssertFalse(state.covers(["first", "second", "third"]))
+        state.refreshSelection(id: id)
+        XCTAssertTrue(state.covers(["first", "second"]))
+        state.finish(id: id, succeeded: true)
+        XCTAssertFalse(state.covers(["first", "second"]))
+    }
+
     func testRepeatedStartCannotReplaceAnActiveTest() {
         let id = UUID()
         var state = NodeDelayTestState()
