@@ -223,9 +223,12 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var nodeDelayTestTask: Task<Void, Never>?
     var nodeDelayTestID = UUID() {
         didSet {
-            guard oldValue != nodeDelayTestID, let requestID = nodeDelayTestState.requestID else { return }
-            nodeDelayTestTask?.cancel()
-            finishNodeDelayTest(id: requestID, succeeded: false)
+            guard oldValue != nodeDelayTestID else { return }
+            if let requestID = nodeDelayTestState.requestID {
+                nodeDelayTestTask?.cancel()
+                finishNodeDelayTest(id: requestID, succeeded: false)
+            }
+            nodeDelayTestState.clearResultProtection()
         }
     }
     var selectorSelectionID = UUID()
@@ -1991,27 +1994,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         guard let proxiesObj = proxiesObj,
               let proxies = proxiesObj["proxies"] as? [String: Any] else { return }
         
-        var updated = false
-        for (name, proxyData) in proxies {
-            guard let proxy = proxyData as? [String: Any] else { continue }
-            var delayMs: Int? = nil
-            if let history = proxy["history"] as? [[String: Any]],
-               let last = history.last,
-               let delay = last["delay"] as? Int {
-                delayMs = delay
-            }
-            
-            if let delayMs = delayMs {
-                if let idx = nodes.firstIndex(where: { $0.tag == name }) {
-                    let oldDelay = nodes[idx].delay
-                    let newDelay = delayMs > 0 ? "\(delayMs) ms" : "超时"
-                    if oldDelay != newDelay && oldDelay != "测试中" {
-                        nodes[idx].delay = newDelay
-                        updated = true
-                    }
-                }
-            }
-        }
+        var updated = nodeDelayTestState.syncBackgroundDelays(proxies: proxies, in: &nodes)
 
         // Sync group active nodes (current values) from Clash API
         for index in nodeGroups.indices {

@@ -7,17 +7,27 @@ struct NodeDelayTestState: Sendable {
     private(set) var total = 0
     private(set) var completed = 0
     private(set) var phase: Phase = .idle
+    private var requestedTags = Set<String>()
+    private var resultTags = Set<String>()
 
-    mutating func begin(id: UUID, total: Int) {
+    var isActive: Bool { requestID != nil }
+
+    @discardableResult
+    mutating func begin(id: UUID, tags: [String]) -> Bool {
+        guard !isActive, !tags.isEmpty else { return false }
         requestID = id
-        self.total = total
+        requestedTags = Set(tags)
+        resultTags.removeAll()
+        total = requestedTags.count
         completed = 0
         phase = .testing
+        return true
     }
 
-    mutating func receivedResult(id: UUID) {
-        guard requestID == id, phase == .testing else { return }
-        completed = min(completed + 1, total)
+    mutating func receivedResult(id: UUID, tag: String) {
+        guard requestID == id, phase == .testing, requestedTags.contains(tag) else { return }
+        resultTags.insert(tag)
+        completed = resultTags.count
     }
 
     mutating func refreshSelection(id: UUID) {
@@ -29,8 +39,34 @@ struct NodeDelayTestState: Sendable {
     mutating func finish(id: UUID, succeeded: Bool) -> Bool {
         guard requestID == id else { return false }
         requestID = nil
+        requestedTags.removeAll()
         phase = succeeded ? .completed : .cancelled
         return true
+    }
+
+    /// A group retest and tray refresh must not replace explicit manual results.
+    /// Keep returned results until the next test or runtime/profile change.
+    mutating func clearResultProtection() {
+        resultTags.removeAll()
+    }
+
+    @discardableResult
+    func syncBackgroundDelays(proxies: [String: Any], in nodes: inout [NodeInfo]) -> Bool {
+        var updated = false
+        for index in nodes.indices {
+            let tag = nodes[index].tag
+            guard !requestedTags.contains(tag), !resultTags.contains(tag),
+                  nodes[index].delay != "测试中",
+                  let proxy = proxies[tag] as? [String: Any],
+                  let history = proxy["history"] as? [[String: Any]],
+                  let delay = history.last?["delay"] as? Int else { continue }
+            let value = delay > 0 ? "\(delay) ms" : "超时"
+            if nodes[index].delay != value {
+                nodes[index].delay = value
+                updated = true
+            }
+        }
+        return updated
     }
 
     var statusText: String {

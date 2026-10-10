@@ -386,6 +386,10 @@ extension MainWindowController {
 
     /// Every entry point shares runtime reselection and freshness checks.
     func runNodeDelayTest(tags requestedTags: [String], title: String) {
+        guard !nodeDelayTestState.isActive else {
+            showToast("测速正在进行，请等待完成", style: .warning)
+            return
+        }
         guard !isProxyServiceTransitioning else {
             showToast("正在切换运行状态，请稍后再测")
             return
@@ -398,7 +402,7 @@ extension MainWindowController {
             let testURL = enteredURL.isEmpty ? TungBoxConfig.urlTestURL : enteredURL
             let requestID = UUID()
             nodeDelayTestID = requestID
-            nodeDelayTestState.begin(id: requestID, total: tags.count)
+            guard nodeDelayTestState.begin(id: requestID, tags: tags) else { return }
             let transitionID = runtimeTransitionID
             let configText = editor.string
             let profileID = selectedIndex.map { profiles[$0].id }
@@ -449,7 +453,7 @@ extension MainWindowController {
                     for await (tag, result) in tasks {
                         guard isCurrent() else { tasks.cancelAll(); continue }
                         if let index = self.nodes.firstIndex(where: { $0.tag == tag }) { self.nodes[index].delay = result }
-                        self.nodeDelayTestState.receivedResult(id: requestID)
+                        self.nodeDelayTestState.receivedResult(id: requestID, tag: tag)
                         self.nodeTestStatusLabel.stringValue = self.nodeDelayTestState.statusText
                         self.nodeTable.reloadData()
                         self.refreshNodeDelayTiles()
