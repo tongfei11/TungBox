@@ -858,10 +858,8 @@ extension MainWindowController {
             if spec.strategy != "REJECT" { config = ensureOutboundSupport(in: config, strategy: spec.strategy) }
             generated.append(customRouteRule(type: spec.type, value: spec.value, strategy: spec.strategy))
         }
-        var route = config["route"] as? [String: Any] ?? [:]
-        route["rules"] = RuleRouting.rebuild(base: base, generated: generated)
-        config["route"] = route
-        pendingRuleProjection = (subscriptionID, route["rules"] as? [[String: Any]] ?? [])
+        config = RuleRouting.rebuildingRules(in: config, base: base, generated: generated, fallbackProxyTag: nodes.first?.tag ?? "direct")
+        pendingRuleProjection = (subscriptionID, (config["route"] as? [String: Any])?["rules"] as? [[String: Any]] ?? [])
         return config
     }
 

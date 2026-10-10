@@ -139,4 +139,15 @@ enum RuleRouting {
         rules.insert(contentsOf: generated, at: customRuleInsertIndex(in: base))
         return rules
     }
+
+    /// The independent rule source may contain older managed mode rules. Reapply
+    /// the current runtime rules so an unchanged source cannot undo startup's
+    /// global selector repair and restart TUN during a delay test.
+    static func rebuildingRules(in config: [String: Any], base: [[String: Any]], generated: [[String: Any]], fallbackProxyTag: String) -> [String: Any] {
+        var config = config
+        var route = config["route"] as? [String: Any] ?? [:]
+        route["rules"] = rebuild(base: base, generated: generated)
+        config["route"] = route
+        return ProxyModeConfig.ensureModeSupport(in: config, mode: ProxyModeConfig.readMode(from: config), fallbackProxyTag: fallbackProxyTag)
+    }
 }

@@ -3,6 +3,46 @@ import XCTest
 @testable import TungBox
 
 final class RuleSetRuntimeTests: XCTestCase {
+    func testRuleProjectionDoesNotUndoCurrentModeRulesOrInvalidateNodeTests() throws {
+        let base: [[String: Any]] = [
+            ["action": "sniff"], ["protocol": "dns", "action": "hijack-dns"],
+            ["clash_mode": "direct", "outbound": "direct"],
+            ["clash_mode": "global", "outbound": TungBoxConfig.tagManual],
+            ["ip_is_private": true, "outbound": "direct"]
+        ]
+        let generated = [RuleRouting.customRouteRule(type: "DOMAIN", value: "example.invalid", strategy: "DIRECT")]
+        let original: [String: Any] = [
+            "route": ["rules": RuleRouting.rebuild(base: base, generated: generated), "final": TungBoxConfig.tagManual],
+            "outbounds": [
+                ["type": "selector", "tag": TungBoxConfig.tagManual, "outbounds": ["node"]],
+                ["type": "trojan", "tag": "node", "server": "node.invalid"]
+            ]
+        ]
+        for mode in ["Direct", "Global", "Rule"] {
+            let running = ProxyModeConfig.ensureModeSupport(in: original, mode: mode, fallbackProxyTag: "node")
+            let projected = RuleRouting.rebuildingRules(in: running, base: base, generated: generated, fallbackProxyTag: "node")
+            XCTAssertEqual(try ConfigCodec.render(projected), try ConfigCodec.render(running), "规则来源中的旧全局出站不能触发配置变化和 TUN 重载")
+            XCTAssertEqual(NodeDelayTestPolicy.configurationIdentity(try ConfigCodec.render(projected)), NodeDelayTestPolicy.configurationIdentity(try ConfigCodec.render(running)))
+        }
+    }
+
+    func testRuleProjectionStillAppliesRealRuleChangesAndPreservesOtherFields() throws {
+        let source = ProxyModeConfig.ensureModeSupport(in: [
+            "route": ["future": true, "rules": []],
+            "outbounds": [["type": "trojan", "tag": "node", "server": "node.invalid"]],
+            "future": ["keep": [2, 1]]
+        ], mode: "Global", fallbackProxyTag: "node")
+        let added = RuleRouting.customRouteRule(type: "DOMAIN", value: "added.invalid", strategy: "DIRECT")
+        let projected = RuleRouting.rebuildingRules(in: source, base: [], generated: [added], fallbackProxyTag: "node")
+        let route = try XCTUnwrap(projected["route"] as? [String: Any])
+        let rules = try XCTUnwrap(route["rules"] as? [[String: Any]])
+        XCTAssertTrue(rules.contains { NSDictionary(dictionary: $0).isEqual(to: added) })
+        XCTAssertEqual(route["future"] as? Bool, true)
+        XCTAssertTrue(NSDictionary(dictionary: projected["future"] as? [String: Any] ?? [:]).isEqual(to: source["future"] as? [String: Any] ?? [:]))
+        XCTAssertEqual(ProxyModeConfig.readMode(from: projected), "Global")
+        XCTAssertNotEqual(NodeDelayTestPolicy.configurationIdentity(try ConfigCodec.render(projected)), NodeDelayTestPolicy.configurationIdentity(try ConfigCodec.render(source)))
+    }
+
     func testInstallBundledRuleSetsCopiesMissingFilesWithoutOverwritingUpdates() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let bundled = root.appendingPathComponent("bundled")

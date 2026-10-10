@@ -1482,7 +1482,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             pendingRuleProjection = nil
         }
         store.saveProfiles(profiles)
-        ruleSetFileSignature = nil
+        // Saving the profile does not change the watched rule-set files. Keep the
+        // last observed revision; subscription changes reset it in the watcher.
         table.reloadData()
         refreshNodesFromEditor()
         refreshRulesFromEditor()
