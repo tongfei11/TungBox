@@ -497,9 +497,7 @@ extension MainWindowController {
         subscriptionTimer?.invalidate()
         subscriptionTimer = nil
 
-        let minutes = UserDefaults.standard.integer(forKey: "subscriptionRefreshMinutes")
-        let effectiveMinutes = minutes > 0 ? minutes : 60
-        let seconds = TimeInterval(effectiveMinutes * 60)
+        let minutes = SubscriptionRefreshSchedule.minutes()
 
         // If set to "off" (0 minutes), don't start a timer
         guard minutes != 0 else {
@@ -507,11 +505,7 @@ extension MainWindowController {
             return
         }
 
-        let formatter = DateComponentsFormatter()
-        formatter.unitsStyle = .abbreviated
-        let intervalText = formatter.string(from: seconds) ?? "\(effectiveMinutes)分"
-
-        subscriptionTimer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: true) { [weak self] _ in
+        subscriptionTimer = SubscriptionRefreshSchedule.makeTimer(minutes: minutes) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self, !self.subscriptions.isEmpty else { return }
                 self.appendLog("[订阅] 自动刷新开始\n")
@@ -521,7 +515,7 @@ extension MainWindowController {
                 }
             }
         }
-        appendLog("[订阅] 自动刷新已开启，间隔：\(intervalText)\n")
+        appendLog("[订阅] 自动刷新已开启，间隔：\(SubscriptionRefreshSchedule.statusText(minutes: minutes))\n")
     }
 
     @MainActor
