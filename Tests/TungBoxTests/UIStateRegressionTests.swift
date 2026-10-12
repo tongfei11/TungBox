@@ -3,6 +3,83 @@ import XCTest
 @testable import TungBox
 
 final class UIStateRegressionTests: XCTestCase {
+    @MainActor
+    func testSwitchTrackAndThumbRouteClicksToTheControl() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 100))
+        let control = MD3Switch(frame: NSRect(x: 30, y: 30, width: 52, height: 28))
+        root.addSubview(control)
+        for isOn in [false, true] {
+            control.isOn = isOn
+            root.layoutSubtreeIfNeeded()
+            for x: CGFloat in [2, 14, 26, 38, 50] {
+                let point = control.convert(NSPoint(x: x, y: 14), to: root)
+                XCTAssertTrue(root.hitTest(point) === control, "滑块和轨道应统一由开关响应")
+            }
+        }
+    }
+
+    @MainActor
+    func testSwitchSendsOneActionWhileMockDelayTestIsActive() throws {
+        for refreshingSelection in [false, true] {
+            let control = MD3Switch(frame: NSRect(x: 0, y: 0, width: 52, height: 28))
+            let recorder = SwitchActionRecorder()
+            let id = UUID()
+            recorder.testState.begin(id: id, tags: ["first", "second"])
+            if refreshingSelection { recorder.testState.refreshSelection(id: id) }
+            control.isOn = true
+            control.target = recorder
+            control.action = #selector(SwitchActionRecorder.toggle(_:))
+            let point = NSPoint(x: 38, y: 14)
+            let down = try switchEvent(.leftMouseDown, at: point, in: control)
+            let up = try switchEvent(.leftMouseUp, at: point, in: control)
+            XCTAssertTrue(control.isEnabled)
+            control.mouseDown(with: down)
+            // Status polling may reassign the same value between down and up.
+            control.isOn = true
+            control.isOn = true
+            XCTAssertTrue(recorder.values.isEmpty)
+            control.mouseUp(with: up)
+            XCTAssertEqual(recorder.values, [false])
+            XCTAssertFalse(recorder.testState.isActive)
+            XCTAssertEqual(recorder.testState.phase, .cancelled)
+            control.mouseUp(with: up)
+            XCTAssertEqual(recorder.values, [false], "一次点击只能发出一次切换意图")
+        }
+    }
+
+    @MainActor
+    func testSwitchAcceptsFirstClickButRejectsDisabledAndOutsideRelease() throws {
+        let control = MD3Switch(frame: NSRect(x: 0, y: 0, width: 52, height: 28))
+        let recorder = SwitchActionRecorder()
+        control.target = recorder
+        control.action = #selector(SwitchActionRecorder.toggle(_:))
+        let down = try switchEvent(.leftMouseDown, at: NSPoint(x: 2, y: 14), in: control)
+        let insideUp = try switchEvent(.leftMouseUp, at: NSPoint(x: 2, y: 14), in: control)
+        XCTAssertTrue(control.acceptsFirstMouse(for: down))
+        XCTAssertFalse(control.mouseDownCanMoveWindow)
+        control.mouseDown(with: down)
+        control.mouseUp(with: try switchEvent(.leftMouseUp, at: NSPoint(x: 54, y: 14), in: control))
+        XCTAssertTrue(recorder.values.isEmpty)
+        control.isEnabled = false
+        XCTAssertFalse(control.acceptsFirstMouse(for: down))
+        control.mouseDown(with: down)
+        control.mouseUp(with: insideUp)
+        XCTAssertTrue(recorder.values.isEmpty)
+        control.isEnabled = true
+        control.mouseDown(with: down)
+        control.mouseUp(with: insideUp)
+        XCTAssertEqual(recorder.values, [true])
+    }
+
+    @MainActor
+    private func switchEvent(_ type: NSEvent.EventType, at point: NSPoint, in control: MD3Switch) throws -> NSEvent {
+        try XCTUnwrap(NSEvent.mouseEvent(
+            with: type, location: control.convert(point, to: nil), modifierFlags: [],
+            timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0,
+            clickCount: 1, pressure: 1
+        ))
+    }
+
     func testTrayPresentationFollowsUserIntentWithoutWaitingForRuntimeShutdown() {
         XCTAssertTrue(TrayPresentationState.isActive(systemProxyEnabled: true, tunEnabled: false))
         XCTAssertTrue(TrayPresentationState.isActive(systemProxyEnabled: false, tunEnabled: true))
@@ -107,6 +184,17 @@ final class UIStateRegressionTests: XCTestCase {
             clickCount: 1,
             pressure: 1
         ))
+    }
+}
+
+@MainActor
+private final class SwitchActionRecorder: NSObject {
+    var values: [Bool] = []
+    var testState = NodeDelayTestState()
+
+    @objc func toggle(_ sender: MD3Switch) {
+        values.append(sender.isOn)
+        if let id = testState.requestID { testState.finish(id: id, succeeded: false) }
     }
 }
 

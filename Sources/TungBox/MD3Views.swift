@@ -2484,9 +2484,11 @@ final class MD3ColorSchemeRow: NSView, MD3Themeable {
 final class MD3Switch: NSControl, MD3Themeable {
     private let track = NSView()
     private let thumb = NSView()
+    private var isPressed = false
     
     var isOn: Bool = false {
         didSet {
+            guard oldValue != isOn else { return }
             updateVisuals(animated: true)
         }
     }
@@ -2543,14 +2545,33 @@ final class MD3Switch: NSControl, MD3Themeable {
         thumbLeadingConstraint = thumb.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4)
         thumbLeadingConstraint?.isActive = true
         
-        let click = NSClickGestureRecognizer(target: self, action: #selector(clicked))
-        addGestureRecognizer(click)
-        
         updateVisuals(animated: false)
     }
     
-    @objc private func clicked() {
-        guard isEnabled else { return }
+    // The track and thumb only draw. Route their complete hit area to the control
+    // and handle mouse-up directly, without gesture recognition or event-loop waits.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard !isHidden, !isBlockedByMD3Dialog,
+              bounds.contains(convert(point, from: superview)) else { return nil }
+        return self
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        isEnabled && !isBlockedByMD3Dialog
+    }
+
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func mouseDown(with event: NSEvent) {
+        isPressed = isEnabled && !isBlockedByMD3Dialog
+            && bounds.contains(convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        let wasPressed = isPressed
+        defer { isPressed = false }
+        guard wasPressed, isEnabled, !isBlockedByMD3Dialog,
+              bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
         isOn.toggle()
         sendAction(action, to: target)
     }
