@@ -26,6 +26,7 @@ enum TrayIconStyle: Int {
 final class MainWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate, NSWindowDelegate {
     let store = Store()
     nonisolated let systemProxyManager = SystemProxyManager()
+    nonisolated let runtimePortProbe = RuntimePortProbe()
     lazy var runner = Runner(store: store)
     var profiles: [ConfigProfile] = []
     var subscriptions: [Subscription] = []
@@ -1023,188 +1024,29 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         // Proactively SIGKILL any sing-box still holding 7890/9090 in ANY state
         // (e.g. bound-but-not-listening after a FATAL/mid-exit — the real cause of
         // the EADDRINUSE we kept hitting). Then a short settle wait.
-        killSingBoxHoldersOfPorts([port, clashPort])
-        if !waitForLocalTCPPortsFree([port, clashPort], timeout: 3.0) {
+        runtimePortProbe.killSingBoxHoldersOfPorts([port, clashPort])
+        if !runtimePortProbe.waitForLocalTCPPortsFree([port, clashPort], timeout: 3.0) {
             runner.reapStrayUserProcesses()
-            killSingBoxHoldersOfPorts([port, clashPort])
-            _ = waitForLocalTCPPortsFree([port, clashPort], timeout: 2.0)
-            log("[TungBox] 端口探测：\(portHoldersDescription([port, clashPort]))\n")
+            runtimePortProbe.killSingBoxHoldersOfPorts([port, clashPort])
+            _ = runtimePortProbe.waitForLocalTCPPortsFree([port, clashPort], timeout: 2.0)
+            log("[TungBox] 端口探测：\(runtimePortProbe.portHoldersDescription([port, clashPort]))\n")
         }
         try runner.start(config: config, elevated: false)
-        if waitForLocalTCPPort(port, timeout: 6.0) {
+        if runtimePortProbe.waitForLocalTCPPort(port, timeout: 6.0) {
             log("[TungBox] \(reason)完成，本地代理端口 \(port) 已监听\n")
             return
         }
         log("[TungBox] 端口 \(port) 未在首次启动内监听，重试一次...\n")
         runner.stop()
         runner.reapStrayUserProcesses()
-        killSingBoxHoldersOfPorts([port, clashPort])
-        _ = waitForLocalTCPPortsFree([port, clashPort], timeout: 3.0)
+        runtimePortProbe.killSingBoxHoldersOfPorts([port, clashPort])
+        _ = runtimePortProbe.waitForLocalTCPPortsFree([port, clashPort], timeout: 3.0)
         try runner.start(config: config, elevated: false)
-        guard waitForLocalTCPPort(port, timeout: 6.0) else {
+        guard runtimePortProbe.waitForLocalTCPPort(port, timeout: 6.0) else {
             runner.stop()
-            throw NSError.user("普通代理启动失败：本地端口 \(port) 未开始监听。请查看日志中的 sing-box 退出原因。端口探测：\(portHoldersDescription([port, clashPort]))")
+            throw NSError.user("普通代理启动失败：本地端口 \(port) 未开始监听。请查看日志中的 sing-box 退出原因。端口探测：\(runtimePortProbe.portHoldersDescription([port, clashPort]))")
         }
         log("[TungBox] \(reason)完成（重试后），本地代理端口 \(port) 已监听\n")
-    }
-
-    nonisolated func waitForLocalTCPPortFree(_ port: Int, timeout: TimeInterval) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if !canConnectLocalTCPPort(port) {
-                return true
-            }
-            Thread.sleep(forTimeInterval: 0.1)
-        }
-        return !canConnectLocalTCPPort(port)
-    }
-
-    /// Wait until every port in `ports` can actually be BOUND. Authoritative gate
-    /// for the TUN→system-proxy handoff. A connect test is NOT enough: while the
-    /// TUN daemon's sing-box drains on shutdown it closes its listener (so connect
-    /// is already refused — port looks "free") yet the process still holds the bound
-    /// socket until it fully exits a couple seconds later, so a fresh `bind` fails
-    /// with "address already in use". Only an explicit bind test reflects what
-    /// sing-box's own bind will see.
-    nonisolated func waitForLocalTCPPortsFree(_ ports: [Int], timeout: TimeInterval) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if ports.allSatisfy({ canBindLocalTCPPort($0) }) {
-                return true
-            }
-            Thread.sleep(forTimeInterval: 0.1)
-        }
-        return ports.allSatisfy { canBindLocalTCPPort($0) }
-    }
-
-    /// Whether 127.0.0.1:`port` can be bound right now by sing-box.
-    ///
-    /// MUST mirror sing-box's own bind options or the gate is wrong. sing-box is Go,
-    /// and Go's net listener sets SO_REUSEADDR — so it can bind a port whose old
-    /// connections are still in TIME_WAIT. Testing WITHOUT SO_REUSEADDR (as an
-    /// earlier version did) made this fail with EADDRINUSE for the full ~15s
-    /// TIME_WAIT window after the TUN daemon's sing-box (which had served live
-    /// connections on 7890) exited — even though sing-box could have bound
-    /// immediately. That stalled and then failed every TUN→system-proxy handoff.
-    /// Verified: a plain bind fails errno 48 in TIME_WAIT; with SO_REUSEADDR it
-    /// succeeds the instant the listener is gone.
-    nonisolated func canBindLocalTCPPort(_ port: Int) -> Bool {
-        let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
-        guard fd >= 0 else { return false }
-        defer { Darwin.close(fd) }
-
-        var reuse: Int32 = 1
-        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
-
-        var addr = sockaddr_in()
-        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-        addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = in_port_t(UInt16(port).bigEndian)
-        addr.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
-
-        return withUnsafePointer(to: &addr) { pointer in
-            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
-                Darwin.bind(fd, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0
-            }
-        }
-    }
-
-    /// Diagnostic: actually attempt the bind and report the exact failure (errno +
-    /// strerror), so we can tell EADDRINUSE (something holds it) from EMFILE (we ran
-    /// out of file descriptors) from anything else — instead of guessing.
-    nonisolated func bindFailureReason(_ port: Int) -> String {
-        let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
-        if fd < 0 {
-            let e = errno
-            return "\(port): socket() 失败 errno=\(e)(\(String(cString: strerror(e))))"
-        }
-        defer { Darwin.close(fd) }
-        var reuse: Int32 = 1
-        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
-        var addr = sockaddr_in()
-        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-        addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = in_port_t(UInt16(port).bigEndian)
-        addr.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
-        let rc = withUnsafePointer(to: &addr) { pointer in
-            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
-                Darwin.bind(fd, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_in>.size))
-            }
-        }
-        if rc == 0 { return "\(port): 可 bind" }
-        let e = errno
-        return "\(port): bind 失败 errno=\(e)(\(String(cString: strerror(e))))"
-    }
-
-    /// SIGKILL any *sing-box* process currently LISTENING on the given local ports.
-    /// This is the decisive way to reclaim 7890/9090 from a lingering instance — our
-    /// own user sing-box that was SIGTERM'd and is still draining keeps the listener
-    /// open, and SO_REUSEADDR can't bind past a live listener. We only kill processes
-    /// whose command line contains "sing-box" so we never touch an unrelated app.
-    nonisolated func killSingBoxHoldersOfPorts(_ ports: [Int]) {
-        for port in ports {
-            // NO `-sTCP:LISTEN` filter: a sing-box that bound the port but FATAL'd
-            // before listen() (or is mid-exit) still HOLDS the bound socket and
-            // causes EADDRINUSE, yet shows no LISTEN state. Match any TCP socket on
-            // the port; we only kill processes whose command is sing-box.
-            let pidList = runCommand("/usr/sbin/lsof", args: ["-nP", "-iTCP:\(port)", "-t"], timeoutSeconds: 2)
-            for token in pidList.split(whereSeparator: { $0 == "\n" || $0 == " " || $0 == "\t" }) {
-                guard let pid = Int32(token) else { continue }
-                let cmd = runCommand("/bin/ps", args: ["-p", "\(pid)", "-o", "command="], timeoutSeconds: 2)
-                guard cmd.contains("sing-box") else { continue }
-                Darwin.kill(pid, SIGKILL)
-            }
-        }
-    }
-
-    /// Human-readable description of who holds the given ports + the precise bind
-    /// failure (errno) + our own open-fd count, so a failure is fully self-diagnosing.
-    nonisolated func portHoldersDescription(_ ports: [Int]) -> String {
-        var holders: [String] = []
-        for port in ports {
-            let out = runCommand("/usr/sbin/lsof", args: ["-nP", "-iTCP:\(port)"], timeoutSeconds: 2)
-            for line in out.split(separator: "\n").dropFirst().prefix(3) {
-                let cols = line.split(separator: " ", omittingEmptySubsequences: true)
-                if cols.count >= 3 {
-                    holders.append("\(port):\(cols[0])(pid \(cols[1]),uid \(cols[2]))")
-                }
-            }
-        }
-        let reasons = ports.map { bindFailureReason($0) }.joined(separator: ", ")
-        // Our own open file-descriptor count — to catch fd exhaustion (EMFILE).
-        let myFD = runCommand("/usr/sbin/lsof", args: ["-p", "\(getpid())"], timeoutSeconds: 2)
-            .split(separator: "\n").count
-        let who = holders.isEmpty ? "无监听者" : holders.joined(separator: "; ")
-        return "\(who)；bind 探测=[\(reasons)]；本进程fd=\(myFD)"
-    }
-
-    nonisolated func waitForLocalTCPPort(_ port: Int, timeout: TimeInterval) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if canConnectLocalTCPPort(port) {
-                return true
-            }
-            Thread.sleep(forTimeInterval: 0.1)
-        }
-        return false
-    }
-
-    nonisolated func canConnectLocalTCPPort(_ port: Int) -> Bool {
-        let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
-        guard fd >= 0 else { return false }
-        defer { Darwin.close(fd) }
-
-        var addr = sockaddr_in()
-        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-        addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = in_port_t(UInt16(port).bigEndian)
-        addr.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
-
-        return withUnsafePointer(to: &addr) { pointer in
-            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
-                Darwin.connect(fd, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0
-            }
-        }
     }
 
     func ensureRuntimeAPISupport() throws {
