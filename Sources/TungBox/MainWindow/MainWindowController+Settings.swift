@@ -1035,7 +1035,7 @@ extension MainWindowController {
                     }
                     guard stillWanted else { return false }
                     await MainActor.run { [weak self] in
-                        guard let self else { return }
+                        guard let self, self.isTunEnabled, self.runtimeTransitionID == transitionID else { return }
                         self.appendLog("[TUN] 本地控制接口认证校验失败，已停止 TUN\n")
                         self.stopTunRequestHeartbeat()
                         try? TunServiceManager.disable(store: self.store)
@@ -1068,7 +1068,7 @@ extension MainWindowController {
             guard stillWanted else { return false }
             let reason = TunServiceManager.lastDaemonErrorLine() ?? "未知原因，请查看 TUN 日志"
             await MainActor.run { [weak self] in
-                guard let self else { return }
+                guard let self, self.isTunEnabled, self.runtimeTransitionID == transitionID else { return }
                 self.appendLog("[TUN] 启动校验失败：sing-box 未在 8 秒内就绪。原因：\(reason)\n")
                 self.stopTunRequestHeartbeat()
                 try? TunServiceManager.disable(store: self.store)

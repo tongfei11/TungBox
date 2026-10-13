@@ -748,22 +748,12 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             mixedProxyPort: getMixedProxyPort(), reason: reason, forceRestart: forceRestart,
             refreshNodeDelays: refreshNodeDelays
         ))
-        let port = request.input.mixedProxyPort
         modeChangeTask?.cancel()
         modeChangeNeedsDelayRefresh = false
         nodeDelayTestID = UUID()
-        let token = request.generation
         let wantSystemProxy = request.input.systemProxyEnabled
         let wantTun = request.input.tunEnabled
-        // TUN and system proxy are independent switches. Once the TUN request
-        // is already present, changing only the system-proxy switch must not
-        // rebuild the TUN config or rerun synchronous route checks.
         let tunNeedsReconcile = wantTun && !TunServiceManager.hasEnableRequest(store: store)
-        let runnerRef = runner
-        let storeCopy = store
-        let log: @Sendable (String) -> Void = { [weak self] text in
-            Task { @MainActor [weak self] in self?.appendLog(text) }
-        }
 
         // Snapshot the editor only when a process needs configuration. Network
         // discovery is awaited off the main actor below; toggling the OS proxy
@@ -802,142 +792,15 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         appendLog("[性能] 主线程配置准备：\(Int(Date().timeIntervalSince(transitionStarted) * 1000)) ms\n")
         if wantSystemProxy { wasProxyActiveInThisSession = true }
         appendLog("[TungBox] 正在切换运行状态（\(reason)）...\n")
+        let plan = RuntimeCoordinator.Plan(tunNeedsReconcile: tunNeedsReconcile,
+                                           userProxyURL: userProxyURL, userConfigText: userConfigText,
+                                           startedAt: transitionStarted)
         Task { @MainActor [weak self] in
-            guard let self, token == self.runtimeTransitionID else { return }
-            var tunStartup: Task<Bool, Never>?
-
-            // ===== 1) Converge the TUN daemon (utun29) — independent of the proxy =====
-            if wantTun {
-                if !tunNeedsReconcile {
-                    // Timers do not survive an app restart. Even when the previous
-                    // request files are still fresh, resume this process's heartbeat
-                    // immediately or the daemon will expire the request after 30s.
-                    self.startTunRequestHeartbeat()
-                    tunStartup = self.verifyTunStartupAsync()
-                    self.appendLog("[TungBox] TUN 已在运行，系统代理切换不重启 TUN\n")
-                } else {
-                    do {
-                        let status = try await self.runSerializedOffMain { TunServiceManager.status(store: storeCopy) }
-                        guard token == self.runtimeTransitionID else { return }
-                        guard status.isUsable else {
-                            throw NSError.user("TUN 服务不可用：\(status.displayText)。请到 设置 > TUN 设置处理。")
-                        }
-                        let source = userConfigText!
-                        let upstreamHosts = self.tunUpstreamHosts(in: source)
-                        let discoveryStarted = Date()
-                        let network = try await self.runSerializedOffMain {
-                            TUNRuntimeConfigBuilder.NetworkSnapshot(
-                                physicalInterface: TunServiceManager.defaultNetworkInterface(),
-                                resolvedAddressesByHost: self.resolvePublicIPv4Addresses(forHosts: upstreamHosts)
-                            )
-                        }
-                        guard token == self.runtimeTransitionID else { return }
-                        self.appendLog("[性能] TUN 后台出口探测：\(Int(Date().timeIntervalSince(discoveryStarted) * 1000)) ms\n")
-                        let request = try self.preparedTunConfigText(from: source, networkSnapshot: network)
-                        try await self.runSerializedOffMain {
-                            try TunServiceManager.enable(store: storeCopy, configText: request)
-                        }
-                        guard token == self.runtimeTransitionID else { return }
-                        self.startTunRequestHeartbeat()
-                        self.wasTunActiveInThisSession = true
-                        tunStartup = self.verifyTunStartupAsync()
-                        self.appendLog("[TungBox] TUN 已启用（\(reason)）\n")
-                    } catch {
-                        guard token == self.runtimeTransitionID else { return }
-                        self.appendLog("[TungBox] TUN 启用失败（\(reason)）：\(error.localizedDescription)\n")
-                        self.isTunEnabled = false
-                        UserDefaults.standard.set(false, forKey: "tunEnabled")
-                        self.tunTransition = .none
-                        self.syncProxyPreferenceControls()
-                        self.showError(error)
-                    }
-                }
-            } else {
-                // Closing TUN is INSTANT: just drop the request file. The daemon
-                // reclaims utun29 and restores the system DNS on its own in the
-                // background. We do NOT block the UI on that, and we NEVER touch the
-                // user proxy — so the proxy keeps running and the switch feels
-                // immediate, exactly like a competitor's transparent-proxy toggle.
-                self.stopTunRequestHeartbeat()
-                try? TunServiceManager.disable(store: storeCopy)
-                self.wasTunActiveInThisSession = false
-                self.appendLog("[TungBox] TUN 已关闭（守护进程后台回收 utun29 与 DNS）\n")
-                let bgStore = storeCopy
-                Task.detached { _ = TunServiceManager.waitUntilStopped(store: bgStore, timeout: 8) }
-            }
-            guard token == self.runtimeTransitionID else { return }
-
-            // ===== 2) Converge the user proxy (7890) — independent of TUN =====
-            if wantSystemProxy {
-                do {
-                    if request.input.forceRestart {
-                        try await self.runSerializedOffMain { if runnerRef.isRunning { runnerRef.stop() } }
-                    }
-                    if !runnerRef.isRunning, let url = userProxyURL {
-                        try await self.runSerializedOffMain {
-                            try self.startNormalProxyBlocking(runner: runnerRef, config: url, port: port, reason: reason, log: log)
-                        }
-                    }
-                    guard token == self.runtimeTransitionID else { return }
-                    try await ClashAPI.verifyAuthentication(port: 9090)
-                    try await self.runSerializedOffMain { self.applySystemProxyBlocking(enabled: true, port: port) }
-                    self.runDeferredNetworkChecksAfterConnection(proxyPort: port)
-                } catch {
-                    guard token == self.runtimeTransitionID else { return }
-                    self.appendLog("[TungBox] 系统代理启动失败（\(reason)）：\(error.localizedDescription)\n")
-                    self.isSystemProxyEnabled = false
-                    UserDefaults.standard.set(false, forKey: "systemProxyEnabled")
-                    self.systemProxyTransition = .none
-                    try? await self.runSerializedOffMain {
-                        if runnerRef.isRunning { runnerRef.stop() }
-                    }
-                    try? await self.runSerializedOffMain { self.applySystemProxyBlocking(enabled: false, port: port) }
-                    self.syncProxyPreferenceControls()
-                    self.showError(error)
-                }
-            } else {
-                // The preference has already been switched off by the user. End the
-                // home-page transition immediately; networksetup may take a while
-                // while it walks all active services, but that work must not make
-                // the UI claim that the proxy is still closing.
-                self.systemProxyTransition = .none
-                self.refreshStatus()
-                do {
-                    try await self.runSerializedOffMain {
-                        if runnerRef.isRunning { runnerRef.stop() }
-                        self.applySystemProxyBlocking(enabled: false, port: port)
-                    }
-                } catch {
-                    guard token == self.runtimeTransitionID else { return }
-                    self.appendLog("[TungBox] 系统代理关闭失败（\(reason)）：\(error.localizedDescription)\n")
-                    self.clearFeatureTransitions()
-                    self.refreshStatus()
-                    self.showError(error)
-                    return
-                }
-            }
-
-            let readyForTest = await NodeDelayTestPolicy.runtimeIsReady(tunStartup: tunStartup) {
-                self.runtimeCoordinator.isCurrent(request) && wantSystemProxy == self.isSystemProxyEnabled && wantTun == self.isTunEnabled
-            }
-            guard token == self.runtimeTransitionID else { return }
-            self.appendLog("[性能] 运行状态切换完成（\(reason)）：\(Int(Date().timeIntervalSince(transitionStarted) * 1000)) ms，UI 保持异步\n")
-            self.reconcileSelectorSelectionsToConfig()
-            guard self.runtimeCoordinator.finish(request) else { return }
-            self.refreshStatus()
-            self.scheduleConnectionsRefreshAfterStart()
-            if request.input.refreshNodeDelays, readyForTest {
-                self.testAllNodesClicked()
+            guard let self, self.runtimeCoordinator.isCurrent(request) else { return }
+            await self.runtimeCoordinator.converge(request, plan: plan, services: self.runtimeServices(for: request)) {
+                self.handleRuntimeEvent($0)
             }
         }
-    }
-
-    /// Run blocking runtime work through the coordinator's serial queue (off main)
-    /// and await the result without blocking the main actor. Serializing here means
-    /// two rapid toggles can never manipulate the runner/ports concurrently.
-    @discardableResult
-    private func runSerializedOffMain<T: Sendable>(_ work: @escaping @Sendable () throws -> T) async throws -> T {
-        try await runtimeCoordinator.performBlocking(work)
     }
 
     /// Drop the TUN request flag and block until the root sing-box has released its
