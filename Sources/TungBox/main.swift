@@ -27,6 +27,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     let store = Store()
     nonisolated let systemProxyManager = SystemProxyManager()
     nonisolated let runtimePortProbe = RuntimePortProbe()
+    let runtimeCoordinator = RuntimeCoordinator()
     lazy var runner = Runner(store: store)
     var profiles: [ConfigProfile] = []
     var subscriptions: [Subscription] = []
@@ -140,20 +141,22 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var isSystemProxyDefaultEnabled = UserDefaults.standard.object(forKey: "systemProxyDefaultEnabled") as? Bool ?? false
     var isSystemProxyEnabled = false
     var isTunEnabled = UserDefaults.standard.object(forKey: "tunEnabled") as? Bool ?? false
-    var isProxyServiceTransitioning = false
+    var isProxyServiceTransitioning: Bool { runtimeCoordinator.state.isTransitioning }
     /// Per-feature transition direction — drives the "启动中 / 关闭中" status chip and
     /// the loading spinner next to each switch while a runtime change is in flight.
-    enum FeatureTransition { case none, starting, stopping }
-    var systemProxyTransition: FeatureTransition = .none
-    var tunTransition: FeatureTransition = .none
+    typealias FeatureTransition = RuntimeCoordinator.FeatureTransition
+    var systemProxyTransition: FeatureTransition {
+        get { runtimeCoordinator.state.systemProxyTransition }
+        set { runtimeCoordinator.updateFeaturePresentation(systemProxy: newValue) }
+    }
+    var tunTransition: FeatureTransition {
+        get { runtimeCoordinator.state.tunTransition }
+        set { runtimeCoordinator.updateFeaturePresentation(tun: newValue) }
+    }
     var systemProxyOperationID = 0
-    // Runtime convergence runs its blocking work (TUN daemon teardown waits, port
-    // waits, user sing-box start) on this serial queue so the main thread (and the
-    // UI) never freezes. `runtimeTransitionID` is bumped on every reconcile so a
-    // stale background transition can detect it has been superseded and skip its
-    // final UI refresh.
-    let runtimeQueue = DispatchQueue(label: "com.tungbox.runtime")
-    var runtimeTransitionID = 0
+    // Every reconcile submits an immutable request to the coordinator. Existing
+    // callbacks read its generation to reject obsolete results.
+    var runtimeTransitionID: Int { runtimeCoordinator.generation }
     var isLaunchAtLoginEnabled: Bool {
         if #available(macOS 13.0, *) {
             return SMAppService.mainApp.status == .enabled
@@ -728,39 +731,30 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     /// Mark a feature as transitioning (drives the chip text + spinner). Pass nil to
     /// leave a feature's current transition untouched.
     func beginFeatureTransition(systemProxy: FeatureTransition? = nil, tun: FeatureTransition? = nil) {
-        if let systemProxy { systemProxyTransition = systemProxy }
-        if let tun { tunTransition = tun }
-        isProxyServiceTransitioning = systemProxyTransition != .none || tunTransition != .none
+        runtimeCoordinator.beginFeatureTransition(systemProxy: systemProxy, tun: tun)
     }
 
     /// Clear all transition indicators (chips fall back to their on/off state).
     func clearFeatureTransitions() {
-        systemProxyTransition = .none
-        tunTransition = .none
-        isProxyServiceTransitioning = false
+        runtimeCoordinator.clearFeatureTransitions()
     }
 
-    /// Single source of truth that converges the runtime to the two independent
-    /// switches `isSystemProxyEnabled` and `isTunEnabled` (they can be on together):
-    ///   • TUN on  → run the root daemon (it also serves 7890); stop the user runner.
-    ///   • TUN off → stop the daemon; if system proxy is on, run the user runner on
-    ///               7890, otherwise stop it.
-    ///   • The OS system-proxy setting points at 7890 whenever system proxy is on,
-    ///     regardless of which sing-box currently serves that port.
-    /// Converges the runtime to the two INDEPENDENT switches. The TUN daemon (root,
-    /// utun29 + clash 9091) and the user proxy (user, 7890 + clash 9090) are now
-    /// separate processes that never share a port — so each switch only ever
-    /// starts/stops its own thing, and toggling TUN never disturbs the user proxy
-    /// (no hand-off, no race, no "关闭TUN把代理也关了").
+    /// Converges the independent TUN and system-proxy switches. The root TUN
+    /// daemon serves 9091; the user runner serves 7890/9090. Each switch manages
+    /// its own process, using the coordinator's request snapshot and generation.
     func reconcileRuntime(reason: String, forceRestart: Bool = false, refreshNodeDelays: Bool = true) {
-        let port = getMixedProxyPort()
-        runtimeTransitionID += 1
+        let request = runtimeCoordinator.begin(.init(
+            systemProxyEnabled: isSystemProxyEnabled, tunEnabled: isTunEnabled,
+            mixedProxyPort: getMixedProxyPort(), reason: reason, forceRestart: forceRestart,
+            refreshNodeDelays: refreshNodeDelays
+        ))
+        let port = request.input.mixedProxyPort
         modeChangeTask?.cancel()
         modeChangeNeedsDelayRefresh = false
         nodeDelayTestID = UUID()
-        let token = runtimeTransitionID
-        let wantSystemProxy = isSystemProxyEnabled
-        let wantTun = isTunEnabled
+        let token = request.generation
+        let wantSystemProxy = request.input.systemProxyEnabled
+        let wantTun = request.input.tunEnabled
         // TUN and system proxy are independent switches. Once the TUN request
         // is already present, changing only the system-proxy switch must not
         // rebuild the TUN config or rerun synchronous route checks.
@@ -776,7 +770,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         // never rebuilds subscription/rules views or reconfigures a live TUN.
         var userProxyURL: URL? = nil
         var userConfigText: String? = nil
-        let needsUserProxyStart = wantSystemProxy && (!runner.isRunning || forceRestart)
+        let needsUserProxyStart = wantSystemProxy && (!runner.isRunning || request.input.forceRestart)
         let transitionStarted = Date()
         if needsUserProxyStart || tunNeedsReconcile {
             guard ensureCoreAvailableForStart() else { markProxyStartupFailed(); return }
@@ -876,7 +870,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             // ===== 2) Converge the user proxy (7890) — independent of TUN =====
             if wantSystemProxy {
                 do {
-                    if forceRestart {
+                    if request.input.forceRestart {
                         try await self.runSerializedOffMain { if runnerRef.isRunning { runnerRef.stop() } }
                     }
                     if !runnerRef.isRunning, let url = userProxyURL {
@@ -924,31 +918,26 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             }
 
             let readyForTest = await NodeDelayTestPolicy.runtimeIsReady(tunStartup: tunStartup) {
-                token == self.runtimeTransitionID && wantSystemProxy == self.isSystemProxyEnabled && wantTun == self.isTunEnabled
+                self.runtimeCoordinator.isCurrent(request) && wantSystemProxy == self.isSystemProxyEnabled && wantTun == self.isTunEnabled
             }
             guard token == self.runtimeTransitionID else { return }
             self.appendLog("[性能] 运行状态切换完成（\(reason)）：\(Int(Date().timeIntervalSince(transitionStarted) * 1000)) ms，UI 保持异步\n")
             self.reconcileSelectorSelectionsToConfig()
-            self.clearFeatureTransitions()
+            guard self.runtimeCoordinator.finish(request) else { return }
             self.refreshStatus()
             self.scheduleConnectionsRefreshAfterStart()
-            if refreshNodeDelays, readyForTest {
+            if request.input.refreshNodeDelays, readyForTest {
                 self.testAllNodesClicked()
             }
         }
     }
 
-    /// Run blocking runtime work on the serial `runtimeQueue` (off the main thread)
+    /// Run blocking runtime work through the coordinator's serial queue (off main)
     /// and await the result without blocking the main actor. Serializing here means
     /// two rapid toggles can never manipulate the runner/ports concurrently.
     @discardableResult
     private func runSerializedOffMain<T: Sendable>(_ work: @escaping @Sendable () throws -> T) async throws -> T {
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<T, Error>) in
-            runtimeQueue.async {
-                do { cont.resume(returning: try work()) }
-                catch { cont.resume(throwing: error) }
-            }
-        }
+        try await runtimeCoordinator.performBlocking(work)
     }
 
     /// Drop the TUN request flag and block until the root sing-box has released its
