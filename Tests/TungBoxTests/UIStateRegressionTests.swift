@@ -4,6 +4,133 @@ import XCTest
 
 final class UIStateRegressionTests: XCTestCase {
     @MainActor
+    func testSegmentedSelectionUsesMockTargetAfterItemsChange() throws {
+        let control = MD3SegmentedControl(frame: NSRect(x: 0, y: 0, width: 300, height: 36))
+        let recorder = InputActionRecorder()
+        control.items = ["直连", "全局", "规则"]
+        control.target = recorder
+        control.action = #selector(InputActionRecorder.selectSegment(_:))
+        let stack = try XCTUnwrap(control.subviews.compactMap { $0 as? NSStackView }.first)
+        let buttons = stack.arrangedSubviews.compactMap { $0 as? MD3Button }
+        XCTAssertEqual(buttons.count, 3)
+        buttons[2].performClick(nil)
+        XCTAssertEqual(control.selectedSegment, 2)
+        XCTAssertEqual(buttons.map(\.state), [.off, .off, .on])
+        XCTAssertEqual(recorder.segments, [2])
+
+        control.selectedSegment = 0
+        control.items = ["今日", "近七天"]
+        let replaced = stack.arrangedSubviews.compactMap { $0 as? MD3Button }
+        XCTAssertEqual(replaced.map(\.title), ["今日", "近七天"])
+        replaced[1].performClick(nil)
+        XCTAssertEqual(control.selectedSegment, 1)
+        XCTAssertEqual(recorder.segments, [2, 1], "程序刷新不应额外发送用户动作")
+    }
+
+    @MainActor
+    func testTextAndPopupKeepValuesAcrossThemeRefresh() throws {
+        let previousDark = MD3.isDark
+        defer { MD3.isDark = previousDark }
+        let root = NSView()
+        let field = MD3TextField(string: "尚未保存的输入")
+        field.placeholderString = "请输入规则"
+        let popup = MD3PopUpButton()
+        popup.addItems(withTitles: ["DIRECT", "测试节点"])
+        popup.item(at: 1)?.representedObject = "node-id"
+        popup.selectItem(at: 1)
+        root.addSubview(field)
+        root.addSubview(popup)
+        for dark in [false, true] {
+            MD3.isDark = dark
+            root.refreshSubviews()
+            field.updateLayer()
+            XCTAssertEqual(field.stringValue, "尚未保存的输入")
+            XCTAssertEqual(field.placeholderAttributedString?.string, "请输入规则")
+            XCTAssertEqual(field.textColor, MD3.onSurface)
+            XCTAssertEqual(popup.titleOfSelectedItem, "测试节点")
+            XCTAssertEqual(popup.selectedItem?.representedObject as? String, "node-id")
+        }
+    }
+
+    @MainActor
+    func testStatusAndLoadingIndicatorsReturnToIdle() throws {
+        let chip = MD3StatusChip(frame: .zero)
+        let stack = try XCTUnwrap(chip.subviews.first as? NSStackView)
+        let label = try XCTUnwrap(stack.arrangedSubviews.compactMap { $0 as? NSTextField }.first)
+        XCTAssertEqual(label.stringValue, "未启动")
+        chip.transitioningText = "启动中"
+        chip.status = .transitioning
+        XCTAssertEqual(label.stringValue, "启动中")
+        chip.isActive = true
+        XCTAssertEqual(label.stringValue, "运行中")
+        chip.status = .transitioning
+        chip.transitioningText = "关闭中"
+        chip.themeChanged()
+        XCTAssertEqual(label.stringValue, "关闭中")
+        chip.isActive = false
+        XCTAssertEqual(label.stringValue, "未启动")
+
+        let spinner = MD3Spinner(frame: NSRect(x: 0, y: 0, width: 16, height: 16))
+        XCTAssertTrue(spinner.isHidden)
+        spinner.isAnimating = true
+        spinner.themeChanged()
+        XCTAssertFalse(spinner.isHidden)
+        spinner.isAnimating = false
+        XCTAssertTrue(spinner.isHidden)
+    }
+
+    @MainActor
+    func testLatencyIndicatorKeepsWarningBoundariesAndFailureState() throws {
+        let chip = MD3LatencyChip(frame: .zero)
+        let label = try XCTUnwrap(chip.subviews.first as? NSTextField)
+        var colors: [CGColor] = []
+        for value in ["未测试", "测试中", "399 ms", "400 ms", "799 ms", "800 ms", "失败", "—"] {
+            chip.value = value
+            chip.themeChanged()
+            chip.updateLayer()
+            XCTAssertEqual(label.stringValue, value)
+            colors.append(try XCTUnwrap(chip.layer?.backgroundColor))
+        }
+        XCTAssertEqual(colors[2], MD3.successContainer.cgColor)
+        XCTAssertNotEqual(colors[2], colors[3])
+        XCTAssertEqual(colors[3], colors[4])
+        XCTAssertNotEqual(colors[4], colors[5])
+        XCTAssertEqual(colors[5], colors[6])
+        XCTAssertEqual(colors[0], colors[7])
+    }
+
+    @MainActor
+    func testCheckboxAndRadioActionsStayLocalAndRespectDisabledState() throws {
+        let recorder = InputActionRecorder()
+        let checkbox = MD3Checkbox(checkboxWithTitle: "独立复选测试", target: recorder,
+                                   action: #selector(InputActionRecorder.check(_:)))
+        let radio = MD3RadioButton(radioButtonWithTitle: "独立单选测试", target: recorder,
+                                  action: #selector(InputActionRecorder.selectRadio(_:)))
+        let event = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+        ))
+        checkbox.mouseDown(with: event)
+        checkbox.isEnabled = false
+        checkbox.mouseDown(with: event)
+        checkbox.isEnabled = true
+        checkbox.mouseDown(with: event)
+        XCTAssertEqual(recorder.checks, [true, false])
+        XCTAssertEqual(checkbox.state, .off)
+
+        radio.mouseDown(with: event)
+        radio.mouseDown(with: event)
+        radio.state = .off
+        radio.isEnabled = false
+        radio.mouseDown(with: event)
+        XCTAssertEqual(recorder.radios, [true])
+        XCTAssertEqual(radio.state, .off)
+        radio.isEnabled = true
+        radio.mouseDown(with: event)
+        XCTAssertEqual(recorder.radios, [true, true])
+    }
+
+    @MainActor
     func testThemeRefreshReachesButtonsInsidePlainContainers() throws {
         let previousDark = MD3.isDark
         defer { MD3.isDark = previousDark }
@@ -289,4 +416,15 @@ private final class SidebarActionRecorder: NSObject {
     @objc func selectItem(_ sender: MD3SidebarItem) {
         senders.append(sender)
     }
+}
+
+@MainActor
+private final class InputActionRecorder: NSObject {
+    var segments: [Int] = []
+    var checks: [Bool] = []
+    var radios: [Bool] = []
+
+    @objc func selectSegment(_ sender: MD3SegmentedControl) { segments.append(sender.selectedSegment) }
+    @objc func check(_ sender: MD3Checkbox) { checks.append(sender.isChecked) }
+    @objc func selectRadio(_ sender: MD3RadioButton) { radios.append(sender.isSelected) }
 }

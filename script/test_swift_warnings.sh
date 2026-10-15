@@ -17,6 +17,8 @@ touch \
   Sources/TungBox/MainWindow/MainWindowController+Runtime.swift \
   Sources/TungBox/Views/MD3Theme.swift \
   Sources/TungBox/Views/MD3Buttons.swift \
+  Sources/TungBox/Views/MD3Inputs.swift \
+  Sources/TungBox/Views/MD3Indicators.swift \
   Sources/TungBox/MD3Views.swift \
   Sources/TungBox/MainWindow/MainWindowController.swift \
   Sources/TungBox/AppDelegate.swift \
