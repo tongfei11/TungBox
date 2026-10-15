@@ -4,6 +4,81 @@ import XCTest
 
 final class UIStateRegressionTests: XCTestCase {
     @MainActor
+    func testThemeRefreshReachesButtonsInsidePlainContainers() throws {
+        let previousDark = MD3.isDark
+        defer { MD3.isDark = previousDark }
+        let root = NSView()
+        let container = NSView()
+        let button = MD3Button(frame: NSRect(x: 0, y: 0, width: 200, height: 40))
+        button.style = .filled
+        button.title = "独立主题测试"
+        button.image = NSImage(size: NSSize(width: 18, height: 18))
+        root.addSubview(container)
+        container.addSubview(button)
+        let stack = try XCTUnwrap(button.subviews.compactMap { $0 as? NSStackView }.first)
+        let label = try XCTUnwrap(stack.arrangedSubviews.compactMap { $0 as? NSTextField }.first)
+        let icon = try XCTUnwrap(stack.arrangedSubviews.compactMap { $0 as? NSImageView }.first)
+        let originalSize = button.intrinsicContentSize
+
+        for dark in [false, true, false] {
+            MD3.isDark = dark
+            root.refreshSubviews()
+            button.updateLayer()
+            XCTAssertEqual(label.textColor, MD3.onPrimary)
+            XCTAssertEqual(icon.contentTintColor, MD3.onPrimary)
+            XCTAssertEqual(button.layer?.backgroundColor, MD3.primary.cgColor)
+            XCTAssertEqual(button.intrinsicContentSize, originalSize)
+            XCTAssertEqual(button.title, "独立主题测试")
+        }
+    }
+
+    @MainActor
+    func testButtonHitAreaSurvivesStyleAndContentChanges() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 150))
+        let button = MD3Button(frame: NSRect(x: 30, y: 40, width: 200, height: 40))
+        root.addSubview(button)
+        let styles: [MD3Button.ButtonStyle] = [.filled, .tonal, .outlined, .text, .nav, .destructive, .segment]
+        for style in styles {
+            button.style = style
+            for title in ["", "测试按钮"] {
+                button.title = title
+                button.image = NSImage(size: NSSize(width: 18, height: 18))
+                root.layoutSubtreeIfNeeded()
+                for point in [NSPoint(x: 2, y: 2), NSPoint(x: 100, y: 20), NSPoint(x: 198, y: 38)] {
+                    XCTAssertTrue(root.hitTest(button.convert(point, to: root)) === button)
+                }
+                XCTAssertNil(button.hitTest(NSPoint(x: 29, y: 60)))
+                if title.isEmpty {
+                    XCTAssertEqual(button.intrinsicContentSize.width, button.intrinsicContentSize.height)
+                } else {
+                    XCTAssertGreaterThan(button.intrinsicContentSize.width, button.intrinsicContentSize.height)
+                }
+            }
+        }
+    }
+
+    @MainActor
+    func testButtonActionUsesMockTargetAndRespectsDisabledState() {
+        let button = MD3Button(frame: NSRect(x: 0, y: 0, width: 200, height: 40))
+        let recorder = ButtonActionRecorder()
+        button.title = "独立按钮测试"
+        button.target = recorder
+        button.action = #selector(ButtonActionRecorder.click(_:))
+        button.performClick(nil)
+        XCTAssertEqual(recorder.senders.count, 1)
+        XCTAssertTrue(recorder.senders.first === button)
+
+        button.isEnabled = false
+        button.performClick(nil)
+        XCTAssertEqual(recorder.senders.count, 1)
+        button.isEnabled = true
+        button.style = .outlined
+        button.performClick(nil)
+        XCTAssertEqual(recorder.senders.count, 2)
+        XCTAssertTrue(recorder.senders.last === button)
+    }
+
+    @MainActor
     func testSwitchTrackAndThumbRouteClicksToTheControl() {
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 100))
         let control = MD3Switch(frame: NSRect(x: 30, y: 30, width: 52, height: 28))
@@ -184,6 +259,15 @@ final class UIStateRegressionTests: XCTestCase {
             clickCount: 1,
             pressure: 1
         ))
+    }
+}
+
+@MainActor
+private final class ButtonActionRecorder: NSObject {
+    var senders: [MD3Button] = []
+
+    @objc func click(_ sender: MD3Button) {
+        senders.append(sender)
     }
 }
 

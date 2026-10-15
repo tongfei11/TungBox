@@ -3,6 +3,8 @@ import AppKit
 // 入口导航（路径相对 Sources/TungBox）：
 // AppDelegate.swift 管理启动、重开、退出，并持有 MainWindow/MainWindowController.swift；
 // 主控制器管理窗口、页面及共享 UI 状态。页面交互位于 MainWindow 下的页面扩展。
+// 配色与主题刷新见 Views/MD3Theme.swift，普通按钮见 Views/MD3Buttons.swift；
+// 其余控件暂留 MD3Views.swift，按后续步骤迁移。
 //
 // 开关链路：MainWindow/MainWindowController+Home.swift 或
 // MainWindow/MainWindowController+Tray.swift → MainWindow/MainWindowController+Runtime.swift
