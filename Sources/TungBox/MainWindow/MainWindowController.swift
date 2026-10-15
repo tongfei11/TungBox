@@ -12,6 +12,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var profiles: [ConfigProfile] = []
     var subscriptions: [Subscription] = []
     var subscriptionRefreshTracker = SubscriptionRefreshTracker()
+    var subscriptionRefreshBatch = SubscriptionRefreshBatch()
     var customRules: [CustomRule] = []
     /// Valid rule sets for the current subscription (loaded from disk).
     var customRuleSets: [CustomRuleSet] = []

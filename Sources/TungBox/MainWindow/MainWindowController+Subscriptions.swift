@@ -400,7 +400,7 @@ extension MainWindowController {
         )
     }
 
-    func refreshSubscription(at index: Int) {
+    func refreshSubscription(at index: Int, automatic: Bool = false) {
         guard subscriptions.indices.contains(index) else { return }
         let subscription = subscriptions[index]
         let refreshToken = subscriptionRefreshTracker.begin(subscriptionID: subscription.id, url: subscription.url)
@@ -427,8 +427,11 @@ extension MainWindowController {
                     manualIssues = ConfigCompatibilityChecker.check(config: obj).filter { !$0.autoFixed }
                 }
                 DispatchQueue.main.async {
-                    guard let self,
-                          let idx = self.subscriptions.firstIndex(where: { $0.id == subscription.id }),
+                    guard let self else { return }
+                    defer {
+                        if automatic { self.finishAutomaticSubscriptionRefresh(subscriptionID: subscription.id) }
+                    }
+                    guard let idx = self.subscriptions.firstIndex(where: { $0.id == subscription.id }),
                           self.subscriptionRefreshTracker.isCurrent(refreshToken, currentURL: self.subscriptions[idx].url) else { return }
                     if ua != SubscriptionImporter.fallbackUserAgents.first {
                         self.appendLog("[订阅] 服务端按 UA 返回不同内容，使用「\(ua)」拉取成功\n")
@@ -471,8 +474,11 @@ extension MainWindowController {
             } catch {
                 let errorMsg = error.localizedDescription
                 DispatchQueue.main.async {
-                    guard let self,
-                          let currentIndex = self.subscriptions.firstIndex(where: { $0.id == subscription.id }),
+                    guard let self else { return }
+                    defer {
+                        if automatic { self.finishAutomaticSubscriptionRefresh(subscriptionID: subscription.id) }
+                    }
+                    guard let currentIndex = self.subscriptions.firstIndex(where: { $0.id == subscription.id }),
                           self.subscriptionRefreshTracker.isCurrent(refreshToken, currentURL: self.subscriptions[currentIndex].url) else { return }
                     // Store error on subscription card
                     if var sub = self.subscriptions.first(where: { $0.id == subscription.id }) {
@@ -505,14 +511,29 @@ extension MainWindowController {
         subscriptionTimer = SubscriptionRefreshSchedule.makeTimer(minutes: minutes) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self, !self.subscriptions.isEmpty else { return }
+                guard self.subscriptionRefreshBatch.begin(subscriptionIDs: self.subscriptions.map(\.id)) else {
+                    self.appendLog("[订阅] 上一批自动刷新尚未结束，本次跳过\n")
+                    return
+                }
                 self.appendLog("[订阅] 自动刷新开始\n")
                 self.subscriptionAutoStatusLabel.stringValue = "订阅自动刷新：正在刷新 \(self.subscriptions.count) 个订阅"
                 for index in self.subscriptions.indices {
-                    self.refreshSubscription(at: index)
+                    self.refreshSubscription(at: index, automatic: true)
                 }
             }
         }
         appendLog("[订阅] 自动刷新已开启，间隔：\(SubscriptionRefreshSchedule.statusText(minutes: minutes))\n")
+    }
+
+    func finishAutomaticSubscriptionRefresh(subscriptionID: UUID) {
+        guard let shouldReload = subscriptionRefreshBatch.finish(
+            subscriptionID: subscriptionID, currentSubscriptionID: currentSubscription()?.id,
+            runtimeGeneration: runtimeTransitionID
+        ) else { return }
+        appendLog("[订阅] 本批自动刷新已结束\n")
+        let minutes = SubscriptionRefreshSchedule.minutes()
+        subscriptionAutoStatusLabel.stringValue = "订阅自动刷新：\(SubscriptionRefreshSchedule.statusText(minutes: minutes))，最近一批已结束"
+        if shouldReload { reloadRuntimeAfterSubscriptionRefresh() }
     }
 
     @MainActor
@@ -612,15 +633,24 @@ extension MainWindowController {
         // runner 重启**只**在当前 profile 被刷新时做。其他订阅的刷新不应该惊动当前
         // 流量。
         if isCurrent, isSystemProxyEnabled || isTunEnabled {
-            beginFeatureTransition(
-                systemProxy: isSystemProxyEnabled ? .starting : nil,
-                tun: isTunEnabled ? .starting : nil
-            )
-            for i in nodes.indices { nodes[i].delay = "未测试" }
-            refreshNodeGroupsView()
-            Task { _ = try? await ClashAPI.closeConnections(port: delayAPIPort()) }
-            reconcileRuntime(reason: "订阅刷新", forceRestart: true)
+            if subscriptionRefreshBatch.deferReload(subscriptionID: subscriptionID, runtimeGeneration: runtimeTransitionID) {
+                appendLog("[订阅] 当前订阅已更新，等待本批下载结束后应用运行配置\n")
+            } else {
+                reloadRuntimeAfterSubscriptionRefresh()
+            }
         }
+    }
+
+    func reloadRuntimeAfterSubscriptionRefresh() {
+        guard !runtimeCoordinator.state.isTerminating, isSystemProxyEnabled || isTunEnabled else { return }
+        beginFeatureTransition(
+            systemProxy: isSystemProxyEnabled ? .starting : nil,
+            tun: isTunEnabled ? .starting : nil
+        )
+        for i in nodes.indices { nodes[i].delay = "未测试" }
+        refreshNodeGroupsView()
+        Task { _ = try? await ClashAPI.closeConnections(port: delayAPIPort()) }
+        reconcileRuntime(reason: "订阅刷新", forceRestart: true)
     }
 
     func currentSubscription() -> Subscription? {
