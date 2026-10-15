@@ -165,6 +165,9 @@ extension MainWindowController {
         case .finished(let refreshNodeDelays):
             refreshStatus()
             scheduleConnectionsRefreshAfterStart()
+            if isSystemProxyEnabled || isTunEnabled {
+                applyRuntimeMode(selectedMode().value, refreshNodeDelays: modeChangeNeedsDelayRefresh, onlyIfNeeded: true)
+            }
             if refreshNodeDelays { testAllNodesClicked() }
         }
     }
@@ -351,6 +354,8 @@ extension MainWindowController {
         try startNormalProxyBlocking(runner: runner, config: config, port: port, reason: reason) { [weak self] text in
             Task { @MainActor [weak self] in self?.appendLog(text) }
         }
+        // Legacy rule updates also restart Core outside runtime convergence.
+        applyRuntimeMode(selectedMode().value, refreshNodeDelays: false, onlyIfNeeded: true)
     }
 
     /// Start the user sing-box on `port`, off the main thread.
@@ -572,7 +577,7 @@ extension MainWindowController {
         }
         return addresses
     }
-    func applyRuntimeMode(_ mode: String, refreshNodeDelays: Bool) {
+    func applyRuntimeMode(_ mode: String, refreshNodeDelays: Bool, onlyIfNeeded: Bool = false) {
         guard !runtimeCoordinator.state.isTerminating else { return }
         let previousTask = modeChangeTask
         previousTask?.cancel()
@@ -604,7 +609,11 @@ extension MainWindowController {
                 let ports = self.activeSelectorAPIPorts()
                 for port in ports {
                     guard isCurrent() else { return }
-                    try await ClashAPI.setModeAndCloseConnections(mode, port: port)
+                    if onlyIfNeeded {
+                        try await ClashAPI.reconcileMode(mode, port: port)
+                    } else {
+                        try await ClashAPI.setModeAndCloseConnections(mode, port: port)
+                    }
                 }
                 guard isCurrent() else { return }
                 self.appendLog(ports.isEmpty ? "[模式] 运行态已关闭，模式已保存\n" : "[模式] 已同步到运行中的 Core：\(mode)\n")

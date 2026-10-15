@@ -3,6 +3,59 @@ import XCTest
 @testable import TungBox
 
 final class RuntimeModeAPITests: XCTestCase {
+    func testStartupReconcilesCachedGlobalModeToSavedRuleMode() async throws {
+        let saved = ProxyModeConfig.ensureModeSupport(in: [
+            "outbounds": [["type": "direct", "tag": "direct"]],
+            "route": ["final": "direct", "rules": [
+                ["domain_suffix": "internal.example", "outbound": "direct"]
+            ]]
+        ], mode: "Rule", fallbackProxyTag: "direct")
+        let stub = ModeAPIStub(config: saved, cachedMode: "global")
+        let session = makeSession(stub)
+        defer { session.invalidateAndCancel(); ModeAPIStubRegistry.shared.remove(stub.id) }
+
+        try await ClashAPI.reconcileMode(ProxyModeConfig.readMode(from: saved), port: 9090, session: session)
+
+        XCTAssertEqual(stub.requests.map(\.method), ["GET", "PATCH", "GET", "DELETE"])
+        XCTAssertEqual(stub.requests.filter { $0.method == "PATCH" }.map(\.mode), ["Rule"])
+        XCTAssertTrue(stub.requests.allSatisfy { $0.port == 9090 && $0.authenticated })
+    }
+
+    func testMatchingStartupModePreservesConnectionsAndAvoidsPatch() async throws {
+        let stub = ModeAPIStub(cachedMode: "rUlE")
+        let session = makeSession(stub)
+        defer { session.invalidateAndCancel(); ModeAPIStubRegistry.shared.remove(stub.id) }
+
+        try await ClashAPI.reconcileMode("Rule", port: 9090, session: session)
+
+        XCTAssertEqual(stub.requests.map(\.method), ["GET"])
+    }
+
+    func testStartupAlsoReconcilesSavedGlobalAndDirectModes() async throws {
+        for mode in ["Global", "Direct"] {
+            let stub = ModeAPIStub()
+            let session = makeSession(stub)
+            defer { session.invalidateAndCancel(); ModeAPIStubRegistry.shared.remove(stub.id) }
+
+            try await ClashAPI.reconcileMode(mode, port: 9090, session: session)
+
+            XCTAssertEqual(stub.requests.map(\.method), ["GET", "PATCH", "GET", "DELETE"])
+            XCTAssertEqual(stub.requests.filter { $0.method == "PATCH" }.map(\.mode), [mode])
+        }
+    }
+
+    func testIgnoredStartupModeRepairReportsFailureWithoutClosingConnections() async {
+        let stub = ModeAPIStub(ignorePatch: true, cachedMode: "Global")
+        let session = makeSession(stub)
+        defer { session.invalidateAndCancel(); ModeAPIStubRegistry.shared.remove(stub.id) }
+
+        do {
+            try await ClashAPI.reconcileMode("Rule", port: 9090, session: session)
+            XCTFail("缓存模式修复未被 Core 应用时不能显示成功")
+        } catch {}
+        XCTAssertEqual(stub.requests.map(\.method), ["GET", "PATCH", "GET"])
+    }
+
     func testSystemProxyCanReturnToRuleAfterGlobalOrDirectStartup() async throws {
         for startupMode in ["Global", "Direct"] {
             let saved = ProxyModeConfig.ensureModeSupport(in: [
@@ -106,7 +159,7 @@ private final class ModeAPIStub: @unchecked Sendable {
     private let ignorePatch: Bool
     private let rejectCleanup: Bool
 
-    init(rejectPatch: Bool = false, ignorePatch: Bool = false, rejectCleanup: Bool = false, config: [String: Any]? = nil) {
+    init(rejectPatch: Bool = false, ignorePatch: Bool = false, rejectCleanup: Bool = false, config: [String: Any]? = nil, cachedMode: String? = nil) {
         if let config {
             currentMode = ProxyModeConfig.readMode(from: config)
             func ruleModes(_ rules: [[String: Any]]) -> [String] {
@@ -121,6 +174,10 @@ private final class ModeAPIStub: @unchecked Sendable {
                 + ruleModes(dns["rules"] as? [[String: Any]] ?? [])
         } else {
             availableModes = nil
+        }
+        if let cachedMode,
+           availableModes?.contains(where: { $0.caseInsensitiveCompare(cachedMode) == .orderedSame }) != false {
+            currentMode = cachedMode
         }
         self.rejectPatch = rejectPatch
         self.ignorePatch = ignorePatch

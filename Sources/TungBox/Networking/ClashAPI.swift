@@ -1,6 +1,15 @@
 import Foundation
 
 enum ClashAPI {
+    /// A restarted Core can restore its cached mode over default_mode. Leave a
+    /// matching mode and its connections intact; repair only an actual mismatch.
+    static func reconcileMode(_ mode: String, port: Int, session: URLSession = .shared) async throws {
+        if let config = try await requestJSON(path: "/configs", port: port, session: session) as? [String: Any],
+           let actualMode = config["mode"] as? String,
+           actualMode.caseInsensitiveCompare(mode) == .orderedSame { return }
+        try await setModeAndCloseConnections(mode, port: port, session: session)
+    }
+
     static func setModeAndCloseConnections(_ mode: String, port: Int, session: URLSession = .shared) async throws {
         _ = try await requestJSON(path: "/configs", method: "PATCH", body: ["mode": mode], port: port, session: session)
         guard let config = try await requestJSON(path: "/configs", port: port, session: session) as? [String: Any],
