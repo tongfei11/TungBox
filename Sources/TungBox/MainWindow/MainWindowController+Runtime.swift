@@ -640,4 +640,61 @@ extension MainWindowController {
     nonisolated func runCommand(_ binary: String, args: [String], timeoutSeconds: TimeInterval = 3) -> String {
         SystemCommand.run(binary, args: args, timeoutSeconds: timeoutSeconds)
     }
+
+    func isProxyRuntimeRunning() -> Bool {
+        runner.isRunning || isTunRuntimeRunning()
+    }
+
+    /// 测速时应打的 sing-box ClashAPI 端口。
+    /// 用户代理在跑用 9090；仅 TUN 守护在跑用 9091；否则返回 nil（走 sing-box URLTest）。
+    func delayAPIPort() -> Int? {
+        if runner.isRunning { return nil }           // nil → ClashAPI 默认 9090
+        if isTunRuntimeRunning() { return TungBoxConfig.tunDaemonClashPort }
+        return nil
+    }
+
+    func isProxyServiceActiveOrRequested() -> Bool {
+        isProxyServiceTransitioning
+            || runner.isRunning
+            || isTunRuntimeRunning()
+            || (isTunEnabled && (isSystemProxyEnabled || TunServiceManager.hasEnableRequest(store: store)))
+    }
+
+    func currentProxyPID() -> Int32? {
+        if runner.isRunning {
+            return runner.pid
+        }
+        if isTunRuntimeRunning() {
+            return TunServiceManager.activeSingBoxPID(store: store, allowScan: false)
+        }
+        return nil
+    }
+
+    /// Re-assert each selector group's configured `default` selection via the clash
+    /// API. sing-box's cache_file remembers the previously selected outbound and
+    /// restores it on (re)start, which otherwise overrides the user's last explicit
+    /// choice when sing-box is restarted (e.g. switching capture mode into TUN).
+    func reconcileSelectorSelectionsToConfig() {
+        guard let config = parseConfigObject(from: editor.string),
+              let outbounds = config["outbounds"] as? [[String: Any]] else { return }
+        var targets: [(group: String, node: String)] = []
+        for outbound in outbounds {
+            guard (outbound["type"] as? String)?.lowercased() == "selector",
+                  let tag = outbound["tag"] as? String,
+                  let def = (outbound["default"] as? String), !def.isEmpty else { continue }
+            targets.append((tag, def))
+        }
+        guard !targets.isEmpty else { return }
+        let apiPorts = activeSelectorAPIPorts()
+        let selectionID = selectorSelectionID
+        let transitionID = runtimeTransitionID
+        Task {
+            for target in targets {
+                for apiPort in apiPorts {
+                    guard selectionID == selectorSelectionID, transitionID == runtimeTransitionID else { return }
+                    try? await ClashAPI.selectProxy(group: target.group, node: target.node, port: apiPort)
+                }
+            }
+        }
+    }
 }

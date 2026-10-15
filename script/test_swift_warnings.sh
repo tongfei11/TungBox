@@ -15,6 +15,10 @@ touch \
   Sources/TungBox/MainWindow/MainWindowController+Nodes.swift \
   Sources/TungBox/MainWindow/MainWindowController+Configuration.swift \
   Sources/TungBox/MainWindow/MainWindowController+Runtime.swift \
+  Sources/TungBox/MainWindow/MainWindowController+Settings.swift \
+  Sources/TungBox/MainWindow/MainWindowController+CoreSettings.swift \
+  Sources/TungBox/MainWindow/MainWindowController+TUNService.swift \
+  Sources/TungBox/MainWindow/MainWindowController+Appearance.swift \
   Sources/TungBox/Views/MD3Theme.swift \
   Sources/TungBox/Views/MD3Buttons.swift \
   Sources/TungBox/Views/MD3Inputs.swift \

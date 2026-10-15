@@ -15,7 +15,7 @@ if printf '%s\n' "$console_body" | grep -q 'checkAppUpdateInBackground'; then
 fi
 
 grep -q 'runDeferredNetworkChecksAfterConnection(proxyPort: port)' Sources/TungBox/MainWindow/MainWindowController+Runtime.swift
-grep -q 'runDeferredNetworkChecksAfterConnection(proxyPort: nil)' Sources/TungBox/MainWindow/MainWindowController+Settings.swift
+grep -q 'runDeferredNetworkChecksAfterConnection(proxyPort: nil)' Sources/TungBox/MainWindow/MainWindowController+TUNService.swift
 
 test_binary="$(mktemp /tmp/tungbox-first-connection.XXXXXX)"
 trap 'rm -f "$test_binary"' EXIT

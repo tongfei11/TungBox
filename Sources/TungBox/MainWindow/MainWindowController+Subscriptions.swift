@@ -536,20 +536,6 @@ extension MainWindowController {
         if shouldReload { reloadRuntimeAfterSubscriptionRefresh() }
     }
 
-    @MainActor
-    func downgradeCoreForCompatibility() async {
-        let oldVersion = "1.11.10"
-        serviceLabel.stringValue = "sing-box Core：正在安装兼容版本 \(oldVersion)..."
-        appendLog("[Core] 订阅兼容性要求降级 Core 至 \(oldVersion)\n")
-        do {
-            let release = try await CoreUpdater.release(version: oldVersion)
-            installCoreRelease(release, reason: "兼容旧订阅")
-        } catch {
-            serviceLabel.stringValue = "sing-box Core：安装 \(oldVersion) 失败\n\(error.localizedDescription)"
-            showError(error)
-        }
-    }
-
     func applySubscriptionConfig(
         _ config: String,
         for subscriptionID: UUID,
