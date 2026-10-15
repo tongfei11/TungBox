@@ -70,6 +70,7 @@ struct TUNRuntimeConfigBuilder {
         var diagnostics: [String] = []
         var config = applyTunRuntimeRouteExclusions(in: source, resolvedByHost: resolvedAddresses, diagnostics: &diagnostics)
         config = Self.setTunCacheFile(enabled: true, in: config, cachePath: cachePath)
+        config = ProxyModeConfig.ensuringRuntimeRuleMode(in: config)
         let validation = Result { try Self.validateTunRuntimeRouting(in: config) }
         if case .success = validation {
             diagnostics += Self.finalDiagnostics(in: config)

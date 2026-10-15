@@ -4,6 +4,23 @@ import XCTest
 
 /// 全部使用显式设置与网络快照，不构造窗口、不探测网络、不启停 TUN。
 final class TUNRuntimeConfigTests: XCTestCase {
+    func testGlobalTunRuntimeAlsoRegistersRuleAfterFinalRoutingIsPrepared() throws {
+        let source = ProxyModeConfig.ensureModeSupport(in: [
+            "outbounds": [["type": "trojan", "tag": "node", "server": "203.0.113.8"]],
+            "route": ["final": "node", "rules": []]
+        ], mode: "Global", fallbackProxyTag: "node")
+        let builder = builder()
+        let prepared = builder.prepare(source)
+        let bound = builder.bindPhysicalInterface(nil, in: prepared.config)
+        let output = builder.finish(bound.config, resolvedAddresses: [:])
+        let config = try object(output.text.get())
+        let route = try dictionary(config, "route")
+        let rules = try XCTUnwrap(route["rules"] as? [[String: Any]])
+        XCTAssertEqual(rules.last?["clash_mode"] as? String, "Rule")
+        XCTAssertEqual(rules.last?["outbound"] as? String, route["final"] as? String)
+        XCTAssertEqual(ProxyModeConfig.readMode(from: config), "Global")
+    }
+
     private let cachePath = "/fixture/tun/cache.db"
     private let secret = "fixture-secret"
     private var inbound: [String: Any] {
@@ -82,7 +99,8 @@ final class TUNRuntimeConfigTests: XCTestCase {
             XCTAssertEqual(cache["path"] as? String, cachePath)
             XCTAssertEqual(cache["store_rdrc"] as? Bool, true)
             let rules = try XCTUnwrap(dictionary(result.config, "route")["rules"] as? [[String: Any]])
-            XCTAssertEqual(rules.last?["domain"] as? [String], ["keep.test"])
+            let nonModeRules = rules.filter { $0["clash_mode"] == nil }
+            XCTAssertEqual(nonModeRules.last?["domain"] as? [String], ["keep.test"])
             XCTAssertEqual(try dictionary(result.config, "route")["final"] as? String, "node")
             XCTAssertTrue(result.diagnostics.contains("[TUN] 守护进程不绑定本地代理端口（7890 由用户代理独占）\n"))
             XCTAssertFalse(result.diagnostics.joined().contains(secret))

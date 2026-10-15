@@ -3,6 +3,59 @@ import XCTest
 @testable import TungBox
 
 final class ConfigTransformationTests: XCTestCase {
+    func testRuntimeRuleModeRegistrationKeepsCustomRulesAndFinalFallback() throws {
+        let originalRules: [[String: Any]] = [
+            ["domain": ["custom.invalid"], "outbound": "custom", "future": true],
+            ["clash_mode": "global", "outbound": "global"]
+        ]
+        let source: [String: Any] = [
+            "experimental": ["clash_api": ["default_mode": "Global"]],
+            "outbounds": [["tag": "first"], ["tag": "final"]],
+            "route": ["final": "final", "rules": originalRules, "future": 7]
+        ]
+        let runtime = ProxyModeConfig.ensuringRuntimeRuleMode(in: source)
+        let route = try XCTUnwrap(runtime["route"] as? [String: Any])
+        let rules = try XCTUnwrap(route["rules"] as? [[String: Any]])
+        XCTAssertTrue(NSArray(array: Array(rules.dropLast())).isEqual(to: originalRules))
+        XCTAssertEqual(rules.last?["clash_mode"] as? String, "Rule")
+        XCTAssertEqual(rules.last?["outbound"] as? String, route["final"] as? String)
+        XCTAssertEqual(route["future"] as? Int, 7)
+        XCTAssertEqual(ProxyModeConfig.readMode(from: runtime), "Global")
+        XCTAssertTrue(NSDictionary(dictionary: runtime).isEqual(to: ProxyModeConfig.ensuringRuntimeRuleMode(in: runtime)))
+        XCTAssertEqual(((source["route"] as? [String: Any])?["rules"] as? [[String: Any]])?.count, originalRules.count)
+    }
+
+    func testRuntimeRuleModeRegistrationUsesFirstOutboundWhenFinalIsImplicit() throws {
+        for final: String? in [nil, ""] {
+            var route: [String: Any] = ["rules": []]
+            route["final"] = final
+            let source: [String: Any] = [
+                "experimental": ["clash_api": ["default_mode": "Direct"]],
+                "outbounds": [["tag": "first"], ["tag": "other"]], "route": route
+            ]
+            let runtime = ProxyModeConfig.ensuringRuntimeRuleMode(in: source)
+            let outputRoute = try XCTUnwrap(runtime["route"] as? [String: Any])
+            let rules = try XCTUnwrap(outputRoute["rules"] as? [[String: Any]])
+            XCTAssertEqual(rules.last?["outbound"] as? String, "first")
+            XCTAssertEqual(outputRoute["final"] as? String, final)
+        }
+    }
+
+    func testRuntimeRuleModeRegistrationKeepsExistingModesAndNestedRules() {
+        for section in ["route", "dns"] {
+            let source: [String: Any] = [
+                "experimental": ["clash_api": ["default_mode": "Global"]],
+                "outbounds": [["tag": "first"]],
+                section: ["rules": [["type": "logical", "mode": "and", "rules": [["clash_mode": "rUlE"]]]]]
+            ]
+            XCTAssertTrue(NSDictionary(dictionary: source).isEqual(to: ProxyModeConfig.ensuringRuntimeRuleMode(in: source)))
+        }
+        for mode in ["Rule", "rule", ""] {
+            let source: [String: Any] = ["experimental": ["clash_api": ["default_mode": mode]], "outbounds": [["tag": "first"]]]
+            XCTAssertTrue(NSDictionary(dictionary: source).isEqual(to: ProxyModeConfig.ensuringRuntimeRuleMode(in: source)))
+        }
+    }
+
     func testCodecPreservesUnknownFieldsAndOrderedValues() throws {
         let source = #"""
         {

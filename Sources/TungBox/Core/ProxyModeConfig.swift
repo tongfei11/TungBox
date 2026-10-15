@@ -2,6 +2,33 @@ import Foundation
 
 /// 模式配置转换。调用方明确传入模式与节点回退值，不读取窗口或运行状态。
 enum ProxyModeConfig {
+    /// sing-box only accepts modes declared by startup rules or default_mode.
+    /// Add Rule to transient configs when a Global/Direct startup would omit it.
+    static func ensuringRuntimeRuleMode(in config: [String: Any]) -> [String: Any] {
+        guard readMode(from: config).caseInsensitiveCompare("Rule") != .orderedSame else { return config }
+        var route = config["route"] as? [String: Any] ?? [:]
+        var rules = route["rules"] as? [[String: Any]] ?? []
+        let dns = config["dns"] as? [String: Any] ?? [:]
+        guard !containsRuleMode(rules), !containsRuleMode(dns["rules"] as? [[String: Any]] ?? []) else { return config }
+        let outbounds = config["outbounds"] as? [[String: Any]] ?? []
+        let final = (route["final"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        guard let fallback = final ?? outbounds.first?["tag"] as? String, !fallback.isEmpty else { return config }
+        // This last rule uses the same outbound as the implicit route fallback.
+        // Earlier custom rules keep their priority; saved editor configs stay intact.
+        rules.append(["clash_mode": "Rule", "outbound": fallback])
+        route["rules"] = rules
+        var runtime = config
+        runtime["route"] = route
+        return runtime
+    }
+
+    private static func containsRuleMode(_ rules: [[String: Any]]) -> Bool {
+        rules.contains { rule in
+            (rule["clash_mode"] as? String)?.caseInsensitiveCompare("Rule") == .orderedSame
+                || containsRuleMode(rule["rules"] as? [[String: Any]] ?? [])
+        }
+    }
+
     static func readMode(from config: [String: Any]) -> String {
         let experimental = config["experimental"] as? [String: Any]
         let clashAPI = experimental?["clash_api"] as? [String: Any]

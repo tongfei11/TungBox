@@ -547,6 +547,7 @@ final class Runner: @unchecked Sendable {
         var convertedTun = false
 
         if userMode {
+            json = ProxyModeConfig.ensuringRuntimeRuleMode(in: json)
             json = LocalAPIConfiguration.authenticated(
                 json,
                 listen: TungBoxConfig.clashAPIListen,

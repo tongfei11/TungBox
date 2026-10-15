@@ -3,6 +3,38 @@ import XCTest
 @testable import TungBox
 
 final class RuntimeModeAPITests: XCTestCase {
+    func testSystemProxyCanReturnToRuleAfterGlobalOrDirectStartup() async throws {
+        for startupMode in ["Global", "Direct"] {
+            let saved = ProxyModeConfig.ensureModeSupport(in: [
+                "outbounds": [["type": "direct", "tag": "direct"]],
+                "route": ["final": "direct", "rules": []]
+            ], mode: startupMode, fallbackProxyTag: "direct")
+            let stub = ModeAPIStub(config: ProxyModeConfig.ensuringRuntimeRuleMode(in: saved))
+            let session = makeSession(stub)
+            defer { session.invalidateAndCancel(); ModeAPIStubRegistry.shared.remove(stub.id) }
+            for mode in ["Rule", "Global", "Direct", "Rule"] {
+                try await ClashAPI.setModeAndCloseConnections(mode, port: 9090, session: session)
+            }
+            XCTAssertTrue(stub.requests.allSatisfy { $0.port == 9090 })
+            XCTAssertEqual(stub.requests.filter { $0.method == "PATCH" }.map(\.mode), ["Rule", "Global", "Direct", "Rule"])
+            XCTAssertEqual(stub.requests.filter { $0.method == "DELETE" }.count, 4)
+        }
+    }
+
+    func testLegacyCoreMissingRuleModeStillReportsFailure() async {
+        let stub = ModeAPIStub(config: [
+            "experimental": ["clash_api": ["default_mode": "Global"]],
+            "route": ["rules": [["clash_mode": "direct"], ["clash_mode": "global"]]]
+        ])
+        let session = makeSession(stub)
+        defer { session.invalidateAndCancel(); ModeAPIStubRegistry.shared.remove(stub.id) }
+        do {
+            try await ClashAPI.setModeAndCloseConnections("Rule", port: 9090, session: session)
+            XCTFail("Core 未声明 Rule 时不能忽略失败或清理连接")
+        } catch {}
+        XCTAssertEqual(stub.requests.map(\.method), ["PATCH", "GET"])
+    }
+
     func testHotModeSwitchUpdatesBothCoresWithoutDelayRequests() async throws {
         let stub = ModeAPIStub()
         let session = makeSession(stub)
@@ -69,11 +101,27 @@ private final class ModeAPIStub: @unchecked Sendable {
     private let lock = NSLock()
     private var recorded: [Request] = []
     private var currentMode = "Rule"
+    private let availableModes: [String]?
     private let rejectPatch: Bool
     private let ignorePatch: Bool
     private let rejectCleanup: Bool
 
-    init(rejectPatch: Bool = false, ignorePatch: Bool = false, rejectCleanup: Bool = false) {
+    init(rejectPatch: Bool = false, ignorePatch: Bool = false, rejectCleanup: Bool = false, config: [String: Any]? = nil) {
+        if let config {
+            currentMode = ProxyModeConfig.readMode(from: config)
+            func ruleModes(_ rules: [[String: Any]]) -> [String] {
+                rules.flatMap { rule in
+                    ((rule["clash_mode"] as? String).map { [$0] } ?? [])
+                        + ruleModes(rule["rules"] as? [[String: Any]] ?? [])
+                }
+            }
+            let route = config["route"] as? [String: Any] ?? [:]
+            let dns = config["dns"] as? [String: Any] ?? [:]
+            availableModes = [currentMode] + ruleModes(route["rules"] as? [[String: Any]] ?? [])
+                + ruleModes(dns["rules"] as? [[String: Any]] ?? [])
+        } else {
+            availableModes = nil
+        }
         self.rejectPatch = rejectPatch
         self.ignorePatch = ignorePatch
         self.rejectCleanup = rejectCleanup
@@ -102,7 +150,15 @@ private final class ModeAPIStub: @unchecked Sendable {
             switch request.httpMethod {
             case "PATCH":
                 if rejectPatch { return (401, Data("rejected".utf8)) }
-                if !ignorePatch, let mode { currentMode = mode }
+                if !ignorePatch, let mode {
+                    if let availableModes {
+                        if let supported = availableModes.first(where: { $0.caseInsensitiveCompare(mode) == .orderedSame }) {
+                            currentMode = supported
+                        }
+                    } else {
+                        currentMode = mode
+                    }
+                }
                 return (204, Data())
             case "DELETE": return (rejectCleanup ? 503 : 204, Data())
             default: return (200, try! JSONSerialization.data(withJSONObject: ["mode": currentMode]))
