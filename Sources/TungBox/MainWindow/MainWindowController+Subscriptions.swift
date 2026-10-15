@@ -1,6 +1,5 @@
 import AppKit
 import Foundation
-import UserNotifications
 
 extension MainWindowController {
     
@@ -484,10 +483,8 @@ extension MainWindowController {
                             self.subscriptionTable.reloadData()
                         }
                     }
+                    // 卡片状态与日志已呈现失败，后台刷新不再弹窗或发送系统通知。
                     self.appendLog("[订阅] \(subscription.name) 刷新失败：\(errorMsg)\n")
-                    // macOS notification for auto-refresh failures (not for manual refresh)
-                    self.notifySubscriptionFailure(name: subscription.name, error: errorMsg)
-                    self.showError(error)
                 }
             }
         }
@@ -530,21 +527,6 @@ extension MainWindowController {
             serviceLabel.stringValue = "sing-box Core：安装 \(oldVersion) 失败\n\(error.localizedDescription)"
             showError(error)
         }
-    }
-
-    func notifySubscriptionFailure(name: String, error: String) {
-        // UNUserNotificationCenter.current() ABORTS (SIGABRT, NSAssertion) when the
-        // process has no bundle identifier — e.g. `swift run` runs the raw binary
-        // outside an .app, and a subscription failure here would crash the whole
-        // app. Only call it when packaged; otherwise the log + showError already
-        // surface the failure.
-        guard Bundle.main.bundleIdentifier != nil else { return }
-        let content = UNMutableNotificationContent()
-        content.title = "订阅刷新失败"
-        content.body = "\(name): \(String(error.prefix(120)))"
-        content.sound = .default
-        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request)
     }
 
     func applySubscriptionConfig(
