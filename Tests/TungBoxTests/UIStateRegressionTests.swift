@@ -4,6 +4,131 @@ import XCTest
 
 final class UIStateRegressionTests: XCTestCase {
     @MainActor
+    func testTableCheckboxAcceptsFirstClickAndRowSelectionUpdatesText() throws {
+        let table = ControlFriendlyTableView()
+        let checkbox = MD3Checkbox()
+        let event = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+        ))
+        XCTAssertTrue(table.validateProposedFirstResponder(checkbox, for: event))
+        let row = MD3TableRowView()
+        let cell = MD3NodeCellView()
+        cell.configure(with: NodeInfo(tag: "测试节点", type: "trojan", server: "demo.invalid", delay: "20 ms"))
+        row.addSubview(cell)
+        row.isSelected = true
+        XCTAssertEqual(cell.titleLabel.textColor, MD3.onPrimaryContainer)
+        row.isSelected = false
+        XCTAssertEqual(cell.titleLabel.stringValue, "测试节点")
+        XCTAssertEqual(cell.titleLabel.textColor, MD3.onSurface)
+        XCTAssertEqual(cell.urlDelayChip.value, "20 ms")
+        let scroll = MD3ScrollView()
+        scroll.scrollerStyle = .legacy
+        scroll.tile()
+        XCTAssertEqual(scroll.scrollerStyle, .overlay)
+        XCTAssertTrue(scroll.verticalScroller is MD3ThinScroller)
+    }
+
+    @MainActor
+    func testSubscriptionCellReuseUsesLatestDataAndMockCallbacks() throws {
+        let cell = MD3SubscriptionCellView()
+        let left = Subscription(id: UUID(), name: "订阅 A", url: "https://first.invalid/config")
+        let right = Subscription(id: UUID(), name: "订阅 B", url: "https://second.invalid/config", lastError: "演示错误")
+        var clicked: [String] = []
+        var refreshes = 0
+        cell.configure(leftSub: left, leftSelected: true, rightSub: right, rightSelected: false,
+                       leftClick: { clicked.append("A") }, rightClick: { clicked.append("B") },
+                       leftRefresh: { refreshes += 1 })
+        XCTAssertEqual(cell.leftItem.domainLabel.stringValue, "first.invalid")
+        XCTAssertFalse(cell.rightItem.errorLabel.isHidden)
+        XCTAssertTrue(cell.rightItem.trafficLabel.isHidden)
+        let event = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+        ))
+        cell.leftItem.mouseDown(with: event)
+        let refreshButton = try XCTUnwrap(descendants(in: cell.leftItem).compactMap { $0 as? NSButton }.first)
+        refreshButton.performClick(nil)
+        refreshButton.performClick(nil)
+        XCTAssertEqual(refreshes, 1, "刷新中重复点击不能触发第二次假刷新")
+        cell.leftItem.isRefreshing = false
+
+        cell.configure(leftSub: right, leftSelected: false, rightSub: nil, rightSelected: false,
+                       leftClick: { clicked.append("B") }, rightClick: nil)
+        cell.leftItem.mouseDown(with: event)
+        XCTAssertEqual(clicked, ["A", "B"])
+        XCTAssertEqual(cell.leftItem.titleLabel.stringValue, "订阅 B")
+        XCTAssertTrue(cell.rightItem.isHidden)
+    }
+
+    @MainActor
+    func testDialogKeepsPassiveHitsInsideAndRoutesOnlyMockCallbacks() async throws {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        let field = MD3TextField(string: "独立弹窗输入")
+        field.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        let dialog = MD3Dialog(title: "测试弹窗", message: "这段文字不能穿透到背景", customView: field)
+        dialog.frame = root.bounds
+        root.addSubview(dialog)
+        root.layoutSubtreeIfNeeded()
+        var confirmed = 0, cancelled = 0
+        dialog.onConfirm = { confirmed += 1 }
+        dialog.onCancel = { cancelled += 1 }
+        let views = descendants(in: dialog)
+        let title = try XCTUnwrap(views.compactMap { $0 as? NSTextField }.first { $0.stringValue == "测试弹窗" })
+        let titlePoint = title.convert(NSPoint(x: title.bounds.midX, y: title.bounds.midY), to: root)
+        XCTAssertTrue(root.hitTest(titlePoint) === dialog)
+        let fieldPoint = field.convert(NSPoint(x: field.bounds.midX, y: field.bounds.midY), to: root)
+        XCTAssertTrue(root.hitTest(fieldPoint) === field)
+        let buttons = views.compactMap { $0 as? MD3Button }
+        try XCTUnwrap(buttons.first { $0.title == "确定" }).performClick(nil)
+        try XCTUnwrap(buttons.first { $0.title == "取消" }).performClick(nil)
+        XCTAssertEqual(confirmed, 1)
+        XCTAssertEqual(cancelled, 1)
+        XCTAssertTrue(dialog.superview === root, "回调由调用者决定是否关闭弹窗")
+        dialog.dismiss()
+        for _ in 0..<20 where dialog.superview != nil {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        XCTAssertNil(dialog.superview)
+    }
+
+    @MainActor
+    func testOnlyTopVisibleDialogAllowsItsOwnDescendants() {
+        _ = NSApplication.shared
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.contentView = nil; window.close() }
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        window.contentView = root
+        let background = MD3Button(frame: NSRect(x: 10, y: 10, width: 100, height: 40))
+        root.addSubview(background)
+        let lowerField = MD3TextField()
+        let lower = MD3Dialog(title: "下层", message: "", customView: lowerField)
+        lower.frame = root.bounds
+        root.addSubview(lower)
+        let upperField = MD3TextField()
+        let upper = MD3Dialog(title: "上层", message: "", customView: upperField)
+        upper.frame = root.bounds
+        root.addSubview(upper)
+        XCTAssertFalse(window.isVisible)
+        XCTAssertTrue(background.isBlockedByMD3Dialog)
+        XCTAssertTrue(lowerField.isBlockedByMD3Dialog)
+        XCTAssertFalse(upperField.isBlockedByMD3Dialog)
+        upper.isHidden = true
+        XCTAssertFalse(lowerField.isBlockedByMD3Dialog)
+        upper.removeFromSuperview()
+        lower.removeFromSuperview()
+        XCTAssertFalse(background.isBlockedByMD3Dialog)
+        XCTAssertFalse(window.isVisible)
+    }
+
+    @MainActor
+    private func descendants(in view: NSView) -> [NSView] {
+        view.subviews.flatMap { [$0] + descendants(in: $0) }
+    }
+
+    @MainActor
     func testSegmentedSelectionUsesMockTargetAfterItemsChange() throws {
         let control = MD3SegmentedControl(frame: NSRect(x: 0, y: 0, width: 300, height: 36))
         let recorder = InputActionRecorder()

@@ -5,7 +5,8 @@ import AppKit
 // 主控制器管理窗口、页面及共享 UI 状态。页面交互位于 MainWindow 下的页面扩展。
 // 配色与主题刷新见 Views/MD3Theme.swift，普通按钮见 Views/MD3Buttons.swift；
 // 输入与选择控件见 Views/MD3Inputs.swift，状态指示器见 Views/MD3Indicators.swift；
-// 其余控件暂留 MD3Views.swift，按后续步骤迁移。
+// 表格与滚动见 Views/MD3TableViews.swift，业务组件见 Views/MD3BusinessViews.swift；
+// 遮罩弹窗及交互边界见 Views/MD3Dialog.swift。
 //
 // 开关链路：MainWindow/MainWindowController+Home.swift 或
 // MainWindow/MainWindowController+Tray.swift → MainWindow/MainWindowController+Runtime.swift
