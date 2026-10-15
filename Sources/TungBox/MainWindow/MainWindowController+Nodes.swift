@@ -877,4 +877,98 @@ extension MainWindowController {
             refreshNodeGroupsView()
         }
     }
+
+    func modeDisplayName(_ mode: String) -> String {
+        ConfigInspection.modeDisplayName(mode)
+    }
+
+    func refreshModeFromEditor() {
+        guard let config = parseConfigObject(from: editor.string) else {
+            syncModeControls(mode: "Rule")
+            modeStatusLabel.stringValue = "当前模式：无法读取配置"
+            return
+        }
+        let mode = readMode(from: config)
+        syncModeControls(mode: mode)
+        updateModeStatus()
+    }
+
+    func syncModeControls(mode: String) {
+        let segment = modeSegment(for: mode)
+        modeControl.selectedSegment = segment
+        nodesModeControl.selectedSegment = segment
+        modeControl.layoutSubtreeIfNeeded()
+        nodesModeControl.layoutSubtreeIfNeeded()
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.modeControl.selectedSegment = segment
+            self.nodesModeControl.selectedSegment = segment
+            self.modeControl.layoutSubtreeIfNeeded()
+            self.nodesModeControl.layoutSubtreeIfNeeded()
+        }
+    }
+
+    func updateModeStatus() {
+        let mode = selectedMode()
+        let hasClashModeRules = editor.string.contains("\"clash_mode\"")
+        let suffix = hasClashModeRules
+            ? "配置中已包含 clash_mode 规则。"
+            : "配置中暂未看到 clash_mode 规则，切换模式时会补 direct/global 前置规则。"
+        modeStatusLabel.stringValue = "当前模式：\(mode.displayName)\n\(suffix)"
+    }
+
+    func applySelectedMode() throws {
+        guard !runtimeCoordinator.state.isTerminating else { return }
+        guard var config = parseConfigObject(from: editor.string) else {
+            throw NSError.user("当前配置不是有效 JSON")
+        }
+        let previousMode = readMode(from: config)
+        let mode = selectedMode()
+        let refreshDelays = NodeDelayTestPolicy.refreshAfterModeChange(
+            from: previousMode, to: mode.value,
+            pendingRefresh: modeChangeNeedsDelayRefresh
+        )
+        config = ensureModeSupport(in: config, mode: mode)
+        editor.string = try renderConfig(config)
+        let url = try saveCurrent()
+        let output = try runner.check(config: url)
+        appendLog("[mode] 已切换到 \(mode.displayName)：\(output)\n")
+        refreshModeFromEditor()
+        refreshNodeGroupsView()   // re-filter shown groups for the new mode
+
+        if isProxyServiceActiveOrRequested() {
+            applyRuntimeMode(mode.value, refreshNodeDelays: refreshDelays)
+        } else if refreshDelays {
+            testAllNodesClicked()
+        }
+    }
+    struct Mode {
+        var value: String
+        var displayName: String
+    }
+
+    func selectedMode() -> Mode {
+        switch modeControl.selectedSegment {
+        case 0: return Mode(value: "Direct", displayName: "直连/绕过代理")
+        case 1: return Mode(value: "Global", displayName: "全局代理")
+        default: return Mode(value: "Rule", displayName: "规则判定")
+        }
+    }
+
+    func modeSegment(for mode: String) -> Int {
+        switch mode.lowercased() {
+        case "direct": return 0
+        case "global": return 1
+        default: return 2
+        }
+    }
+
+    func nodesModeSegment(forHomeSegment segment: Int) -> Int {
+        segment
+    }
+
+    func homeModeSegment(forNodesSegment segment: Int) -> Int {
+        segment
+    }
 }

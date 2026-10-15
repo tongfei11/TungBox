@@ -3,12 +3,18 @@ import Darwin
 import Foundation
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private let makeController: @MainActor () -> MainWindowController
     private var controller: MainWindowController?
     private var terminationReplyTask: Task<Void, Never>?
 
+    init(makeController: @escaping @MainActor () -> MainWindowController) {
+        self.makeController = makeController
+        super.init()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMainMenu()
-        controller = MainWindowController()
+        controller = makeController()
 
         let startSilently = UserDefaults.standard.bool(forKey: "startSilently")
         if isLaunchedAtLogin() && startSilently {

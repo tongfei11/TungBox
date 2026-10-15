@@ -12,6 +12,9 @@ cd "$ROOT_DIR"
 touch \
   Sources/TungBox/MainWindow/MainWindowController+Connections.swift \
   Sources/TungBox/MainWindow/MainWindowController+Home.swift \
+  Sources/TungBox/MainWindow/MainWindowController+Nodes.swift \
+  Sources/TungBox/MainWindow/MainWindowController+Configuration.swift \
+  Sources/TungBox/MainWindow/MainWindowController+Runtime.swift \
   Sources/TungBox/MainWindow/MainWindowController.swift \
   Sources/TungBox/AppDelegate.swift \
   Sources/TungBox/main.swift
