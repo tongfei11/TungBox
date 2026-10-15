@@ -4,13 +4,17 @@ set -eu
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
-console_body="$(sed -n '/func showConsoleWindow()/,/^    }/p' Sources/TungBox/main.swift)"
+console_body="$(sed -n '/func showConsoleWindow()/,/^    }/p' Sources/TungBox/MainWindow/MainWindowController.swift)"
+if [ -z "$console_body" ]; then
+  echo "FAIL: console reopen implementation was not found" >&2
+  exit 1
+fi
 if printf '%s\n' "$console_body" | grep -q 'checkAppUpdateInBackground'; then
   echo "FAIL: opening the console still checks GitHub before the first connection" >&2
   exit 1
 fi
 
-grep -q 'runDeferredNetworkChecksAfterConnection(proxyPort: port)' Sources/TungBox/main.swift
+grep -q 'runDeferredNetworkChecksAfterConnection(proxyPort: port)' Sources/TungBox/MainWindow/MainWindowController+Runtime.swift
 grep -q 'runDeferredNetworkChecksAfterConnection(proxyPort: nil)' Sources/TungBox/MainWindow/MainWindowController+Settings.swift
 
 test_binary="$(mktemp /tmp/tungbox-first-connection.XXXXXX)"

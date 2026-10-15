@@ -12,6 +12,8 @@ cd "$ROOT_DIR"
 touch \
   Sources/TungBox/MainWindow/MainWindowController+Connections.swift \
   Sources/TungBox/MainWindow/MainWindowController+Home.swift \
+  Sources/TungBox/MainWindow/MainWindowController.swift \
+  Sources/TungBox/AppDelegate.swift \
   Sources/TungBox/main.swift
 
 if ! swift build >"$LOG_FILE" 2>&1; then

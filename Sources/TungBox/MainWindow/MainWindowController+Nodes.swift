@@ -622,4 +622,259 @@ extension MainWindowController {
         refreshNodesFromEditor()
         showToast("节点列表已刷新（\(nodes.count) 个）", style: .info)
     }
+
+    func refreshNodesFromEditor() {
+        // Re-parsing the editor rebuilds NodeInfo with delay "未测试", which would
+        // wipe latencies already measured this session (e.g. when switching the
+        // selected node from auto to a manual one). Carry the measured delay over
+        // for nodes that are still the same (matched by tag + server).
+        let previousDelays = Dictionary(
+            nodes.map { ("\($0.tag)\u{1}\($0.server)", $0.delay) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var parsed = parseNodes(from: editor.string)
+        for index in parsed.indices {
+            let key = "\(parsed[index].tag)\u{1}\(parsed[index].server)"
+            if let previous = previousDelays[key], previous != "未测试", previous != "测试中" {
+                parsed[index].delay = previous
+            }
+        }
+        nodes = parsed
+        nodeGroups = parseNodeGroups(from: editor.string)
+        nodeTable.reloadData()
+        populateRuleStrategyPopup()
+        refreshNodeGroupsView()
+        selectCurrentNodeInTable()
+    }
+
+    func activeSelectorAPIPorts() -> [Int] {
+        var ports: [Int] = []
+        if runner.isRunning { ports.append(9090) }
+        if isTunRuntimeRunning() { ports.append(TungBoxConfig.tunDaemonClashPort) }
+        return ports
+    }
+
+    func selectNode(at index: Int) {
+        guard nodes.indices.contains(index) else { return }
+        selectNode(nodes[index].tag, inGroup: TungBoxConfig.tagManual)
+    }
+
+    static func optimisticSelectionState(
+        nodeGroups: [NodeGroupInfo],
+        proxiesObj: [String: Any]?,
+        nodeTag: String,
+        groupTag: String
+    ) -> (nodeGroups: [NodeGroupInfo], proxiesObj: [String: Any]?) {
+        var updatedGroups = nodeGroups
+        if let index = updatedGroups.firstIndex(where: { $0.tag == groupTag }) {
+            updatedGroups[index].current = nodeTag
+        }
+
+        var updatedProxiesObj = proxiesObj
+        if var root = updatedProxiesObj,
+           var proxies = root["proxies"] as? [String: Any] {
+            var runtimeGroup = proxies[groupTag] as? [String: Any] ?? [:]
+            runtimeGroup["now"] = nodeTag
+            proxies[groupTag] = runtimeGroup
+            root["proxies"] = proxies
+            updatedProxiesObj = root
+        }
+        return (updatedGroups, updatedProxiesObj)
+    }
+
+    func applyOptimisticNodeSelection(nodeTag: String, groupTag: String) {
+        let state = Self.optimisticSelectionState(
+            nodeGroups: nodeGroups,
+            proxiesObj: lastProxiesObj,
+            nodeTag: nodeTag,
+            groupTag: groupTag
+        )
+        nodeGroups = state.nodeGroups
+        lastProxiesObj = state.proxiesObj
+        refreshNodeGroupsView()
+
+        if groupTag == TungBoxConfig.tagManual && isProxyServiceActiveOrRequested() {
+            let active = resolveActiveOutbound(proxiesObj: lastProxiesObj)
+            currentNodeNameLabel.stringValue = active.name.isEmpty ? nodeTag : active.name
+            currentNodeAutoBadge.isHidden = !active.isAuto
+            let delay = nodes.first(where: { $0.tag == active.name })?.delay ?? "—"
+            currentNodeDelayLabel.stringValue = delay == "未测试" ? "—" : delay
+            currentNodeDelayLabel.textColor = MD3.latencyTextColor(currentNodeDelayLabel.stringValue)
+            refreshTrayIcon()
+        }
+    }
+
+    func selectNode(_ nodeTag: String, inGroup groupTag: String) {
+        guard !runtimeCoordinator.state.isTerminating else { return }
+        selectorSelectionID = UUID()
+        let selectionID = selectorSelectionID
+        let transitionID = runtimeTransitionID
+        let apiPorts = activeSelectorAPIPorts()
+        let previousNodeGroups = nodeGroups
+        let previousProxiesObj = lastProxiesObj
+
+        // Reflect the click before any control API, connection cleanup or disk I/O.
+        // The runtime/config work below remains serialized in the background task.
+        applyOptimisticNodeSelection(nodeTag: nodeTag, groupTag: groupTag)
+
+        selectorSelectionTask = Task {
+            guard selectorSelectionID == selectionID, runtimeTransitionID == transitionID else { return }
+            var switchedByAPI = false
+            if isProxyRuntimeRunning() {
+                do {
+                    for apiPort in apiPorts {
+                        guard selectorSelectionID == selectionID, runtimeTransitionID == transitionID else { return }
+                        try await ClashAPI.selectProxyAndCloseConnections(group: groupTag, node: nodeTag, port: apiPort)
+                    }
+                    switchedByAPI = true
+                    appendLog("[节点] \(groupTag) 已通过运行时 API 切换到: \(nodeTag)\n")
+                } catch {
+                    appendLog("[节点] 运行时 API 切换失败，改用配置重启：\(error.localizedDescription)\n")
+                }
+            }
+            guard self.selectorSelectionID == selectionID, self.runtimeTransitionID == transitionID else { return }
+            do {
+                guard var config = self.parseConfigObject(from: self.editor.string) else {
+                    throw NSError.user("当前配置不是有效 JSON")
+                }
+                var outbounds = config["outbounds"] as? [[String: Any]] ?? []
+                var found = false
+                for i in outbounds.indices {
+                    if outbounds[i]["tag"] as? String == groupTag,
+                       ((outbounds[i]["type"] as? String)?.lowercased() == "selector") {
+                        outbounds[i]["default"] = nodeTag
+                        found = true
+                    }
+                }
+                if found {
+                    config["outbounds"] = outbounds
+                    self.editor.string = try self.renderConfig(config)
+                    _ = try self.saveCurrent()
+                    self.appendLog("[节点] \(groupTag) 已选择: \(nodeTag)\n")
+                    self.refreshNodesFromEditor()
+                    if self.isProxyRuntimeRunning() && !switchedByAPI {
+                        if self.isTunEnabled {
+                            // TUN is already running; hot-reload the config in
+                            // place. A full restart here re-runs start-time
+                            // checks that can throw and tear the live TUN down
+                            // (the reported "switching node killed the proxy").
+                            let reloaded = await self.reloadTunConfigInPlace(configText: self.editor.string)
+                            guard self.selectorSelectionID == selectionID, self.runtimeTransitionID == transitionID else { return }
+                            if reloaded { self.appendLog("[节点] 已按新节点热重载 TUN\n") }
+                            if self.isSystemProxyEnabled { self.reconcileRuntime(reason: "节点切换后重启", forceRestart: true) }
+                        } else {
+                            self.reconcileRuntime(reason: "节点切换后重启", forceRestart: true)
+                            self.appendLog("[节点] 服务已按新节点重启\n")
+                        }
+                        self.refreshStatus()
+                    } else {
+                        self.refreshStatus()
+                    }
+                } else {
+                    throw NSError.user("当前配置中未找到节点选择组：\(groupTag)")
+                }
+            } catch {
+                // If neither the runtime nor the persisted config accepted the
+                // change, restore the rendered state. When the runtime switch
+                // succeeded, keep showing that real state and only report that
+                // persistence failed.
+                if !switchedByAPI {
+                    self.nodeGroups = previousNodeGroups
+                    self.lastProxiesObj = previousProxiesObj
+                    self.refreshNodeGroupsView()
+                    self.refreshStatus()
+                }
+                self.showError(error)
+            }
+        }
+    }
+    func parseNodes(from text: String) -> [NodeInfo] {
+        ConfigInspection.parseNodes(from: text)
+    }
+
+    func parseNodeGroups(from text: String) -> [NodeGroupInfo] {
+        ConfigInspection.parseNodeGroups(from: text)
+    }
+    func resolveActiveOutbound(proxiesObj: [String: Any]?) -> (name: String, isAuto: Bool) {
+        return resolveActiveOutboundForGroup(groupTag: "节点选择", proxiesObj: proxiesObj)
+    }
+
+    nonisolated static func automaticSelectionTransition(
+        previous: String?,
+        currentName: String,
+        isAutomatic: Bool
+    ) -> (next: String?, didChange: Bool) {
+        guard isAutomatic, !currentName.isEmpty, currentName != "自动选择" else {
+            return (nil, false)
+        }
+        return (currentName, previous != nil && previous != currentName)
+    }
+
+    func resolveActiveOutboundForGroup(groupTag: String, proxiesObj: [String: Any]?) -> (name: String, isAuto: Bool) {
+        guard let proxiesObj = proxiesObj,
+              let proxies = proxiesObj["proxies"] as? [String: Any] else {
+            if let group = nodeGroups.first(where: { $0.tag == groupTag }) {
+                if group.current == "自动选择" {
+                    if let autoGroup = nodeGroups.first(where: { $0.tag == "自动选择" }) {
+                        return (autoGroup.current.isEmpty ? "自动选择" : autoGroup.current, true)
+                    }
+                }
+                return (group.current.isEmpty ? "默认" : group.current, false)
+            }
+
+            var offlineNode = "默认"
+            if let config = parseConfigObject(from: editor.string),
+               let outbounds = config["outbounds"] as? [[String: Any]],
+               let selector = outbounds.first(where: { $0["tag"] as? String == groupTag }),
+               let defNode = selector["default"] as? String {
+                offlineNode = defNode
+            } else if let firstNode = nodes.first {
+                offlineNode = firstNode.tag
+            }
+            return (offlineNode, false)
+        }
+
+        var current = groupTag
+        var isAuto = false
+        var visited = Set<String>()
+
+        while let group = proxies[current] as? [String: Any], !visited.contains(current) {
+            visited.insert(current)
+            if let now = group["now"] as? String {
+                let type = (group["type"] as? String)?.lowercased() ?? ""
+                if current == "自动选择" || type == "urltest" || type == "fallback" {
+                    isAuto = true
+                }
+                current = now
+            } else {
+                break
+            }
+        }
+
+        return (current, isAuto)
+    }
+
+    func syncNodeDelaysFromClashAPI(proxiesObj: [String: Any]?) {
+        guard let proxiesObj = proxiesObj,
+              let proxies = proxiesObj["proxies"] as? [String: Any] else { return }
+
+        var updated = nodeDelayTestState.syncBackgroundDelays(proxies: proxies, in: &nodes)
+
+        // Sync group active nodes (current values) from Clash API
+        for index in nodeGroups.indices {
+            let groupTag = nodeGroups[index].tag
+            if let groupData = proxies[groupTag] as? [String: Any],
+               let now = groupData["now"] as? String {
+                if nodeGroups[index].current != now {
+                    nodeGroups[index].current = now
+                    updated = true
+                }
+            }
+        }
+
+        if updated {
+            nodeTable.reloadData()
+            refreshNodeGroupsView()
+        }
+    }
 }

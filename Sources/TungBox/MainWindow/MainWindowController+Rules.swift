@@ -1023,4 +1023,71 @@ extension MainWindowController {
               let ruleSets = route["rule_set"] as? [[String: Any]] else { return [] }
         return ruleSets
     }
+
+    func populateRuleTypePopup() {
+        let currentKey = customRuleTypePopup.selectedItem?.representedObject as? String
+        customRuleTypePopup.removeAllItems()
+        let sections = [
+            ["DOMAIN", "DOMAIN-SUFFIX", "DOMAIN-KEYWORD", "DOMAIN-WILDCARD", "DOMAIN-REGEX"],
+            ["IP-CIDR", "IP-CIDR6", "GEOIP", "SRC-IP"],
+            ["PROCESS-NAME", "PROCESS-PATH", "URL-REGEX"],
+            ["DEST-PORT", "PROTOCOL", "NETWORK"],
+            ["RULE-SET", "LAN"]
+        ]
+        for (index, section) in sections.enumerated() {
+            if index > 0 {
+                customRuleTypePopup.menu?.addItem(NSMenuItem.separator())
+            }
+            for key in section {
+                // Show "ENGLISH 中文" (Chinese greyed) but keep the English key in
+                // representedObject so the type switches elsewhere read a stable
+                // identifier, not the label. The per-item action fires the type-change
+                // handler reliably (the popup-level action was inconsistent through
+                // the custom cell).
+                let item = NSMenuItem(
+                    title: key,
+                    action: #selector(customRuleTypeChanged),
+                    keyEquivalent: ""
+                )
+                item.attributedTitle = ruleTypeAttributedTitle(key)
+                item.target = self
+                item.representedObject = key
+                customRuleTypePopup.menu?.addItem(item)
+            }
+        }
+        if let currentKey {
+            selectRuleType(currentKey)
+        }
+    }
+
+    func populateRuleStrategyPopup() {
+        let current = customRuleStrategyPopup.titleOfSelectedItem
+        customRuleStrategyPopup.removeAllItems()
+        customRuleStrategyPopup.addItems(withTitles: ["DIRECT", "REJECT"])
+        customRuleStrategyPopup.menu?.addItem(NSMenuItem.separator())
+        customRuleStrategyPopup.addItems(withTitles: ["Proxy", "AUTO"])
+        let nodeTags = nodes.map(\.tag).filter { !$0.isEmpty }
+        if !nodeTags.isEmpty {
+            customRuleStrategyPopup.menu?.addItem(NSMenuItem.separator())
+            customRuleStrategyPopup.addItems(withTitles: nodeTags)
+        }
+        if let current, popup(customRuleStrategyPopup, contains: current) {
+            customRuleStrategyPopup.selectItem(withTitle: current)
+        } else {
+            customRuleStrategyPopup.selectItem(withTitle: "Proxy")
+        }
+    }
+
+    func popup(_ popup: NSPopUpButton, contains title: String) -> Bool {
+        popup.itemArray.contains { $0.title == title }
+    }
+
+    func makeRuleCell(for rule: RuleInfo, columnID: String) -> NSView {
+        RuleTableCell.make(for: rule, columnID: columnID) { [self] button, ruleID in
+            // The action indexes persisted rules, not display rows with section headers.
+            button.tag = customRules.firstIndex(where: { $0.id == ruleID }) ?? -1
+            button.target = self
+            button.action = #selector(toggleRuleEnabled(_:))
+        }
+    }
 }

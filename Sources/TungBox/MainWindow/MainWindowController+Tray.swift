@@ -1,6 +1,26 @@
 import AppKit
 import Foundation
 
+enum TrayIconStyle: Int {
+    case iconOnly = 0
+    case iconAndSpeed = 1
+    case speedOnly = 2
+
+    static let defaultsKey = "trayIconStyle"
+
+    static var current: TrayIconStyle {
+        TrayIconStyle(rawValue: UserDefaults.standard.integer(forKey: defaultsKey)) ?? .iconOnly
+    }
+
+    var title: String {
+        switch self {
+        case .iconOnly: return "仅显示图标"
+        case .iconAndSpeed: return "显示图标和实时速度"
+        case .speedOnly: return "仅显示实时速度"
+        }
+    }
+}
+
 enum TrayPresentationState {
     static func isActive(systemProxyEnabled: Bool, tunEnabled: Bool) -> Bool {
         systemProxyEnabled || tunEnabled
