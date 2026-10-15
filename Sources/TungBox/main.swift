@@ -153,7 +153,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         get { runtimeCoordinator.state.tunTransition }
         set { runtimeCoordinator.updateFeaturePresentation(tun: newValue) }
     }
-    var systemProxyOperationID = 0
     // Every reconcile submits an immutable request to the coordinator. Existing
     // callbacks read its generation to reject obsolete results.
     var runtimeTransitionID: Int { runtimeCoordinator.generation }
@@ -743,6 +742,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     /// daemon serves 9091; the user runner serves 7890/9090. Each switch manages
     /// its own process, using the coordinator's request snapshot and generation.
     func reconcileRuntime(reason: String, forceRestart: Bool = false, refreshNodeDelays: Bool = true) {
+        guard !runtimeCoordinator.state.isTerminating else { return }
         let request = runtimeCoordinator.begin(.init(
             systemProxyEnabled: isSystemProxyEnabled, tunEnabled: isTunEnabled,
             mixedProxyPort: getMixedProxyPort(), reason: reason, forceRestart: forceRestart,
@@ -910,7 +910,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
     func scheduleConnectionsRefreshAfterStart() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
-            guard let self, self.isProxyRuntimeRunning() else { return }
+            guard let self, !self.runtimeCoordinator.state.isTerminating, self.isProxyRuntimeRunning() else { return }
             if self.isConnectionsPageSelected() {
                 self.startConnectionsRefreshTimer()
             }
@@ -1015,96 +1015,6 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             return false
         }
         return true
-    }
-
-    func stopService(clearSystemProxySynchronously: Bool = false, isTerminating: Bool = false) {
-        let shouldDisableTun = wasTunActiveInThisSession && (
-            isTunEnabled
-            || TunServiceManager.status(store: store).isRunning
-            || TunServiceManager.hasRequestFiles(store: store)
-            || TunServiceManager.hasNetworkResidue()
-        )
-        let shouldStopNormalProxy = runner.isRunning
-        let shouldClearSystemProxy = wasProxyActiveInThisSession && (isSystemProxyEnabled || shouldStopNormalProxy)
-
-        // 1. Tell TUN daemon to stop (removes enabled flag; daemon cleanly kills TUN child, keeps daemon alive)
-        if shouldDisableTun {
-            stopTunRequestHeartbeat()
-            try? TunServiceManager.disable(store: store)
-            appendLog("[TungBox] TUN 标记已关闭\n")
-            if isTerminating {
-                // App is quitting: removing the request files is all we owe the
-                // persistent root daemon — it reclaims utun29 and restores the
-                // system DNS on its own within ~1s. Never block the main thread
-                // (and the app's exit) waiting for that reclaim to finish.
-                appendLog("[TungBox] 退出：已交由后台守护进程回收 TUN\n")
-                wasTunActiveInThisSession = false
-            } else if clearSystemProxySynchronously {
-                let timeout: TimeInterval = 8
-                if TunServiceManager.waitUntilStopped(store: store, timeout: timeout) {
-                    appendLog("[TungBox] TUN 已确认回收\n")
-                } else {
-                    let residue = TunServiceManager.networkResidueDescription() ?? "未知残留"
-                    appendLog("[警告] TUN 未在 \(Int(timeout)) 秒内确认回收：\(residue)。请到设置重新安装 TUN 服务以更新安全停机脚本。\n")
-                    showToast("TUN 未确认回收，请重新安装 TUN 服务")
-                }
-                wasTunActiveInThisSession = false
-            } else {
-                let storeCopy = self.store
-                appendLog("[TungBox] 正在后台等待回收 TUN 网卡...\n")
-                Task.detached { [weak self] in
-                    let success = TunServiceManager.waitUntilStopped(store: storeCopy, timeout: 6)
-                    let residue = success ? nil : (TunServiceManager.networkResidueDescription() ?? "未知残留")
-                    
-                    await MainActor.run { [weak self] in
-                        guard let self = self else { return }
-                        if success {
-                            self.appendLog("[TungBox] TUN 已确认回收\n")
-                        } else {
-                            self.appendLog("[警告] TUN 未能在后台确认回收：\(residue ?? "")。请到设置重新安装 TUN 服务以更新安全停机脚本。\n")
-                            self.showToast("TUN 未确认回收，请重新安装 TUN 服务")
-                        }
-                        self.wasTunActiveInThisSession = false
-                    }
-                }
-            }
-        } else {
-            wasTunActiveInThisSession = false
-        }
-
-        // 2. Stop sing-box processes (normal + elevated)
-        if shouldStopNormalProxy {
-            runner.stop()
-            appendLog("[TungBox] sing-box 已停止\n")
-        }
-
-        // 3. Turn off system proxy synchronously — must complete before app exits
-        if shouldClearSystemProxy {
-            let port = getMixedProxyPort()
-            if clearSystemProxySynchronously {
-                setSystemProxySync(enabled: false, port: port)
-            } else {
-                setSystemProxy(enabled: false, port: port)
-            }
-            appendLog("[TungBox] 系统代理已关闭\n")
-        }
-        wasProxyActiveInThisSession = false
-
-        isSystemProxyEnabled = false
-        clearFeatureTransitions()
-
-        // No UI refresh on the exit path — the app is tearing down and a status
-        // sweep here only adds work (and timers) to a process that is going away.
-        if !isTerminating {
-            refreshStatus()
-        }
-    }
-
-    func setSystemProxySync(enabled: Bool, port: Int) {
-        if enabled {
-            wasProxyActiveInThisSession = true
-        }
-        systemProxyManager.apply(enabled: enabled, port: port)
     }
 
     func selectProfile(at index: Int, forceReload: Bool = false) {
@@ -1291,6 +1201,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     }
 
     func selectNode(_ nodeTag: String, inGroup groupTag: String) {
+        guard !runtimeCoordinator.state.isTerminating else { return }
         selectorSelectionID = UUID()
         let selectionID = selectorSelectionID
         let transitionID = runtimeTransitionID
@@ -1317,60 +1228,59 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                     appendLog("[节点] 运行时 API 切换失败，改用配置重启：\(error.localizedDescription)\n")
                 }
             }
-            await MainActor.run { [weak self] in
-                guard let self = self, self.selectorSelectionID == selectionID, self.runtimeTransitionID == transitionID else { return }
-                do {
-                    guard var config = self.parseConfigObject(from: self.editor.string) else {
-                        throw NSError.user("当前配置不是有效 JSON")
+            guard self.selectorSelectionID == selectionID, self.runtimeTransitionID == transitionID else { return }
+            do {
+                guard var config = self.parseConfigObject(from: self.editor.string) else {
+                    throw NSError.user("当前配置不是有效 JSON")
+                }
+                var outbounds = config["outbounds"] as? [[String: Any]] ?? []
+                var found = false
+                for i in outbounds.indices {
+                    if outbounds[i]["tag"] as? String == groupTag,
+                       ((outbounds[i]["type"] as? String)?.lowercased() == "selector") {
+                        outbounds[i]["default"] = nodeTag
+                        found = true
                     }
-                    var outbounds = config["outbounds"] as? [[String: Any]] ?? []
-                    var found = false
-                    for i in outbounds.indices {
-                        if outbounds[i]["tag"] as? String == groupTag,
-                           ((outbounds[i]["type"] as? String)?.lowercased() == "selector") {
-                            outbounds[i]["default"] = nodeTag
-                            found = true
-                        }
-                    }
-                    if found {
-                        config["outbounds"] = outbounds
-                        self.editor.string = try self.renderConfig(config)
-                        _ = try self.saveCurrent()
-                        self.appendLog("[节点] \(groupTag) 已选择: \(nodeTag)\n")
-                        self.refreshNodesFromEditor()
-                        if self.isProxyRuntimeRunning() && !switchedByAPI {
-                            if self.isTunEnabled {
-                                // TUN is already running; hot-reload the config in
-                                // place. A full restart here re-runs start-time
-                                // checks that can throw and tear the live TUN down
-                                // (the reported "switching node killed the proxy").
-                                self.reloadTunConfigInPlace(configText: self.editor.string)
-                                self.appendLog("[节点] 已按新节点热重载 TUN\n")
-                                if self.isSystemProxyEnabled { self.reconcileRuntime(reason: "节点切换后重启", forceRestart: true) }
-                            } else {
-                                self.reconcileRuntime(reason: "节点切换后重启", forceRestart: true)
-                                self.appendLog("[节点] 服务已按新节点重启\n")
-                            }
-                            self.refreshStatus()
+                }
+                if found {
+                    config["outbounds"] = outbounds
+                    self.editor.string = try self.renderConfig(config)
+                    _ = try self.saveCurrent()
+                    self.appendLog("[节点] \(groupTag) 已选择: \(nodeTag)\n")
+                    self.refreshNodesFromEditor()
+                    if self.isProxyRuntimeRunning() && !switchedByAPI {
+                        if self.isTunEnabled {
+                            // TUN is already running; hot-reload the config in
+                            // place. A full restart here re-runs start-time
+                            // checks that can throw and tear the live TUN down
+                            // (the reported "switching node killed the proxy").
+                            let reloaded = await self.reloadTunConfigInPlace(configText: self.editor.string)
+                            guard self.selectorSelectionID == selectionID, self.runtimeTransitionID == transitionID else { return }
+                            if reloaded { self.appendLog("[节点] 已按新节点热重载 TUN\n") }
+                            if self.isSystemProxyEnabled { self.reconcileRuntime(reason: "节点切换后重启", forceRestart: true) }
                         } else {
-                            self.refreshStatus()
+                            self.reconcileRuntime(reason: "节点切换后重启", forceRestart: true)
+                            self.appendLog("[节点] 服务已按新节点重启\n")
                         }
+                        self.refreshStatus()
                     } else {
-                        throw NSError.user("当前配置中未找到节点选择组：\(groupTag)")
-                    }
-                } catch {
-                    // If neither the runtime nor the persisted config accepted the
-                    // change, restore the rendered state. When the runtime switch
-                    // succeeded, keep showing that real state and only report that
-                    // persistence failed.
-                    if !switchedByAPI {
-                        self.nodeGroups = previousNodeGroups
-                        self.lastProxiesObj = previousProxiesObj
-                        self.refreshNodeGroupsView()
                         self.refreshStatus()
                     }
-                    self.showError(error)
+                } else {
+                    throw NSError.user("当前配置中未找到节点选择组：\(groupTag)")
                 }
+            } catch {
+                // If neither the runtime nor the persisted config accepted the
+                // change, restore the rendered state. When the runtime switch
+                // succeeded, keep showing that real state and only report that
+                // persistence failed.
+                if !switchedByAPI {
+                    self.nodeGroups = previousNodeGroups
+                    self.lastProxiesObj = previousProxiesObj
+                    self.refreshNodeGroupsView()
+                    self.refreshStatus()
+                }
+                self.showError(error)
             }
         }
     }
@@ -1548,6 +1458,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     }
 
     func applySelectedMode() throws {
+        guard !runtimeCoordinator.state.isTerminating else { return }
         guard var config = parseConfigObject(from: editor.string) else {
             throw NSError.user("当前配置不是有效 JSON")
         }
@@ -1573,6 +1484,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     }
 
     func applyRuntimeMode(_ mode: String, refreshNodeDelays: Bool) {
+        guard !runtimeCoordinator.state.isTerminating else { return }
         let previousTask = modeChangeTask
         previousTask?.cancel()
         modeChangeID = UUID()
@@ -1800,6 +1712,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     }
 
     func refreshStatus() {
+        guard !runtimeCoordinator.state.isTerminating else { return }
         let isRunning = isProxyRuntimeRunning()
         let isActiveOrRequested = isProxyServiceActiveOrRequested()
         // 系统代理卡片：过渡中显示 启动中/关闭中（内置转圈），否则显示运行态。
@@ -2033,44 +1946,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         """
     }
 
-    func stopServiceFromDelegate() {
+    @discardableResult
+    func stopServiceFromDelegate() -> Task<Void, Never> {
         stopService(clearSystemProxySynchronously: true, isTerminating: true)
-    }
-
-    func setSystemProxy(enabled: Bool, port: Int, rollbackOnMismatch: Bool = false) {
-        systemProxyOperationID += 1
-        let operationID = systemProxyOperationID
-        if enabled {
-            wasProxyActiveInThisSession = true
-        }
-        // Run networksetup commands in background
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self else { return }
-            self.systemProxyManager.apply(enabled: enabled, port: port)
-            Task { @MainActor [weak self] in
-                if enabled {
-                    self?.appendLog("[TungBox] 已自动启用系统 HTTP/HTTPS 代理，端口为: \(port)\n")
-                } else {
-                    self?.appendLog("[TungBox] 已自动关闭系统代理\n")
-                }
-            }
-            
-            if enabled {
-                Thread.sleep(forTimeInterval: 1.0)
-                Task { @MainActor [weak self] in
-                    guard let self,
-                          operationID == self.systemProxyOperationID,
-                          self.isSystemProxyEnabled,
-                          !self.isTunEnabled else { return }
-                    let status = self.systemProxyManager.currentStatus(expectedPort: port)
-                    guard status.hasExternalProxy else { return }
-                    self.appendLog("[警告] 检测到系统代理指向非 TungBox 地址（\(status.message)）。如代理不可用，请检查其他代理软件设置。\n")
-                    if rollbackOnMismatch {
-                        self.showToast("系统代理被其他软件覆盖")
-                    }
-                }
-            }
-        }
     }
 
     nonisolated func runCommand(_ binary: String, args: [String], timeoutSeconds: TimeInterval = 3) -> String {
@@ -2122,6 +2000,7 @@ extension MainWindowController {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var controller: MainWindowController?
+    private var terminationReplyTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMainMenu()
@@ -2161,6 +2040,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         controller?.showConsoleWindow()
         return true
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let controller else { return .terminateNow }
+        if terminationReplyTask == nil {
+            let cleanup = controller.stopServiceFromDelegate()
+            terminationReplyTask = Task { @MainActor in
+                await cleanup.value
+                sender.reply(toApplicationShouldTerminate: true)
+            }
+        }
+        return .terminateLater
     }
 
     func applicationWillTerminate(_ notification: Notification) {

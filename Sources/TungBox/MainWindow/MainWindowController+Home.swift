@@ -647,6 +647,7 @@ extension MainWindowController {
 
     // System-proxy switch — independent of TUN; both can be on together.
     @objc func switchToggled(_ sender: MD3Switch) {
+        guard !runtimeCoordinator.state.isTerminating else { return }
         isSystemProxyEnabled = sender.isOn
         UserDefaults.standard.set(isSystemProxyEnabled, forKey: "systemProxyEnabled")
         beginFeatureTransition(systemProxy: sender.isOn ? .starting : .stopping)
@@ -664,6 +665,7 @@ extension MainWindowController {
     /// Toggle the TUN switch (shared by the home switch, tray, and settings). System
     /// proxy state is untouched; reconcileRuntime() converges the runtime.
     func setCaptureMode(tunEnabled: Bool, source: String) {
+        guard !runtimeCoordinator.state.isTerminating else { return }
         tunCaptureIntentID = UUID()
         let intent = tunCaptureIntentID
         if tunEnabled {

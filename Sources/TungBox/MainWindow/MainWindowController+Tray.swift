@@ -296,7 +296,6 @@ extension MainWindowController {
     }
 
     @objc func quitFromTray() {
-        stopServiceFromDelegate()
         NSApp.terminate(nil)
     }
 }

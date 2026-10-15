@@ -129,11 +129,16 @@ extension MainWindowController {
             TunServiceManager.refreshRequestHeartbeat(store: store)
             isApplyingRuleSets = true
             ruleSetApplyStatus = "已保存，正在应用"
+            let transitionID = runtimeTransitionID
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                defer { self.isApplyingRuleSets = false; self.refreshRulesFromEditor() }
+                defer {
+                    self.isApplyingRuleSets = false
+                    if !self.runtimeCoordinator.state.isTerminating { self.refreshRulesFromEditor() }
+                }
                 for _ in 0..<30 {
                     try? await Task.sleep(for: .milliseconds(500))
+                    guard self.runtimeCoordinator.acceptsDeferredResult(generation: transitionID) else { return }
                     guard self.isTunEnabled else {
                         self.ruleSetApplyStatus = "已保存，待启动应用"
                         return
@@ -145,7 +150,8 @@ extension MainWindowController {
                     if let pid = TunServiceManager.activeSingBoxPID(store: self.store), pid != oldPID,
                        TunServiceManager.tunInterfaceIsActive() {
                         try? await Task.sleep(for: .seconds(1))
-                        if self.isTunEnabled, TunServiceManager.activeSingBoxPID(store: self.store) == pid,
+                        if self.runtimeCoordinator.acceptsDeferredResult(generation: transitionID),
+                           self.isTunEnabled, TunServiceManager.activeSingBoxPID(store: self.store) == pid,
                            TunServiceManager.tunInterfaceIsActive() {
                             self.ruleSetApplyStatus = "已生效"
                             return
@@ -153,7 +159,7 @@ extension MainWindowController {
                     }
                 }
                 do {
-                    guard self.isTunEnabled else { return }
+                    guard self.isTunEnabled, self.runtimeCoordinator.acceptsDeferredResult(generation: transitionID) else { return }
                     try TunServiceManager.writeRequestConfig(oldRequest, store: self.store)
                     try Data().write(to: self.store.tunRequestFlagURL, options: .atomic)
                     self.startTunRequestHeartbeat()

@@ -901,15 +901,6 @@ extension MainWindowController {
         }
     }
 
-    func reconcileSystemProxyForCurrentMode() {
-        guard isProxyRuntimeRunning() else { return }
-        if isTunEnabled {
-            setSystemProxy(enabled: false, port: getMixedProxyPort())
-        } else {
-            setSystemProxy(enabled: isSystemProxyEnabled, port: getMixedProxyPort())
-        }
-    }
-
     func isProxyRuntimeRunning() -> Bool {
         runner.isRunning || isTunRuntimeRunning()
     }
@@ -937,11 +928,13 @@ extension MainWindowController {
             guard let self else { return }
             // 网络接口（en*）的 IP / 默认路由 / DNS resolver 在 didWake 那一刻
             // 可能还没回来，立刻 reconcile 会建在错的接口上。等 2s 再动手。
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            Task { @MainActor [weak self] in
                 guard let self else { return }
-                guard self.isTunEnabled else { return }
-                self.appendLog("[TungBox] 系统已唤醒，自动重新下发 TUN 配置以恢复守护进程\n")
-                self.reconcileRuntime(reason: "唤醒", forceRestart: false)
+                self.runtimeCoordinator.schedule(after: 2) { [weak self] in
+                    guard let self, self.isTunEnabled else { return }
+                    self.appendLog("[TungBox] 系统已唤醒，自动重新下发 TUN 配置以恢复守护进程\n")
+                    self.reconcileRuntime(reason: "唤醒", forceRestart: false)
+                }
             }
         }
     }
@@ -970,32 +963,6 @@ extension MainWindowController {
         startTunRequestHeartbeat()
         wasTunActiveInThisSession = true
         verifyTunStartupAsync()
-    }
-
-    /// Reload the TUN config in place while it is already running (e.g. a node
-    /// switch where the clash API hot-switch failed). Rewrites the request config
-    /// so the daemon hot-reloads, but deliberately skips the start-time route
-    /// safety check (the TUN is already up and safe) and never reverts UI state or
-    /// rethrows, so a transient failure can't tear the running TUN down.
-    func reloadTunConfigInPlace(configText: String) {
-        do {
-            let prepared = try preparedTunConfigText(from: configText)
-            try TunServiceManager.writeRequestConfig(prepared, store: store)
-            if !FileManager.default.fileExists(atPath: store.tunRequestFlagURL.path) {
-                FileManager.default.createFile(atPath: store.tunRequestFlagURL.path, contents: Data())
-            }
-            TunServiceManager.refreshRequestHeartbeat(store: store)
-            startTunRequestHeartbeat()
-            appendLog("[节点] 已请求 TUN 热重载新节点配置\n")
-            // The daemon restarts sing-box for the reload, which restores the
-            // cached selection and can override the new default; re-assert it once
-            // the reloaded process should be up.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
-                self?.reconcileSelectorSelectionsToConfig()
-            }
-        } catch {
-            appendLog("[节点] TUN 配置热重载失败（保持当前运行不变）：\(error.localizedDescription)\n")
-        }
     }
 
     /// After requesting TUN, confirm in the background that sing-box actually came
