@@ -24,6 +24,8 @@ import AppKit
 // MainWindow/MainWindowController+CoreSettings.swift 管理 Core 更新、安装与导入；
 // MainWindow/MainWindowController+TUNService.swift 管理 TUN 服务设置、启动校验、唤醒与心跳；
 // MainWindow/MainWindowController+Appearance.swift 管理配色、主题与状态栏图标样式。
+// 窗口固定尺寸与全屏边界见 MainWindow/ConsoleWindowDelegate.swift、FixedSidebarLayout.swift；
+// 首页卡片布局见 Views/HomeDashboardLayout.swift，规则列宽见 MainWindow/RuleTableLayout.swift。
 
 let app = NSApplication.shared
 // 工厂在 applicationDidFinishLaunching 中执行，避免事件循环启动前访问存储或创建窗口。

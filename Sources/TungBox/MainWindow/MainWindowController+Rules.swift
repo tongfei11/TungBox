@@ -69,9 +69,14 @@ extension MainWindowController {
         ruleToolbar.spacing = 12
         ruleToolbar.alignment = .centerY
         ruleToolbar.translatesAutoresizingMaskIntoConstraints = false
-        ruleSearchField.widthAnchor.constraint(equalToConstant: 320).isActive = true
+        ruleSearchField.widthAnchor.constraint(greaterThanOrEqualToConstant: 120).isActive = true
+        ruleSearchField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        for button in [addRuleSetButton, addRuleButton, deleteRuleButton] {
+            button.setContentHuggingPriority(.required, for: .horizontal)
+            button.setContentCompressionResistancePriority(.required, for: .horizontal)
+        }
 
-        let scroll = MD3ScrollView()
+        let scroll = RuleTableScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.hasVerticalScroller = true
         scroll.applyThinOverlayScroller()
@@ -83,6 +88,7 @@ extension MainWindowController {
         rulesTable.delegate = self
         rulesTable.dataSource = self
         rulesTable.rowHeight = 54
+        rulesTable.columnAutoresizingStyle = .noColumnAutoresizing
         rulesTable.gridStyleMask = [.solidHorizontalGridLineMask]
         rulesTable.gridColor = MD3.outlineVariant
         rulesTable.menu = ruleContextMenu()
@@ -90,13 +96,9 @@ extension MainWindowController {
         rulesTable.action = #selector(rulesTableClicked(_:))
         rulesTable.registerForDraggedTypes([.string])
         rulesTable.draggingDestinationFeedbackStyle = .gap
-        rulesTable.addTableColumn(ruleColumn("enabled", title: "", width: 48))
-        rulesTable.addTableColumn(ruleColumn("id", title: "#", width: 56))
-        rulesTable.addTableColumn(ruleColumn("type", title: "类型", width: 150))
-        rulesTable.addTableColumn(ruleColumn("value", title: "匹配值", width: 360))
-        rulesTable.addTableColumn(ruleColumn("strategy", title: "策略", width: 120))
-        rulesTable.addTableColumn(ruleColumn("count", title: "命中", width: 80))
-        rulesTable.addTableColumn(ruleColumn("note", title: "备注", width: 240))
+        for column in RuleTableLayout.columns {
+            rulesTable.addTableColumn(ruleColumn(column.id, title: column.title, width: column.minimum))
+        }
 
         let panel = MD3Panel()
         panel.type = .filled
@@ -109,18 +111,18 @@ extension MainWindowController {
         view.addSubview(panel)
 
         NSLayoutConstraint.activate([
-            title.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
+            title.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
             title.topAnchor.constraint(equalTo: view.topAnchor, constant: 28),
 
             subtitle.leadingAnchor.constraint(equalTo: title.leadingAnchor),
             subtitle.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 6),
 
             ruleToolbar.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            ruleToolbar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
+            ruleToolbar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
             ruleToolbar.topAnchor.constraint(equalTo: subtitle.bottomAnchor, constant: 20),
 
             panel.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            panel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
+            panel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
             panel.topAnchor.constraint(equalTo: ruleToolbar.bottomAnchor, constant: 14),
             panel.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -24),
 
@@ -139,7 +141,8 @@ extension MainWindowController {
         column.title = title
         column.width = width
         column.minWidth = width
-        column.resizingMask = .autoresizingMask
+        column.headerCell.font = .systemFont(ofSize: 12, weight: .semibold)
+        column.resizingMask = []
         return column
     }
 

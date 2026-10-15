@@ -236,7 +236,7 @@ extension MainWindowController {
         ])
         ruleSetForm.translatesAutoresizingMaskIntoConstraints = false
         ruleSetForm.column(at: 0).xPlacement = .trailing
-        ruleSetForm.column(at: 1).width = 560
+        ruleSetForm.column(at: 1).width = 480
         ruleSetForm.rowSpacing = 10
         ruleSetForm.columnSpacing = 10
         let saveRuleSetButton = settingsButton(title: "保存规则集地址", action: #selector(saveRuleSetURLsClicked))

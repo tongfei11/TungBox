@@ -58,10 +58,10 @@ enum RuleTableCell {
         }
 
         let label = NSTextField(labelWithString: text)
-        label.font = rule.isSection ? .systemFont(ofSize: 13, weight: .bold) : .systemFont(ofSize: 13)
+        label.font = rule.isSection ? .systemFont(ofSize: 12, weight: .bold) : .systemFont(ofSize: 12)
         label.textColor = columnID == "strategy" && rule.strategyReferenceError != nil ? MD3.warning :
             (rule.isSection ? MD3.onSurfaceVariant : MD3.onSurface)
-        label.toolTip = columnID == "strategy" ? rule.strategyReferenceError : rule.referenceError
+        label.toolTip = (columnID == "strategy" ? rule.strategyReferenceError : rule.referenceError) ?? text
         label.lineBreakMode = .byTruncatingTail
         label.maximumNumberOfLines = 2
         label.translatesAutoresizingMaskIntoConstraints = false

@@ -12,7 +12,7 @@ extension MainWindowController {
         }
 
         let title = NSTextField(labelWithString: "首页")
-        title.font = .systemFont(ofSize: 30, weight: .bold)
+        title.font = .systemFont(ofSize: 28, weight: .bold)
         title.textColor = MD3.onSurface
         title.translatesAutoresizingMaskIntoConstraints = false
         registerThemeObserver { [weak title] in
@@ -20,6 +20,7 @@ extension MainWindowController {
         }
 
         let subtitle = NSTextField(labelWithString: "服务状态、出站模式和运行统计信息")
+        subtitle.font = .systemFont(ofSize: 12)
         subtitle.textColor = MD3.onSurfaceVariant
         subtitle.translatesAutoresizingMaskIntoConstraints = false
         registerThemeObserver { [weak subtitle] in
@@ -27,14 +28,14 @@ extension MainWindowController {
         }
 
         statusChip.translatesAutoresizingMaskIntoConstraints = false
-        statusChip.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        statusChip.heightAnchor.constraint(equalToConstant: 28).isActive = true
         // Size to content (with a sensible minimum) so transition labels like
         // "启动中" / "关闭中" are never clipped.
-        statusChip.widthAnchor.constraint(greaterThanOrEqualToConstant: 96).isActive = true
+        statusChip.widthAnchor.constraint(greaterThanOrEqualToConstant: 76).isActive = true
 
         tunStatusChip.translatesAutoresizingMaskIntoConstraints = false
-        tunStatusChip.heightAnchor.constraint(equalToConstant: 32).isActive = true
-        tunStatusChip.widthAnchor.constraint(greaterThanOrEqualToConstant: 96).isActive = true
+        tunStatusChip.heightAnchor.constraint(equalToConstant: 28).isActive = true
+        tunStatusChip.widthAnchor.constraint(greaterThanOrEqualToConstant: 76).isActive = true
 
         serviceSwitch.target = self
         serviceSwitch.action = #selector(switchToggled(_:))
@@ -45,6 +46,7 @@ extension MainWindowController {
         let systemProxyRow = NSStackView(views: [statusChip, systemProxySpacer, serviceSwitch])
         systemProxyRow.orientation = .horizontal
         systemProxyRow.distribution = .fill
+        systemProxyRow.spacing = 4
         systemProxyRow.alignment = .centerY
         systemProxyRow.translatesAutoresizingMaskIntoConstraints = false
         let serviceCard = homeCard(title: "系统代理", views: [systemProxyRow])
@@ -55,7 +57,7 @@ extension MainWindowController {
         tunSwitch.isOn = isTunEnabled
         tunSwitch.translatesAutoresizingMaskIntoConstraints = false
         let tunLabel = NSTextField(labelWithString: "启用 TUN")
-        tunLabel.font = .systemFont(ofSize: 14, weight: .bold)
+        tunLabel.font = .systemFont(ofSize: 12, weight: .bold)
         tunLabel.textColor = MD3.onSurface
         registerThemeObserver { [weak tunLabel] in
             tunLabel?.textColor = MD3.onSurface
@@ -65,6 +67,7 @@ extension MainWindowController {
         let tunControlRow = NSStackView(views: [tunLabel, tunSpacer, tunSwitch])
         tunControlRow.orientation = .horizontal
         tunControlRow.distribution = .fill
+        tunControlRow.spacing = 4
         tunControlRow.alignment = .centerY
         tunControlRow.translatesAutoresizingMaskIntoConstraints = false
         let tunCard = homeCard(title: "TUN 模式", views: [tunControlRow])
@@ -84,7 +87,7 @@ extension MainWindowController {
         }
         let outboundCard = homeCard(title: "出站模式", views: [modeControl, modeStatusLabel])
 
-        currentNodeNameLabel.font = .systemFont(ofSize: 22, weight: .bold)
+        currentNodeNameLabel.font = .systemFont(ofSize: 20, weight: .bold)
         currentNodeNameLabel.textColor = MD3.primary
         currentNodeNameLabel.lineBreakMode = .byTruncatingTail
         currentNodeNameLabel.maximumNumberOfLines = 1
@@ -110,7 +113,7 @@ extension MainWindowController {
             self.currentNodeAutoBadge.backgroundColor = MD3.successContainer
         }
 
-        currentNodeDelayLabel.font = .systemFont(ofSize: 22, weight: .bold)
+        currentNodeDelayLabel.font = .systemFont(ofSize: 20, weight: .bold)
         currentNodeDelayLabel.textColor = MD3.success
         currentNodeDelayLabel.lineBreakMode = .byClipping
         currentNodeDelayLabel.maximumNumberOfLines = 1
@@ -158,7 +161,7 @@ extension MainWindowController {
         
         let nodeLatencyCard = homeCard(title: "节点名称与延迟", views: [nodeRow])
 
-        uploadValueLabel.font = .systemFont(ofSize: 28, weight: .bold)
+        uploadValueLabel.font = .systemFont(ofSize: 24, weight: .bold)
         uploadValueLabel.textColor = MD3.primary
         uploadValueLabel.translatesAutoresizingMaskIntoConstraints = false
         let uploadDetail = NSTextField(labelWithString: "上传速度")
@@ -166,7 +169,7 @@ extension MainWindowController {
         uploadDetail.translatesAutoresizingMaskIntoConstraints = false
         let uploadCard = homeCard(title: "实时上传", views: [uploadValueLabel, uploadDetail])
 
-        downloadValueLabel.font = .systemFont(ofSize: 28, weight: .bold)
+        downloadValueLabel.font = .systemFont(ofSize: 24, weight: .bold)
         downloadValueLabel.textColor = MD3.primary
         downloadValueLabel.translatesAutoresizingMaskIntoConstraints = false
         let downloadDetail = NSTextField(labelWithString: "下载速度")
@@ -174,7 +177,7 @@ extension MainWindowController {
         downloadDetail.translatesAutoresizingMaskIntoConstraints = false
         let downloadCard = homeCard(title: "实时下载", views: [downloadValueLabel, downloadDetail])
 
-        connectionsValueLabel.font = .systemFont(ofSize: 28, weight: .bold)
+        connectionsValueLabel.font = .systemFont(ofSize: 24, weight: .bold)
         connectionsValueLabel.textColor = MD3.primary
         connectionsValueLabel.translatesAutoresizingMaskIntoConstraints = false
         connectionsDetailLabel.font = .systemFont(ofSize: 11)
@@ -187,10 +190,10 @@ extension MainWindowController {
         trafficPeriodControl.action = #selector(trafficPeriodChanged)
         trafficPeriodControl.selectedSegment = 0
         trafficPeriodControl.translatesAutoresizingMaskIntoConstraints = false
-        trafficPeriodControl.widthAnchor.constraint(equalToConstant: 210).isActive = true
-        trafficPeriodControl.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        trafficPeriodControl.widthAnchor.constraint(equalToConstant: 180).isActive = true
+        trafficPeriodControl.heightAnchor.constraint(equalToConstant: 28).isActive = true
 
-        trafficStatsValueLabel.font = .systemFont(ofSize: 28, weight: .bold)
+        trafficStatsValueLabel.font = .systemFont(ofSize: 24, weight: .bold)
         trafficStatsValueLabel.textColor = MD3.primary
         trafficStatsValueLabel.translatesAutoresizingMaskIntoConstraints = false
         trafficStatsDetailLabel.font = .systemFont(ofSize: 11)
@@ -217,88 +220,26 @@ extension MainWindowController {
         updateTrafficLabels()
         syncProxyPreferenceControls()
 
-        let container = NSView()
-        container.translatesAutoresizingMaskIntoConstraints = false
-        
-        container.addSubview(serviceCard)
-        container.addSubview(tunCard)
-        container.addSubview(outboundCard)
-        container.addSubview(nodeLatencyCard)
-        container.addSubview(uploadCard)
-        container.addSubview(downloadCard)
-        container.addSubview(activeConnectionsCard)
-        container.addSubview(trafficStatsCard)
-
-        NSLayoutConstraint.activate([
-            // --- Width Constraints ---
-            tunCard.widthAnchor.constraint(equalTo: serviceCard.widthAnchor),
-            uploadCard.widthAnchor.constraint(equalTo: serviceCard.widthAnchor),
-            downloadCard.widthAnchor.constraint(equalTo: serviceCard.widthAnchor),
-
-            // 出站模式跨 2 个卡片宽：2 * 单卡宽 + 16(间距)
-            outboundCard.widthAnchor.constraint(equalTo: serviceCard.widthAnchor, multiplier: 2.0, constant: 16),
-            nodeLatencyCard.widthAnchor.constraint(equalTo: outboundCard.widthAnchor),
-            activeConnectionsCard.widthAnchor.constraint(equalTo: outboundCard.widthAnchor),
-            trafficStatsCard.widthAnchor.constraint(equalTo: outboundCard.widthAnchor),
-
-            // --- Height Constraints ---
-            serviceCard.heightAnchor.constraint(equalToConstant: 142),
-            tunCard.heightAnchor.constraint(equalTo: serviceCard.heightAnchor),
-            outboundCard.heightAnchor.constraint(equalTo: serviceCard.heightAnchor),
-            nodeLatencyCard.heightAnchor.constraint(equalTo: serviceCard.heightAnchor),
-            uploadCard.heightAnchor.constraint(equalTo: serviceCard.heightAnchor),
-            downloadCard.heightAnchor.constraint(equalTo: serviceCard.heightAnchor),
-            activeConnectionsCard.heightAnchor.constraint(equalTo: serviceCard.heightAnchor),
-            trafficStatsCard.heightAnchor.constraint(equalTo: serviceCard.heightAnchor),
-
-            // --- Row 1: 系统代理 | TUN | 出站模式 ---
-            serviceCard.topAnchor.constraint(equalTo: container.topAnchor),
-            serviceCard.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-
-            tunCard.topAnchor.constraint(equalTo: container.topAnchor),
-            tunCard.leadingAnchor.constraint(equalTo: serviceCard.trailingAnchor, constant: 16),
-
-            outboundCard.topAnchor.constraint(equalTo: container.topAnchor),
-            outboundCard.leadingAnchor.constraint(equalTo: tunCard.trailingAnchor, constant: 16),
-            outboundCard.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-
-            // --- Row 2: 节点 | 上传 | 下载 ---
-            nodeLatencyCard.topAnchor.constraint(equalTo: serviceCard.bottomAnchor, constant: 16),
-            nodeLatencyCard.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-
-            uploadCard.topAnchor.constraint(equalTo: serviceCard.bottomAnchor, constant: 16),
-            uploadCard.leadingAnchor.constraint(equalTo: nodeLatencyCard.trailingAnchor, constant: 16),
-
-            downloadCard.topAnchor.constraint(equalTo: serviceCard.bottomAnchor, constant: 16),
-            downloadCard.leadingAnchor.constraint(equalTo: uploadCard.trailingAnchor, constant: 16),
-            downloadCard.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-
-            // --- Row 3: 活动连接数 | 流量统计 ---
-            activeConnectionsCard.topAnchor.constraint(equalTo: nodeLatencyCard.bottomAnchor, constant: 16),
-            activeConnectionsCard.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-
-            trafficStatsCard.topAnchor.constraint(equalTo: nodeLatencyCard.bottomAnchor, constant: 16),
-            trafficStatsCard.leadingAnchor.constraint(equalTo: activeConnectionsCard.trailingAnchor, constant: 16),
-            trafficStatsCard.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-
-            // Bottom constraint to calculate container height
-            container.bottomAnchor.constraint(equalTo: activeConnectionsCard.bottomAnchor)
-        ])
+        let container = HomeDashboardLayout.grid(
+            serviceCard: serviceCard, tunCard: tunCard, outboundCard: outboundCard,
+            nodeLatencyCard: nodeLatencyCard, uploadCard: uploadCard, downloadCard: downloadCard,
+            activeConnectionsCard: activeConnectionsCard, trafficStatsCard: trafficStatsCard
+        )
 
         view.addSubview(title)
         view.addSubview(subtitle)
         view.addSubview(container)
 
         NSLayoutConstraint.activate([
-            title.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
-            title.topAnchor.constraint(equalTo: view.topAnchor, constant: 28),
+            title.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
+            title.topAnchor.constraint(equalTo: view.topAnchor, constant: 24),
             subtitle.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            subtitle.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 6),
+            subtitle.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 4),
 
             container.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            container.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
-            container.topAnchor.constraint(equalTo: subtitle.bottomAnchor, constant: 24),
-            container.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor, constant: -24)
+            container.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
+            container.topAnchor.constraint(equalTo: subtitle.bottomAnchor, constant: 18),
+            container.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -24)
         ])
 
         refreshHomeFeatureStatus()
@@ -338,61 +279,12 @@ extension MainWindowController {
     }
 
     func homeCard(title: String, titleInlineView: NSView? = nil, titleAccessoryView: NSView? = nil, views: [NSView]) -> NSView {
-        let panel = MD3Panel()
-        panel.type = .elevated
-        panel.translatesAutoresizingMaskIntoConstraints = false
-        
-        let titleStack = NSStackView()
-        titleStack.orientation = .horizontal
-        titleStack.alignment = .centerY
-        titleStack.spacing = 8
-        titleStack.translatesAutoresizingMaskIntoConstraints = false
-        
-        let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.font = .systemFont(ofSize: 18, weight: .bold)
-        titleLabel.textColor = MD3.onSurface
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        registerThemeObserver { [weak titleLabel] in
+        let card = HomeDashboardLayout.card(title: title, titleInlineView: titleInlineView,
+                                            titleAccessoryView: titleAccessoryView, views: views)
+        registerThemeObserver { [weak titleLabel = card.title] in
             titleLabel?.textColor = MD3.onSurface
         }
-        titleStack.addArrangedSubview(titleLabel)
-        
-        if let inline = titleInlineView {
-            titleStack.addArrangedSubview(inline)
-        }
-        
-        if let accessory = titleAccessoryView {
-            let spacer = NSView()
-            spacer.translatesAutoresizingMaskIntoConstraints = false
-            titleStack.addArrangedSubview(spacer)
-            titleStack.addArrangedSubview(accessory)
-        }
-
-        let stack = NSStackView(views: views)
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 6
-        stack.translatesAutoresizingMaskIntoConstraints = false
-
-        panel.addSubview(titleStack)
-        panel.addSubview(stack)
-        NSLayoutConstraint.activate([
-            titleStack.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 20),
-            titleStack.topAnchor.constraint(equalTo: panel.topAnchor, constant: 20),
-            titleStack.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -20),
-            titleStack.heightAnchor.constraint(equalToConstant: 28),
-            
-            stack.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 20),
-            stack.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -20),
-            stack.topAnchor.constraint(equalTo: titleStack.bottomAnchor, constant: 16),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: panel.bottomAnchor, constant: -20)
-        ])
-
-        views.forEach { subview in
-            subview.leadingAnchor.constraint(equalTo: stack.leadingAnchor).isActive = true
-            subview.trailingAnchor.constraint(equalTo: stack.trailingAnchor).isActive = true
-        }
-        return panel
+        return card.view
     }
 
     func getTodayKey() -> String {

@@ -69,7 +69,7 @@ final class RuleTableCellTests: XCTestCase {
             XCTAssertEqual(mark.textColor, MD3.warning)
             let strategy = try XCTUnwrap(RuleTableCell.make(for: row, columnID: "strategy").subviews.first as? NSTextField)
             XCTAssertEqual(strategy.textColor, MD3.onSurface)
-            XCTAssertNil(strategy.toolTip)
+            XCTAssertEqual(strategy.toolTip, "旧节点", "正常策略也能悬停查看完整节点名称")
         }
     }
 

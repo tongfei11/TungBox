@@ -7,6 +7,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     nonisolated let systemProxyManager: SystemProxyManager
     nonisolated let runtimePortProbe: RuntimePortProbe
     let runtimeCoordinator: RuntimeCoordinator
+    let consoleWindowDelegate = ConsoleWindowDelegate()
     private let makeRunner: (Store) -> Runner
     lazy var runner = makeRunner(store)
     var profiles: [ConfigProfile] = []
@@ -260,7 +261,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         self.runtimeCoordinator = runtimeCoordinator
         self.makeRunner = makeRunner
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1080, height: 720),
+            contentRect: NSRect(origin: .zero, size: ConsoleLayout.defaultContentSize),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
@@ -270,7 +271,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         window.isReleasedWhenClosed = false
         window.center()
         super.init(window: window)
-        window.delegate = self
+        consoleWindowDelegate.configure(window)
+        consoleWindowDelegate.onClose = { [weak self] notification in self?.windowWillClose(notification) }
         setup()
     }
 
@@ -410,7 +412,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         }
 
         let title = NSTextField(labelWithString: "TungBox")
-        title.font = .systemFont(ofSize: 28, weight: .bold)
+        title.font = .systemFont(ofSize: 24, weight: .bold)
         title.textColor = MD3.onSurface
         title.translatesAutoresizingMaskIntoConstraints = false
         registerThemeObserver { [weak title] in
@@ -419,7 +421,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
         let nav = NSStackView()
         nav.orientation = .vertical
-        nav.spacing = 8
+        nav.spacing = 6
         nav.alignment = .leading
         nav.translatesAutoresizingMaskIntoConstraints = false
 
@@ -441,7 +443,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             button.action = #selector(navClicked(_:))
             button.isSelected = (index == 0)
             button.translatesAutoresizingMaskIntoConstraints = false
-            button.heightAnchor.constraint(equalToConstant: 40).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 36).isActive = true
             return button
         }
         navButtons.forEach { button in
@@ -463,17 +465,17 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         view.addSubview(appVersionFooter)
 
         NSLayoutConstraint.activate([
-            title.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 28),
+            title.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
             title.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
-            title.topAnchor.constraint(equalTo: view.topAnchor, constant: 34),
+            title.topAnchor.constraint(equalTo: view.topAnchor, constant: 26),
 
-            nav.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 18),
-            nav.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -18),
-            nav.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 30),
+            nav.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            nav.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+            nav.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 24),
 
-            appVersionFooter.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 28),
+            appVersionFooter.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
             appVersionFooter.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -20),
-            appVersionFooter.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -24)
+            appVersionFooter.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -18)
         ])
     }
 

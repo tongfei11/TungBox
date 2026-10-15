@@ -57,7 +57,7 @@ final class MD3ThinScroller: NSScroller {
     }
 }
 
-final class MD3ScrollView: NSScrollView {
+class MD3ScrollView: NSScrollView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         setup()

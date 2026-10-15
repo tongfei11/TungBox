@@ -19,6 +19,12 @@ touch \
   Sources/TungBox/MainWindow/MainWindowController+CoreSettings.swift \
   Sources/TungBox/MainWindow/MainWindowController+TUNService.swift \
   Sources/TungBox/MainWindow/MainWindowController+Appearance.swift \
+  Sources/TungBox/MainWindow/MainWindowController+Rules.swift \
+  Sources/TungBox/MainWindow/FixedSidebarLayout.swift \
+  Sources/TungBox/MainWindow/ConsoleWindowDelegate.swift \
+  Sources/TungBox/MainWindow/RuleTableLayout.swift \
+  Sources/TungBox/MainWindow/RuleTableCell.swift \
+  Sources/TungBox/Views/HomeDashboardLayout.swift \
   Sources/TungBox/Views/MD3Theme.swift \
   Sources/TungBox/Views/MD3Buttons.swift \
   Sources/TungBox/Views/MD3Inputs.swift \
