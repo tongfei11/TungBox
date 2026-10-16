@@ -20,6 +20,9 @@ touch \
   Sources/TungBox/MainWindow/MainWindowController+TUNService.swift \
   Sources/TungBox/MainWindow/MainWindowController+Appearance.swift \
   Sources/TungBox/MainWindow/MainWindowController+Rules.swift \
+  Sources/TungBox/MainWindow/MainWindowController+RuleEditor.swift \
+  Sources/TungBox/MainWindow/MainWindowController+RuleSets.swift \
+  Sources/TungBox/Core/RuleConfigProjector.swift \
   Sources/TungBox/MainWindow/FixedSidebarLayout.swift \
   Sources/TungBox/MainWindow/ConsoleWindowDelegate.swift \
   Sources/TungBox/MainWindow/RuleTableLayout.swift \

@@ -62,18 +62,12 @@ extension MainWindowController {
             _ = try store.baseRouteRules(for: subscription.id)
             return
         } catch { }
-        guard var config = parseConfigObject(from: editor.string) else {
+        guard let config = parseConfigObject(from: editor.string) else {
             throw NSError.user("当前配置不是有效 JSON，无法迁移旧规则")
         }
-        var route = config["route"] as? [String: Any] ?? [:]
-        var routeRules = route["rules"] as? [[String: Any]] ?? []
-        for set in store.loadRuleSets(for: subscription.id).valid {
-            let generated = set.rules.map { RuleRouting.customRouteRule(type: $0.type, value: $0.value, strategy: set.outbound) }
-            routeRules.removeAll { existing in generated.contains { NSDictionary(dictionary: $0).isEqual(to: existing) } }
-        }
-        route["rules"] = routeRules
-        config["route"] = route
-        let baseline = try renderConfig(config)
+        let baseline = try renderConfig(RuleConfigProjector.legacyBase(
+            in: config, ruleSets: store.loadRuleSets(for: subscription.id).valid
+        ))
         try store.saveRuleBase(baseline, for: subscription.id)
         appendLog("[规则集] 已将旧配置迁移为独立规则来源\n")
     }

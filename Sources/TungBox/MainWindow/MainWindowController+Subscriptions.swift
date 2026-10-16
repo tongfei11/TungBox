@@ -567,7 +567,7 @@ extension MainWindowController {
                 snapshots.append((url, FileManager.default.fileExists(atPath: url.path) ? try Data(contentsOf: url) : nil))
             }
             try store.saveRuleBase(config, for: subscription.id)
-            let merged = try renderConfig(try applyCustomRules(to: config, subscriptionID: subscription.id, freshSubscription: true))
+            let merged = try renderConfig(try applyCustomRules(to: config, subscriptionID: subscription.id))
             try checkRuleSetConfig(merged)
             try Data(merged.utf8).write(to: configURL, options: .atomic)
             try store.saveRuleProjection(merged, for: subscription.id)
