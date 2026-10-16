@@ -73,6 +73,26 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
     let trafficPeriodControl = MD3SegmentedControl()
 
+    // Home Dashboard widgets
+    let wifiStatusLabel = NSTextField(labelWithString: "Wi-Fi")
+    let homeProfileSelectorPopup = MD3PopUpButton()
+    let externalIPLabel = NSTextField(labelWithString: "检测中…")
+    let externalIPRefreshButton = NSButton()
+    let trafficTrendChartView = TrafficTrendChartView()
+    let trafficUploadStatLabel = NSTextField(labelWithString: "上传: 0 B")
+    let trafficDownloadStatLabel = NSTextField(labelWithString: "下载: 0 B")
+    let uploadWaveChartView = SpeedWaveChartView()
+    let downloadWaveChartView = SpeedWaveChartView()
+    let trafficDonutChartView = TrafficDonutChartView()
+    let donutProxyLabel = NSTextField(labelWithString: "代理 0 B  0%")
+    let donutDirectLabel = NSTextField(labelWithString: "直连 0 B  0%")
+    let donutOtherLabel = NSTextField(labelWithString: "其他 0 B  0%")
+    let memoryValueLabel = NSTextField(labelWithString: "65.3 MB")
+    let memoryRingView = MemoryRingView()
+    let equalizerBarsView = EqualizerBarsView()
+    let recentStatusStack = NSStackView()
+    let recentStatusPill = NSTextField(labelWithString: "运行正常")
+
     let table = NSTableView()
     let subscriptionTable = NSTableView()
     let nodeTable = NSTableView()
@@ -149,6 +169,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var isRefreshingConnections = false
     weak var zeroStateView: NSView?
     let connectionFilterField = MD3TextField()
+    let connectionCountLabel = NSTextField(labelWithString: "共 0 条连接")
     var editingRuleID: UUID?
     var logLevelButtons: [MD3Checkbox]?
     weak var logSearchField: NSTextField?

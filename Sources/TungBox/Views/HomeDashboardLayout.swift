@@ -1,8 +1,94 @@
 import AppKit
 
-/// Pure dashboard construction; contains no controller, services or networking.
+/// Pure dashboard layout and card construction; contains no controller, services or networking.
 @MainActor
 enum HomeDashboardLayout {
+    /// Modern 4-2-3 Grid layout matching the new console design:
+    /// - Row 1: 4 equal control cards (System Proxy, TUN Mode, Outbound Mode, Current Node)
+    /// - Row 2: 2 monitoring cards (Traffic Trend ~60%, Realtime Speed ~40%)
+    /// - Row 3: 3 metric/activity cards (Active Connections, Traffic Breakdown, Recent Status)
+    static func dashboardGrid(
+        systemProxyCard: NSView,
+        tunCard: NSView,
+        outboundCard: NSView,
+        currentNodeCard: NSView,
+        trafficTrendCard: NSView,
+        realtimeSpeedCard: NSView,
+        activeConnectionsCard: NSView,
+        trafficDestinationCard: NSView,
+        recentStatusCard: NSView
+    ) -> NSView {
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        let allCards = [
+            systemProxyCard, tunCard, outboundCard, currentNodeCard,
+            trafficTrendCard, realtimeSpeedCard,
+            activeConnectionsCard, trafficDestinationCard, recentStatusCard
+        ]
+        allCards.forEach { container.addSubview($0) }
+
+        let spacing: CGFloat = 12
+
+        NSLayoutConstraint.activate([
+            // --- Row 1 (4 Equal Cards) ---
+            systemProxyCard.topAnchor.constraint(equalTo: container.topAnchor),
+            systemProxyCard.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+
+            tunCard.topAnchor.constraint(equalTo: container.topAnchor),
+            tunCard.leadingAnchor.constraint(equalTo: systemProxyCard.trailingAnchor, constant: spacing),
+            tunCard.widthAnchor.constraint(equalTo: systemProxyCard.widthAnchor),
+
+            outboundCard.topAnchor.constraint(equalTo: container.topAnchor),
+            outboundCard.leadingAnchor.constraint(equalTo: tunCard.trailingAnchor, constant: spacing),
+            outboundCard.widthAnchor.constraint(equalTo: systemProxyCard.widthAnchor),
+
+            currentNodeCard.topAnchor.constraint(equalTo: container.topAnchor),
+            currentNodeCard.leadingAnchor.constraint(equalTo: outboundCard.trailingAnchor, constant: spacing),
+            currentNodeCard.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            currentNodeCard.widthAnchor.constraint(equalTo: systemProxyCard.widthAnchor),
+
+            systemProxyCard.heightAnchor.constraint(greaterThanOrEqualToConstant: 92),
+            tunCard.heightAnchor.constraint(equalTo: systemProxyCard.heightAnchor),
+            outboundCard.heightAnchor.constraint(equalTo: systemProxyCard.heightAnchor),
+            currentNodeCard.heightAnchor.constraint(equalTo: systemProxyCard.heightAnchor),
+
+            // --- Row 2 (Traffic Trend ~62% | Realtime Speed ~38%) ---
+            trafficTrendCard.topAnchor.constraint(equalTo: systemProxyCard.bottomAnchor, constant: spacing),
+            trafficTrendCard.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+
+            realtimeSpeedCard.topAnchor.constraint(equalTo: systemProxyCard.bottomAnchor, constant: spacing),
+            realtimeSpeedCard.leadingAnchor.constraint(equalTo: trafficTrendCard.trailingAnchor, constant: spacing),
+            realtimeSpeedCard.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+
+            trafficTrendCard.widthAnchor.constraint(equalTo: container.widthAnchor, multiplier: 0.61, constant: -spacing / 2),
+            trafficTrendCard.heightAnchor.constraint(greaterThanOrEqualToConstant: 180),
+            realtimeSpeedCard.heightAnchor.constraint(equalTo: trafficTrendCard.heightAnchor),
+
+            // --- Row 3 (3 Equal Cards: Connections | Destinations | Recent Status) ---
+            activeConnectionsCard.topAnchor.constraint(equalTo: trafficTrendCard.bottomAnchor, constant: spacing),
+            activeConnectionsCard.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+
+            trafficDestinationCard.topAnchor.constraint(equalTo: trafficTrendCard.bottomAnchor, constant: spacing),
+            trafficDestinationCard.leadingAnchor.constraint(equalTo: activeConnectionsCard.trailingAnchor, constant: spacing),
+            trafficDestinationCard.widthAnchor.constraint(equalTo: activeConnectionsCard.widthAnchor),
+
+            recentStatusCard.topAnchor.constraint(equalTo: trafficTrendCard.bottomAnchor, constant: spacing),
+            recentStatusCard.leadingAnchor.constraint(equalTo: trafficDestinationCard.trailingAnchor, constant: spacing),
+            recentStatusCard.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            recentStatusCard.widthAnchor.constraint(equalTo: activeConnectionsCard.widthAnchor),
+
+            activeConnectionsCard.heightAnchor.constraint(greaterThanOrEqualToConstant: 175),
+            trafficDestinationCard.heightAnchor.constraint(equalTo: activeConnectionsCard.heightAnchor),
+            recentStatusCard.heightAnchor.constraint(equalTo: activeConnectionsCard.heightAnchor),
+
+            container.bottomAnchor.constraint(equalTo: activeConnectionsCard.bottomAnchor)
+        ])
+
+        return container
+    }
+
+    /// Legacy 8-card grid preserved for backward compatibility and layout tests.
     static func grid(serviceCard: NSView, tunCard: NSView, outboundCard: NSView,
                      nodeLatencyCard: NSView, uploadCard: NSView, downloadCard: NSView,
                      activeConnectionsCard: NSView, trafficStatsCard: NSView) -> NSView {
@@ -19,18 +105,15 @@ enum HomeDashboardLayout {
         container.addSubview(trafficStatsCard)
 
         NSLayoutConstraint.activate([
-            // --- Width Constraints ---
             tunCard.widthAnchor.constraint(equalTo: serviceCard.widthAnchor),
             uploadCard.widthAnchor.constraint(equalTo: serviceCard.widthAnchor),
             downloadCard.widthAnchor.constraint(equalTo: serviceCard.widthAnchor),
 
-            // 出站模式跨 2 个卡片宽：2 * 单卡宽 + 12(间距)
             outboundCard.widthAnchor.constraint(equalTo: serviceCard.widthAnchor, multiplier: 2.0, constant: 12),
             nodeLatencyCard.widthAnchor.constraint(equalTo: outboundCard.widthAnchor),
             activeConnectionsCard.widthAnchor.constraint(equalTo: outboundCard.widthAnchor),
             trafficStatsCard.widthAnchor.constraint(equalTo: outboundCard.widthAnchor),
 
-            // --- Height Constraints ---
             serviceCard.heightAnchor.constraint(greaterThanOrEqualToConstant: 128),
             tunCard.heightAnchor.constraint(equalTo: serviceCard.heightAnchor),
             outboundCard.heightAnchor.constraint(equalTo: serviceCard.heightAnchor),
@@ -40,7 +123,6 @@ enum HomeDashboardLayout {
             activeConnectionsCard.heightAnchor.constraint(equalTo: serviceCard.heightAnchor),
             trafficStatsCard.heightAnchor.constraint(equalTo: serviceCard.heightAnchor),
 
-            // --- Row 1: 系统代理 | TUN | 出站模式 ---
             serviceCard.topAnchor.constraint(equalTo: container.topAnchor),
             serviceCard.leadingAnchor.constraint(equalTo: container.leadingAnchor),
 
@@ -51,7 +133,6 @@ enum HomeDashboardLayout {
             outboundCard.leadingAnchor.constraint(equalTo: tunCard.trailingAnchor, constant: 12),
             outboundCard.trailingAnchor.constraint(equalTo: container.trailingAnchor),
 
-            // --- Row 2: 节点 | 上传 | 下载 ---
             nodeLatencyCard.topAnchor.constraint(equalTo: serviceCard.bottomAnchor, constant: 12),
             nodeLatencyCard.leadingAnchor.constraint(equalTo: container.leadingAnchor),
 
@@ -62,7 +143,6 @@ enum HomeDashboardLayout {
             downloadCard.leadingAnchor.constraint(equalTo: uploadCard.trailingAnchor, constant: 12),
             downloadCard.trailingAnchor.constraint(equalTo: container.trailingAnchor),
 
-            // --- Row 3: 活动连接数 | 流量统计 ---
             activeConnectionsCard.topAnchor.constraint(equalTo: nodeLatencyCard.bottomAnchor, constant: 12),
             activeConnectionsCard.leadingAnchor.constraint(equalTo: container.leadingAnchor),
 
@@ -70,14 +150,20 @@ enum HomeDashboardLayout {
             trafficStatsCard.leadingAnchor.constraint(equalTo: activeConnectionsCard.trailingAnchor, constant: 12),
             trafficStatsCard.trailingAnchor.constraint(equalTo: container.trailingAnchor),
 
-            // Bottom constraint to calculate container height
             container.bottomAnchor.constraint(equalTo: activeConnectionsCard.bottomAnchor)
         ])
 
         return container
     }
 
-    static func card(title: String, titleInlineView: NSView? = nil, titleAccessoryView: NSView? = nil, views: [NSView]) -> (view: NSView, title: NSTextField) {
+    static func card(
+        title: String,
+        iconName: String? = nil,
+        subtitle: String? = nil,
+        titleInlineView: NSView? = nil,
+        titleAccessoryView: NSView? = nil,
+        views: [NSView]
+    ) -> (view: NSView, title: NSTextField) {
         let panel = MD3Panel()
         panel.type = .elevated
         panel.translatesAutoresizingMaskIntoConstraints = false
@@ -88,11 +174,29 @@ enum HomeDashboardLayout {
         titleStack.spacing = 8
         titleStack.translatesAutoresizingMaskIntoConstraints = false
 
+        if let icon = iconName, let img = NSImage(systemSymbolName: icon, accessibilityDescription: nil) {
+            img.isTemplate = true
+            let iconView = NSImageView(image: img)
+            iconView.contentTintColor = MD3.primary
+            iconView.translatesAutoresizingMaskIntoConstraints = false
+            iconView.widthAnchor.constraint(equalToConstant: 16).isActive = true
+            iconView.heightAnchor.constraint(equalToConstant: 16).isActive = true
+            titleStack.addArrangedSubview(iconView)
+        }
+
         let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.font = .systemFont(ofSize: 16, weight: .bold)
+        titleLabel.font = .systemFont(ofSize: 15, weight: .bold)
         titleLabel.textColor = MD3.onSurface
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleStack.addArrangedSubview(titleLabel)
+
+        if let sub = subtitle {
+            let subLabel = NSTextField(labelWithString: sub)
+            subLabel.font = .systemFont(ofSize: 11)
+            subLabel.textColor = MD3.onSurfaceVariant.withAlphaComponent(0.7)
+            subLabel.translatesAutoresizingMaskIntoConstraints = false
+            titleStack.addArrangedSubview(subLabel)
+        }
 
         if let inline = titleInlineView {
             titleStack.addArrangedSubview(inline)
@@ -101,35 +205,56 @@ enum HomeDashboardLayout {
         if let accessory = titleAccessoryView {
             let spacer = NSView()
             spacer.translatesAutoresizingMaskIntoConstraints = false
+            spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
             titleStack.addArrangedSubview(spacer)
             titleStack.addArrangedSubview(accessory)
         }
 
-        let stack = NSStackView(views: views)
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 6
-        stack.translatesAutoresizingMaskIntoConstraints = false
+        let contentContainer = NSView()
+        contentContainer.translatesAutoresizingMaskIntoConstraints = false
+
+        if views.count == 1, let single = views.first {
+            contentContainer.addSubview(single)
+            NSLayoutConstraint.activate([
+                single.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
+                single.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor),
+                single.topAnchor.constraint(equalTo: contentContainer.topAnchor),
+                single.bottomAnchor.constraint(equalTo: contentContainer.bottomAnchor)
+            ])
+        } else {
+            let stack = NSStackView(views: views)
+            stack.orientation = .vertical
+            stack.alignment = .leading
+            stack.spacing = 6
+            stack.translatesAutoresizingMaskIntoConstraints = false
+            contentContainer.addSubview(stack)
+            NSLayoutConstraint.activate([
+                stack.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
+                stack.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor),
+                stack.topAnchor.constraint(equalTo: contentContainer.topAnchor),
+                stack.bottomAnchor.constraint(lessThanOrEqualTo: contentContainer.bottomAnchor)
+            ])
+            views.forEach { subview in
+                subview.leadingAnchor.constraint(equalTo: stack.leadingAnchor).isActive = true
+                subview.trailingAnchor.constraint(equalTo: stack.trailingAnchor).isActive = true
+            }
+        }
 
         panel.addSubview(titleStack)
-        panel.addSubview(stack)
-        NSLayoutConstraint.activate([
-            titleStack.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 16),
-            titleStack.topAnchor.constraint(equalTo: panel.topAnchor, constant: 16),
-            titleStack.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -16),
-            titleStack.heightAnchor.constraint(equalToConstant: 28),
+        panel.addSubview(contentContainer)
 
-            stack.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 16),
-            stack.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -16),
-            stack.topAnchor.constraint(equalTo: titleStack.bottomAnchor, constant: 12),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: panel.bottomAnchor, constant: -16)
+        NSLayoutConstraint.activate([
+            titleStack.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 14),
+            titleStack.topAnchor.constraint(equalTo: panel.topAnchor, constant: 12),
+            titleStack.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -14),
+            titleStack.heightAnchor.constraint(equalToConstant: 24),
+
+            contentContainer.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 14),
+            contentContainer.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -14),
+            contentContainer.topAnchor.constraint(equalTo: titleStack.bottomAnchor, constant: 8),
+            contentContainer.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -12)
         ])
 
-        views.forEach { subview in
-            subview.leadingAnchor.constraint(equalTo: stack.leadingAnchor).isActive = true
-            subview.trailingAnchor.constraint(equalTo: stack.trailingAnchor).isActive = true
-        }
         return (panel, titleLabel)
     }
-
 }

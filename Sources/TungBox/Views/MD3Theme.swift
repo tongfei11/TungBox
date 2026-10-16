@@ -188,6 +188,12 @@ enum MD3 {
     static var surfaceContainerLow: NSColor {
         isDark ? currentScheme.darkBackground.mixed(with: .white, ratio: 0.08) : currentScheme.lightBackground.mixed(with: currentScheme.lightPrimary, ratio: 0.02)
     }
+    static var surfaceContainerHigh: NSColor {
+        isDark ? currentScheme.darkBackground.mixed(with: .white, ratio: 0.16) : currentScheme.lightBackground.mixed(with: currentScheme.lightPrimary, ratio: 0.08)
+    }
+    static var surfaceContainerHighest: NSColor {
+        isDark ? currentScheme.darkBackground.mixed(with: .white, ratio: 0.22) : currentScheme.lightBackground.mixed(with: currentScheme.lightPrimary, ratio: 0.12)
+    }
     static var onSurfaceVariant: NSColor {
         isDark ? NSColor(calibratedRed: 0.75, green: 0.76, blue: 0.80, alpha: 1) : NSColor(calibratedRed: 0.27, green: 0.28, blue: 0.33, alpha: 1)
     }
@@ -217,6 +223,12 @@ enum MD3 {
 
     static var error: NSColor {
         isDark ? NSColor(calibratedRed: 1.00, green: 0.45, blue: 0.45, alpha: 1) : NSColor(calibratedRed: 0.75, green: 0.10, blue: 0.10, alpha: 1)
+    }
+    static var errorContainer: NSColor {
+        isDark ? NSColor(calibratedRed: 0.35, green: 0.08, blue: 0.08, alpha: 1) : NSColor(calibratedRed: 0.98, green: 0.88, blue: 0.88, alpha: 1)
+    }
+    static var onErrorContainer: NSColor {
+        isDark ? NSColor(calibratedRed: 1.00, green: 0.70, blue: 0.70, alpha: 1) : NSColor(calibratedRed: 0.45, green: 0.05, blue: 0.05, alpha: 1)
     }
 
     static var warning: NSColor {

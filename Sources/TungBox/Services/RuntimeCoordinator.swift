@@ -44,6 +44,10 @@ final class RuntimeCoordinator {
         var verifyUserAPI: @MainActor () async throws -> Void
         var applySystemProxy: @MainActor (Bool) async throws -> Void
         var stopUserProxyAndClearSystemProxy: @MainActor () async throws -> Void
+        /// Awaitable selector restoration — ensures config's `default` values are
+        /// PUT to the Clash API **before** any delay test begins, preventing the
+        /// urltest auto-selection from overriding the user's manual choice.
+        var restoreSelectors: @MainActor () async -> Void
         var currentSwitches: @MainActor () -> Switches
     }
 
@@ -52,7 +56,7 @@ final class RuntimeCoordinator {
         case tunResumed, tunStarted, tunWillStop, tunStopped
         case tunFailed(Error), userProxyFailed, reportStartupError(Error)
         case userProxyClosing, shutdownFailed(Error), userProxyReady(Int)
-        case restoreSelectors, finished(refreshNodeDelays: Bool)
+        case finished(refreshNodeDelays: Bool)
     }
 
     enum OperationError: Error { case superseded }
@@ -402,7 +406,8 @@ final class RuntimeCoordinator {
         }
         guard current() else { return }
         emit(.log("[性能] 运行状态切换完成（\(input.reason)）：\(Int(Date().timeIntervalSince(plan.startedAt) * 1000)) ms，UI 保持异步\n"))
-        emit(.restoreSelectors)
+        await services.restoreSelectors()
+        guard current() else { return }
         guard finish(request) else { return }
         emit(.finished(refreshNodeDelays: input.refreshNodeDelays && readyForTest))
     }

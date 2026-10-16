@@ -172,4 +172,44 @@ enum ProxyModeConfig {
         }
         return fallback
     }
+
+    /// Preserves user-configured selector `default` values from an existing configuration
+    /// into a newly generated configuration (e.g. from subscription refresh). If a
+    /// previously selected node still exists in the new selector members, keep it.
+    static func preserveSelectorDefaults(from existingConfigText: String, into newConfigText: String) -> String {
+        guard let existingConfig = ConfigCodec.parseObject(from: existingConfigText),
+              let existingOutbounds = existingConfig["outbounds"] as? [[String: Any]],
+              var newConfig = ConfigCodec.parseObject(from: newConfigText),
+              var newOutbounds = newConfig["outbounds"] as? [[String: Any]] else {
+            return newConfigText
+        }
+
+        var existingDefaults: [String: String] = [:]
+        for outbound in existingOutbounds {
+            if (outbound["type"] as? String)?.lowercased() == "selector",
+               let tag = outbound["tag"] as? String,
+               let def = outbound["default"] as? String, !def.isEmpty {
+                existingDefaults[tag] = def
+            }
+        }
+
+        guard !existingDefaults.isEmpty else { return newConfigText }
+
+        var changed = false
+        for i in newOutbounds.indices {
+            if (newOutbounds[i]["type"] as? String)?.lowercased() == "selector",
+               let tag = newOutbounds[i]["tag"] as? String,
+               let existingDefault = existingDefaults[tag] {
+                let members = newOutbounds[i]["outbounds"] as? [String] ?? []
+                if members.contains(existingDefault) {
+                    newOutbounds[i]["default"] = existingDefault
+                    changed = true
+                }
+            }
+        }
+
+        guard changed else { return newConfigText }
+        newConfig["outbounds"] = newOutbounds
+        return (try? ConfigCodec.render(newConfig)) ?? newConfigText
+    }
 }

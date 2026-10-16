@@ -449,6 +449,7 @@ private final class RuntimeFlowFixture {
             verifyUserAPI: { self.calls.append("verifyUser") },
             applySystemProxy: { self.calls.append("apply:\($0)") },
             stopUserProxyAndClearSystemProxy: { self.calls.append("stopAndClear"); self.userRunning = false },
+            restoreSelectors: { self.calls.append("restore") },
             currentSwitches: { self.switches }
         )
     }
@@ -473,7 +474,6 @@ private final class RuntimeFlowFixture {
             case .userProxyClosing: self.calls.append("proxy:closing")
             case .shutdownFailed: self.calls.append("shutdownError")
             case .userProxyReady: self.calls.append("proxy:ready")
-            case .restoreSelectors: self.calls.append("restore")
             case .finished(let refresh): self.calls.append("finish:\(refresh)")
             }
         }

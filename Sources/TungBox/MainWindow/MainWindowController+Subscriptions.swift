@@ -12,61 +12,84 @@ extension MainWindowController {
         }
 
         let title = NSTextField(labelWithString: "订阅")
-        title.font = .systemFont(ofSize: 30, weight: .bold)
+        title.font = .systemFont(ofSize: 26, weight: .bold)
         title.textColor = MD3.onSurface
         title.translatesAutoresizingMaskIntoConstraints = false
-        tightenLabelCell(title)   // 让字符紧贴 frame.x，避免视觉缩进
+        tightenLabelCell(title)
         registerThemeObserver { [weak title] in
             title?.textColor = MD3.onSurface
         }
 
+        let subtitle = NSTextField(labelWithString: "管理订阅链接，获取并更新节点信息")
+        subtitle.font = .systemFont(ofSize: 12)
+        subtitle.textColor = MD3.onSurfaceVariant
+        subtitle.translatesAutoresizingMaskIntoConstraints = false
+        tightenLabelCell(subtitle)
+        registerThemeObserver { [weak subtitle] in
+            subtitle?.textColor = MD3.onSurfaceVariant
+        }
+
+        let headerStack = NSStackView(views: [title, subtitle])
+        headerStack.orientation = .vertical
+        headerStack.alignment = .leading
+        headerStack.spacing = 3
+        headerStack.translatesAutoresizingMaskIntoConstraints = false
+
         let addButton = MD3Button()
         addButton.title = "添加订阅"
+        addButton.image = NSImage(systemSymbolName: "plus.circle.fill", accessibilityDescription: nil)
         addButton.style = .filled
         addButton.target = self
         addButton.action = #selector(addSubscriptionClicked)
         addButton.translatesAutoresizingMaskIntoConstraints = false
-        addButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
-        addButton.widthAnchor.constraint(equalToConstant: 120).isActive = true
+        addButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
+
+        let refreshAllButton = MD3Button()
+        refreshAllButton.title = "刷新全部"
+        refreshAllButton.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: nil)
+        refreshAllButton.style = .outlined
+        refreshAllButton.target = self
+        refreshAllButton.action = #selector(refreshAllSubscriptionsClicked)
+        refreshAllButton.translatesAutoresizingMaskIntoConstraints = false
+        refreshAllButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
 
         let importFileButton = MD3Button()
         importFileButton.title = "从文件导入"
+        importFileButton.image = NSImage(systemSymbolName: "doc.text", accessibilityDescription: nil)
         importFileButton.style = .outlined
         importFileButton.target = self
         importFileButton.action = #selector(importSubscriptionFileClicked)
         importFileButton.translatesAutoresizingMaskIntoConstraints = false
-        importFileButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
-        importFileButton.widthAnchor.constraint(equalToConstant: 120).isActive = true
+        importFileButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
 
         let importClipboardButton = MD3Button()
         importClipboardButton.title = "从剪贴板"
+        importClipboardButton.image = NSImage(systemSymbolName: "doc.on.clipboard", accessibilityDescription: nil)
         importClipboardButton.style = .outlined
         importClipboardButton.target = self
         importClipboardButton.action = #selector(importSubscriptionFromClipboardClicked)
         importClipboardButton.translatesAutoresizingMaskIntoConstraints = false
-        importClipboardButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
-        importClipboardButton.widthAnchor.constraint(equalToConstant: 120).isActive = true
+        importClipboardButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
 
-        // 顶部操作栏不再放"更新选中" —— 每张卡片右上角已有刷新按钮，避免重复。
         let deleteButton = MD3Button()
         deleteButton.title = "删除订阅"
+        deleteButton.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
         deleteButton.style = .destructive
         deleteButton.target = self
         deleteButton.action = #selector(deleteSubscriptionClicked)
         deleteButton.translatesAutoresizingMaskIntoConstraints = false
-        deleteButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
-        deleteButton.widthAnchor.constraint(equalToConstant: 120).isActive = true
+        deleteButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
 
-        let buttons = NSStackView(views: [addButton, importFileButton, importClipboardButton, deleteButton])
+        let buttons = NSStackView(views: [addButton, refreshAllButton, importFileButton, importClipboardButton, deleteButton])
         buttons.orientation = .horizontal
-        buttons.spacing = 12
-        buttons.edgeInsets = NSEdgeInsetsZero   // 显式清零，否则按钮和标题/卡片对不齐
+        buttons.spacing = 10
+        buttons.edgeInsets = NSEdgeInsetsZero
         buttons.translatesAutoresizingMaskIntoConstraints = false
 
         let scroll = MD3ScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.hasVerticalScroller = true
-        scroll.applyThinOverlayScroller()       // 极简悬浮滚动条
+        scroll.applyThinOverlayScroller()
         scroll.automaticallyAdjustsContentInsets = false
         scroll.contentInsets = NSEdgeInsetsZero
         
@@ -85,28 +108,24 @@ extension MainWindowController {
         subscriptionTable.headerView = nil
         subscriptionTable.delegate = self
         subscriptionTable.dataSource = self
-        // NSTableView 默认 intercellSpacing = (3, 2) 会让 cell 内容横向缩进 3pt，
-        // 视觉上卡片就比标题/按钮右移 → 看不齐。清零横向间距，保留 8pt 行间距。
-        subscriptionTable.intercellSpacing = NSSize(width: 0, height: 8)
-        subscriptionTable.rowHeight = 84   // 紧凑卡片高度（行间距由 intercellSpacing 给）
+        subscriptionTable.intercellSpacing = NSSize(width: 0, height: 12)
+        subscriptionTable.rowHeight = 160
         scroll.documentView = subscriptionTable
         subscriptionTable.sizeLastColumnToFit()
 
-        // 直接把 scroll 放到 view 上（不再包 MD3Panel 底色），让卡片左缘和上方按钮、
-        // 标题完全对齐 —— 视觉上更干净。
-        view.addSubview(title)
+        view.addSubview(headerStack)
         view.addSubview(buttons)
         view.addSubview(scroll)
 
         NSLayoutConstraint.activate([
-            title.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
-            title.topAnchor.constraint(equalTo: view.topAnchor, constant: 28),
+            headerStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
+            headerStack.topAnchor.constraint(equalTo: view.topAnchor, constant: 28),
 
-            buttons.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            buttons.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 20),
-            buttons.heightAnchor.constraint(equalToConstant: 36),
+            buttons.leadingAnchor.constraint(equalTo: headerStack.leadingAnchor),
+            buttons.topAnchor.constraint(equalTo: headerStack.bottomAnchor, constant: 18),
+            buttons.heightAnchor.constraint(equalToConstant: 34),
 
-            scroll.leadingAnchor.constraint(equalTo: title.leadingAnchor),
+            scroll.leadingAnchor.constraint(equalTo: headerStack.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
             scroll.topAnchor.constraint(equalTo: buttons.bottomAnchor, constant: 16),
             scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -24)
@@ -214,6 +233,17 @@ extension MainWindowController {
         
         dialog.onCancel = { [weak dialog] in
             dialog?.dismiss()
+        }
+    }
+
+    @objc func refreshAllSubscriptionsClicked() {
+        guard !subscriptions.isEmpty else {
+            showToast("暂无订阅可刷新", style: .info)
+            return
+        }
+        showToast("正在刷新全部 \(subscriptions.count) 个订阅...", style: .info)
+        for index in subscriptions.indices {
+            refreshSubscription(at: index)
         }
     }
 
@@ -561,13 +591,18 @@ extension MainWindowController {
         let configURL = store.configURL(for: profile)
         let baseURL = store.ruleBaseURL(for: subscription.id)
         let projectionURL = store.ruleProjectionURL(for: subscription.id)
+        var resolvedConfig = config
+        if FileManager.default.fileExists(atPath: configURL.path),
+           let existingText = try? String(contentsOf: configURL, encoding: .utf8) {
+            resolvedConfig = ProxyModeConfig.preserveSelectorDefaults(from: existingText, into: config)
+        }
         var snapshots: [(URL, Data?)] = []
         do {
             for url in [configURL, baseURL, projectionURL] {
                 snapshots.append((url, FileManager.default.fileExists(atPath: url.path) ? try Data(contentsOf: url) : nil))
             }
-            try store.saveRuleBase(config, for: subscription.id)
-            let merged = try renderConfig(try applyCustomRules(to: config, subscriptionID: subscription.id))
+            try store.saveRuleBase(resolvedConfig, for: subscription.id)
+            let merged = try renderConfig(try applyCustomRules(to: resolvedConfig, subscriptionID: subscription.id))
             try checkRuleSetConfig(merged)
             try Data(merged.utf8).write(to: configURL, options: .atomic)
             try store.saveRuleProjection(merged, for: subscription.id)

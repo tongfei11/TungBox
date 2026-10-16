@@ -307,3 +307,43 @@ final class MD3LatencyChip: NSView, MD3Themeable {
         self.needsDisplay = true
     }
 }
+
+// MARK: - Equalizer Bars View
+
+final class EqualizerBarsView: NSView, MD3Themeable {
+    private let barCount = 10
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        wantsLayer = true
+    }
+
+    func themeChanged() {
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        let heights: [CGFloat] = [0.25, 0.45, 0.8, 0.35, 0.9, 0.65, 0.55, 0.85, 0.5, 0.3]
+        let barW: CGFloat = 3.0
+        let spacing: CGFloat = 3.0
+        let totalW = CGFloat(barCount) * barW + CGFloat(barCount - 1) * spacing
+        let startX = max(bounds.width - totalW, 0)
+        ctx.setFillColor(MD3.primary.withAlphaComponent(0.8).cgColor)
+        for i in 0..<barCount {
+            let h = max(bounds.height * heights[i % heights.count], 3)
+            let r = CGRect(x: startX + CGFloat(i) * (barW + spacing), y: 0, width: barW, height: h)
+            ctx.fill(r)
+        }
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: 58, height: 20)
+    }
+}

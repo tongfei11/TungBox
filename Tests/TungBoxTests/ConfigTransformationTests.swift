@@ -287,4 +287,68 @@ final class ConfigTransformationTests: XCTestCase {
         let actual = try XCTUnwrap((result["route"] as? [String: Any])?["default_domain_resolver"] as? [String: Any])
         XCTAssertTrue(NSDictionary(dictionary: actual).isEqual(to: resolver))
     }
+
+    func testPreserveSelectorDefaultsKeepsExistingPickWhenNodeStillExists() throws {
+        let existingConfig = """
+        {
+          "outbounds": [
+            {
+              "type": "selector",
+              "tag": "节点选择",
+              "outbounds": ["自动选择", "香港 01", "日本 01"],
+              "default": "香港 01"
+            }
+          ]
+        }
+        """
+        let newConfig = """
+        {
+          "outbounds": [
+            {
+              "type": "selector",
+              "tag": "节点选择",
+              "outbounds": ["自动选择", "香港 01", "新加坡 01"],
+              "default": "自动选择"
+            }
+          ]
+        }
+        """
+        let merged = ProxyModeConfig.preserveSelectorDefaults(from: existingConfig, into: newConfig)
+        let parsed = try XCTUnwrap(ConfigCodec.parseObject(from: merged))
+        let outbounds = try XCTUnwrap(parsed["outbounds"] as? [[String: Any]])
+        let selector = try XCTUnwrap(outbounds.first { $0["tag"] as? String == "节点选择" })
+        XCTAssertEqual(selector["default"] as? String, "香港 01")
+    }
+
+    func testPreserveSelectorDefaultsFallsBackWhenNodeNoLongerExists() throws {
+        let existingConfig = """
+        {
+          "outbounds": [
+            {
+              "type": "selector",
+              "tag": "节点选择",
+              "outbounds": ["自动选择", "下线节点"],
+              "default": "下线节点"
+            }
+          ]
+        }
+        """
+        let newConfig = """
+        {
+          "outbounds": [
+            {
+              "type": "selector",
+              "tag": "节点选择",
+              "outbounds": ["自动选择", "香港 01"],
+              "default": "自动选择"
+            }
+          ]
+        }
+        """
+        let merged = ProxyModeConfig.preserveSelectorDefaults(from: existingConfig, into: newConfig)
+        let parsed = try XCTUnwrap(ConfigCodec.parseObject(from: merged))
+        let outbounds = try XCTUnwrap(parsed["outbounds"] as? [[String: Any]])
+        let selector = try XCTUnwrap(outbounds.first { $0["tag"] as? String == "节点选择" })
+        XCTAssertEqual(selector["default"] as? String, "自动选择")
+    }
 }

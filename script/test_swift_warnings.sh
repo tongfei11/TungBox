@@ -36,6 +36,17 @@ touch \
   Sources/TungBox/Views/MD3BusinessViews.swift \
   Sources/TungBox/Views/MD3Dialog.swift \
   Sources/TungBox/MainWindow/MainWindowController.swift \
+  Sources/TungBox/Core/CountryFlagHelper.swift \
+  Sources/TungBox/Services/ExternalIPService.swift \
+  Sources/TungBox/Services/NetworkReachability.swift \
+  Sources/TungBox/Services/ProcessResourceProbe.swift \
+  Sources/TungBox/Services/RecentStatusTracker.swift \
+  Sources/TungBox/Services/TrafficTrendStore.swift \
+  Sources/TungBox/Services/SpeedRingBuffer.swift \
+  Sources/TungBox/Views/TrafficTrendChartView.swift \
+  Sources/TungBox/Views/SpeedWaveChartView.swift \
+  Sources/TungBox/Views/TrafficDonutChartView.swift \
+  Sources/TungBox/Views/MemoryRingView.swift \
   Sources/TungBox/AppDelegate.swift \
   Sources/TungBox/main.swift
 

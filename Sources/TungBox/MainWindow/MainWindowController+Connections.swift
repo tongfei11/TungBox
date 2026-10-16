@@ -12,12 +12,28 @@ extension MainWindowController {
         }
 
         let title = NSTextField(labelWithString: "连接")
-        title.font = .systemFont(ofSize: 30, weight: .bold)
+        title.font = .systemFont(ofSize: 26, weight: .bold)
         title.textColor = MD3.onSurface
         title.translatesAutoresizingMaskIntoConstraints = false
+        tightenLabelCell(title)
         registerThemeObserver { [weak title] in
             title?.textColor = MD3.onSurface
         }
+
+        let subtitle = NSTextField(labelWithString: "查看当前活动网络连接和分流规则")
+        subtitle.textColor = MD3.onSurfaceVariant
+        subtitle.font = .systemFont(ofSize: 12)
+        subtitle.translatesAutoresizingMaskIntoConstraints = false
+        tightenLabelCell(subtitle)
+        registerThemeObserver { [weak subtitle] in
+            subtitle?.textColor = MD3.onSurfaceVariant
+        }
+
+        let headerStack = NSStackView(views: [title, subtitle])
+        headerStack.orientation = .vertical
+        headerStack.alignment = .leading
+        headerStack.spacing = 3
+        headerStack.translatesAutoresizingMaskIntoConstraints = false
 
         // Filter bar
         let filterField = connectionFilterField
@@ -25,7 +41,7 @@ extension MainWindowController {
         filterField.target = self
         filterField.action = #selector(connectionFilterChanged)
         filterField.translatesAutoresizingMaskIntoConstraints = false
-        filterField.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        filterField.heightAnchor.constraint(equalToConstant: 34).isActive = true
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(connectionFilterChanged),
@@ -35,25 +51,27 @@ extension MainWindowController {
 
         let refreshButton = MD3Button()
         refreshButton.title = "刷新"
-        refreshButton.style = .tonal
+        refreshButton.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: nil)
+        refreshButton.style = .filled
         refreshButton.target = self
         refreshButton.action = #selector(refreshConnectionsClicked)
         refreshButton.translatesAutoresizingMaskIntoConstraints = false
-        refreshButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
-        refreshButton.widthAnchor.constraint(equalToConstant: 80).isActive = true
+        refreshButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        refreshButton.widthAnchor.constraint(equalToConstant: 88).isActive = true
 
         let closeButton = MD3Button()
         closeButton.title = "关闭全部"
-        closeButton.style = .outlined
+        closeButton.image = NSImage(systemSymbolName: "xmark.circle", accessibilityDescription: nil)
+        closeButton.style = .destructive
         closeButton.target = self
         closeButton.action = #selector(closeAllConnectionsClicked)
         closeButton.translatesAutoresizingMaskIntoConstraints = false
-        closeButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
-        closeButton.widthAnchor.constraint(equalToConstant: 120).isActive = true
+        closeButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        closeButton.widthAnchor.constraint(equalToConstant: 112).isActive = true
 
         let buttons = NSStackView(views: [refreshButton, closeButton])
         buttons.orientation = .horizontal
-        buttons.spacing = 8
+        buttons.spacing = 10
         buttons.translatesAutoresizingMaskIntoConstraints = false
 
         let toolbar = NSStackView(views: [filterField, buttons])
@@ -61,7 +79,7 @@ extension MainWindowController {
         toolbar.spacing = 12
         toolbar.alignment = .centerY
         toolbar.translatesAutoresizingMaskIntoConstraints = false
-        filterField.widthAnchor.constraint(equalTo: toolbar.widthAnchor, multiplier: 0.55).isActive = true
+        filterField.widthAnchor.constraint(equalTo: toolbar.widthAnchor, multiplier: 0.58).isActive = true
 
         let panel = MD3Panel()
         panel.type = .filled
@@ -70,45 +88,61 @@ extension MainWindowController {
         let scroll = MD3ScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.hasVerticalScroller = true
+        scroll.applyThinOverlayScroller()
         scroll.drawsBackground = false
 
         connectionsTable.backgroundColor = .clear
-        connectionsTable.addTableColumn(connectionColumn("network", "网络", 70))
-        connectionsTable.addTableColumn(connectionColumn("status", "状态", 80))
-        connectionsTable.addTableColumn(connectionColumn("source", "来源 IP", 120))
-        connectionsTable.addTableColumn(connectionColumn("destination", "目标", 240))
-        connectionsTable.addTableColumn(connectionColumn("rule", "规则", 120))
-        connectionsTable.addTableColumn(connectionColumn("outbound", "出站", 120))
-        connectionsTable.addTableColumn(connectionColumn("traffic", "流量", 120))
+        connectionsTable.addTableColumn(connectionColumn("index", "#", 44))
+        connectionsTable.addTableColumn(connectionColumn("network", "网络", 68))
+        connectionsTable.addTableColumn(connectionColumn("status", "状态", 88))
+        connectionsTable.addTableColumn(connectionColumn("source", "来源 IP", 110))
+        connectionsTable.addTableColumn(connectionColumn("destination", "目标", 220))
+        connectionsTable.addTableColumn(connectionColumn("rule", "规则", 130))
+        connectionsTable.addTableColumn(connectionColumn("outbound", "出站", 110))
+        connectionsTable.addTableColumn(connectionColumn("traffic", "流量", 110))
         connectionsTable.delegate = self
         connectionsTable.dataSource = self
-        connectionsTable.rowHeight = 40
+        connectionsTable.rowHeight = 38
         connectionsTable.gridStyleMask = [.solidHorizontalGridLineMask]
+        connectionsTable.gridColor = MD3.outlineVariant.withAlphaComponent(0.25)
         connectionsTable.menu = connectionContextMenu()
         scroll.documentView = connectionsTable
 
         panel.addSubview(scroll)
-        view.addSubview(title)
+
+        connectionCountLabel.font = .systemFont(ofSize: 12)
+        connectionCountLabel.textColor = MD3.onSurfaceVariant
+        connectionCountLabel.translatesAutoresizingMaskIntoConstraints = false
+        connectionCountLabel.stringValue = "共 \(displayedConnections.count) 条连接"
+        registerThemeObserver { [weak self] in
+            self?.connectionCountLabel.textColor = MD3.onSurfaceVariant
+        }
+
+        view.addSubview(headerStack)
         view.addSubview(toolbar)
         view.addSubview(panel)
+        view.addSubview(connectionCountLabel)
 
         NSLayoutConstraint.activate([
-            title.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
-            title.topAnchor.constraint(equalTo: view.topAnchor, constant: 28),
+            headerStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
+            headerStack.topAnchor.constraint(equalTo: view.topAnchor, constant: 28),
 
-            toolbar.leadingAnchor.constraint(equalTo: title.leadingAnchor),
+            toolbar.leadingAnchor.constraint(equalTo: headerStack.leadingAnchor),
             toolbar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
-            toolbar.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 16),
+            toolbar.topAnchor.constraint(equalTo: headerStack.bottomAnchor, constant: 18),
 
-            panel.leadingAnchor.constraint(equalTo: title.leadingAnchor),
+            panel.leadingAnchor.constraint(equalTo: headerStack.leadingAnchor),
             panel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
-            panel.topAnchor.constraint(equalTo: toolbar.bottomAnchor, constant: 12),
-            panel.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -24),
+            panel.topAnchor.constraint(equalTo: toolbar.bottomAnchor, constant: 14),
+            panel.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -46),
 
-            scroll.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 12),
-            scroll.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -12),
-            scroll.topAnchor.constraint(equalTo: panel.topAnchor, constant: 12),
-            scroll.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -12)
+            scroll.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 6),
+            scroll.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -6),
+            scroll.topAnchor.constraint(equalTo: panel.topAnchor, constant: 6),
+            scroll.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -6),
+
+            connectionCountLabel.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 4),
+            connectionCountLabel.topAnchor.constraint(equalTo: panel.bottomAnchor, constant: 10)
         ])
 
         return view
@@ -139,6 +173,7 @@ extension MainWindowController {
         guard window?.isVisible == true, window?.isMiniaturized == false,
               isConnectionsPageSelected() else { return }
         let rows = filteredConnections()
+        connectionCountLabel.stringValue = "共 \(rows.count) 条连接"
         guard rows != displayedConnections else { return }
         let sameOrder = rows.map(\.id) == displayedConnections.map(\.id)
         displayedConnections = rows
@@ -150,8 +185,25 @@ extension MainWindowController {
         connectionsTable.enumerateAvailableRowViews { rowView, row in
             guard rows.indices.contains(row) else { return }
             for (column, definition) in self.connectionsTable.tableColumns.enumerated() {
-                guard let cell = rowView.view(atColumn: column) as? ConnectionTextCell else { continue }
-                cell.update(text: self.connectionCellText(for: rows[row], columnID: definition.identifier.rawValue))
+                let colID = definition.identifier.rawValue
+                if colID == "index" {
+                    if let cell = rowView.view(atColumn: column) as? ConnectionTextCell {
+                        cell.update(text: String(format: "%02d", row + 1), isMuted: true)
+                    }
+                } else if colID == "network" {
+                    if let cell = rowView.view(atColumn: column) as? ConnectionPillCell {
+                        cell.update(network: rows[row].network)
+                    }
+                } else if colID == "status" {
+                    if let cell = rowView.view(atColumn: column) as? ConnectionStatusCell {
+                        cell.update(status: rows[row].status)
+                    }
+                } else {
+                    if let cell = rowView.view(atColumn: column) as? ConnectionTextCell {
+                        let isMuted = (colID == "source" || colID == "rule")
+                        cell.update(text: self.connectionCellText(for: rows[row], columnID: colID), isMuted: isMuted)
+                    }
+                }
             }
         }
     }
@@ -308,6 +360,15 @@ extension MainWindowController {
         currentDownloadSpeed = downloadSpeed
         uploadValueLabel.stringValue = "\(formatBytes(uploadSpeed))/s"
         downloadValueLabel.stringValue = "\(formatBytes(downloadSpeed))/s"
+
+        SpeedRingBuffer.shared.record(uploadSpeedBytes: uploadSpeed, downloadSpeedBytes: downloadSpeed)
+        uploadWaveChartView.samples = SpeedRingBuffer.shared.uploadSamples
+        downloadWaveChartView.samples = SpeedRingBuffer.shared.downloadSamples
+        let maxSample = max(SpeedRingBuffer.shared.uploadSamples.max() ?? 10.0, SpeedRingBuffer.shared.downloadSamples.max() ?? 10.0, 10.0)
+        let scale = ceil(maxSample / 10.0) * 10.0
+        uploadWaveChartView.maxScaleKB = scale
+        downloadWaveChartView.maxScaleKB = scale
+
         let activeState = isProxyServiceActiveOrRequested()
         if speedChanged || lastTrayActiveState == nil || activeState != lastTrayActiveState {
             lastTrayActiveState = activeState
@@ -385,13 +446,37 @@ extension MainWindowController {
         return text
     }
 
-    func makeConnectionCell(for connection: ConnectionInfo, columnID: String) -> NSView {
-        let text = connectionCellText(for: connection, columnID: columnID)
-        let identifier = NSUserInterfaceItemIdentifier("Connection-" + columnID)
-        let cell = connectionsTable.makeView(withIdentifier: identifier, owner: nil) as? ConnectionTextCell
-            ?? ConnectionTextCell()
-        cell.identifier = identifier
-        cell.update(text: text)
-        return cell
+    func makeConnectionCell(for connection: ConnectionInfo, columnID: String, row: Int = 0) -> NSView {
+        if columnID == "index" {
+            let identifier = NSUserInterfaceItemIdentifier("Connection-index")
+            let cell = connectionsTable.makeView(withIdentifier: identifier, owner: nil) as? ConnectionTextCell
+                ?? ConnectionTextCell()
+            cell.identifier = identifier
+            cell.update(text: String(format: "%02d", row + 1), isMuted: true)
+            return cell
+        } else if columnID == "network" {
+            let identifier = NSUserInterfaceItemIdentifier("Connection-network")
+            let cell = connectionsTable.makeView(withIdentifier: identifier, owner: nil) as? ConnectionPillCell
+                ?? ConnectionPillCell()
+            cell.identifier = identifier
+            cell.update(network: connection.network)
+            return cell
+        } else if columnID == "status" {
+            let identifier = NSUserInterfaceItemIdentifier("Connection-status")
+            let cell = connectionsTable.makeView(withIdentifier: identifier, owner: nil) as? ConnectionStatusCell
+                ?? ConnectionStatusCell()
+            cell.identifier = identifier
+            cell.update(status: connection.status)
+            return cell
+        } else {
+            let text = connectionCellText(for: connection, columnID: columnID)
+            let identifier = NSUserInterfaceItemIdentifier("Connection-" + columnID)
+            let cell = connectionsTable.makeView(withIdentifier: identifier, owner: nil) as? ConnectionTextCell
+                ?? ConnectionTextCell()
+            cell.identifier = identifier
+            let isMuted = (columnID == "source" || columnID == "rule")
+            cell.update(text: text, isMuted: isMuted)
+            return cell
+        }
     }
 }

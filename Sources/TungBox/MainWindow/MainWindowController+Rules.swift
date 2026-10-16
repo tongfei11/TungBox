@@ -13,26 +13,34 @@ extension MainWindowController {
         }
 
         let title = NSTextField(labelWithString: "规则")
-        title.font = .systemFont(ofSize: 30, weight: .bold)
+        title.font = .systemFont(ofSize: 26, weight: .bold)
         title.textColor = MD3.onSurface
         title.translatesAutoresizingMaskIntoConstraints = false
+        tightenLabelCell(title)
         registerThemeObserver { [weak title] in
             title?.textColor = MD3.onSurface
         }
 
         let subtitle = NSTextField(labelWithString: "规则将按照从上到下的顺序匹配")
         subtitle.textColor = MD3.onSurfaceVariant
-        subtitle.font = .systemFont(ofSize: 13)
+        subtitle.font = .systemFont(ofSize: 12)
         subtitle.translatesAutoresizingMaskIntoConstraints = false
+        tightenLabelCell(subtitle)
         registerThemeObserver { [weak subtitle] in
             subtitle?.textColor = MD3.onSurfaceVariant
         }
 
-        ruleSearchField.placeholderString = "搜索规则"
+        let headerStack = NSStackView(views: [title, subtitle])
+        headerStack.orientation = .vertical
+        headerStack.alignment = .leading
+        headerStack.spacing = 3
+        headerStack.translatesAutoresizingMaskIntoConstraints = false
+
+        ruleSearchField.placeholderString = "搜索规则（类型 / 域名 / 关键词...）"
         ruleSearchField.target = self
         ruleSearchField.action = #selector(filterRulesClicked)
         ruleSearchField.translatesAutoresizingMaskIntoConstraints = false
-        ruleSearchField.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        ruleSearchField.heightAnchor.constraint(equalToConstant: 34).isActive = true
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(filterRulesClicked),
@@ -40,33 +48,36 @@ extension MainWindowController {
             object: ruleSearchField
         )
 
-        let addRuleButton = MD3Button()
-        addRuleButton.title = "添加规则"
-        addRuleButton.style = .filled
-        addRuleButton.target = self
-        addRuleButton.action = #selector(showAddCustomRuleDialog)
-        addRuleButton.translatesAutoresizingMaskIntoConstraints = false
-        addRuleButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
-
         let addRuleSetButton = MD3Button()
         addRuleSetButton.title = "添加规则集"
+        addRuleSetButton.image = NSImage(systemSymbolName: "square.stack.3d.up", accessibilityDescription: nil)
         addRuleSetButton.style = .outlined
         addRuleSetButton.target = self
         addRuleSetButton.action = #selector(showAddRuleSetDialog)
         addRuleSetButton.translatesAutoresizingMaskIntoConstraints = false
-        addRuleSetButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        addRuleSetButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
+
+        let addRuleButton = MD3Button()
+        addRuleButton.title = "添加规则"
+        addRuleButton.image = NSImage(systemSymbolName: "plus.circle.fill", accessibilityDescription: nil)
+        addRuleButton.style = .filled
+        addRuleButton.target = self
+        addRuleButton.action = #selector(showAddCustomRuleDialog)
+        addRuleButton.translatesAutoresizingMaskIntoConstraints = false
+        addRuleButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
 
         let deleteRuleButton = MD3Button()
         deleteRuleButton.title = "删除选中"
-        deleteRuleButton.style = .outlined
+        deleteRuleButton.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
+        deleteRuleButton.style = .destructive
         deleteRuleButton.target = self
         deleteRuleButton.action = #selector(deleteSelectedRuleClicked)
         deleteRuleButton.translatesAutoresizingMaskIntoConstraints = false
-        deleteRuleButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        deleteRuleButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
 
         let ruleToolbar = NSStackView(views: [ruleSearchField, addRuleSetButton, addRuleButton, deleteRuleButton])
         ruleToolbar.orientation = .horizontal
-        ruleToolbar.spacing = 12
+        ruleToolbar.spacing = 10
         ruleToolbar.alignment = .centerY
         ruleToolbar.translatesAutoresizingMaskIntoConstraints = false
         ruleSearchField.widthAnchor.constraint(greaterThanOrEqualToConstant: 120).isActive = true
@@ -87,10 +98,10 @@ extension MainWindowController {
         rulesTable.headerView = NSTableHeaderView()
         rulesTable.delegate = self
         rulesTable.dataSource = self
-        rulesTable.rowHeight = 54
+        rulesTable.rowHeight = 44
         rulesTable.columnAutoresizingStyle = .noColumnAutoresizing
         rulesTable.gridStyleMask = [.solidHorizontalGridLineMask]
-        rulesTable.gridColor = MD3.outlineVariant
+        rulesTable.gridColor = MD3.outlineVariant.withAlphaComponent(0.25)
         rulesTable.menu = ruleContextMenu()
         rulesTable.target = self
         rulesTable.action = #selector(rulesTableClicked(_:))
@@ -105,31 +116,28 @@ extension MainWindowController {
         panel.translatesAutoresizingMaskIntoConstraints = false
         panel.addSubview(scroll)
 
-        view.addSubview(title)
-        view.addSubview(subtitle)
+        view.addSubview(headerStack)
         view.addSubview(ruleToolbar)
         view.addSubview(panel)
 
         NSLayoutConstraint.activate([
-            title.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
-            title.topAnchor.constraint(equalTo: view.topAnchor, constant: 28),
+            headerStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
+            headerStack.topAnchor.constraint(equalTo: view.topAnchor, constant: 28),
 
-            subtitle.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            subtitle.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 6),
+            ruleToolbar.leadingAnchor.constraint(equalTo: headerStack.leadingAnchor),
+            ruleToolbar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
+            ruleToolbar.topAnchor.constraint(equalTo: headerStack.bottomAnchor, constant: 18),
+            ruleToolbar.heightAnchor.constraint(equalToConstant: 34),
 
-            ruleToolbar.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            ruleToolbar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
-            ruleToolbar.topAnchor.constraint(equalTo: subtitle.bottomAnchor, constant: 20),
-
-            panel.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            panel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
+            panel.leadingAnchor.constraint(equalTo: headerStack.leadingAnchor),
+            panel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
             panel.topAnchor.constraint(equalTo: ruleToolbar.bottomAnchor, constant: 14),
             panel.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -24),
 
-            scroll.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 8),
-            scroll.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -8),
-            scroll.topAnchor.constraint(equalTo: panel.topAnchor, constant: 8),
-            scroll.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -8)
+            scroll.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 6),
+            scroll.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -6),
+            scroll.topAnchor.constraint(equalTo: panel.topAnchor, constant: 6),
+            scroll.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -6)
         ])
 
         refreshRulesFromEditor()

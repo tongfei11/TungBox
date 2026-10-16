@@ -14,6 +14,10 @@ final class MD3Panel: NSView, MD3Themeable {
         didSet { self.needsDisplay = true }
     }
 
+    var isSelected: Bool = false {
+        didSet { self.needsDisplay = true }
+    }
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         setup()
@@ -37,19 +41,35 @@ final class MD3Panel: NSView, MD3Themeable {
         switch type {
         case .elevated:
             layer.backgroundColor = MD3.surface.cgColor
-            layer.borderWidth = 0
-            layer.shadowColor = NSColor.black.cgColor
-            layer.shadowOpacity = MD3.isDark ? 0.3 : 0.06
-            layer.shadowRadius = 6
-            layer.shadowOffset = CGSize(width: 0, height: -2)
+            layer.borderWidth = isSelected ? 1.5 : 1.0
+            layer.borderColor = isSelected ? MD3.primary.cgColor : MD3.outlineVariant.cgColor
+            if isSelected && MD3.isDark {
+                layer.shadowColor = MD3.primary.cgColor
+                layer.shadowOpacity = 0.25
+                layer.shadowRadius = 8
+                layer.shadowOffset = .zero
+            } else {
+                layer.shadowColor = NSColor.black.cgColor
+                layer.shadowOpacity = MD3.isDark ? 0.3 : 0.06
+                layer.shadowRadius = 6
+                layer.shadowOffset = CGSize(width: 0, height: -2)
+            }
         case .filled:
             layer.backgroundColor = MD3.surfaceContainer.cgColor
-            layer.borderWidth = 0
-            layer.shadowOpacity = 0
+            layer.borderWidth = isSelected ? 1.5 : 0
+            layer.borderColor = isSelected ? MD3.primary.cgColor : NSColor.clear.cgColor
+            if isSelected && MD3.isDark {
+                layer.shadowColor = MD3.primary.cgColor
+                layer.shadowOpacity = 0.2
+                layer.shadowRadius = 6
+                layer.shadowOffset = .zero
+            } else {
+                layer.shadowOpacity = 0
+            }
         case .outlined:
             layer.backgroundColor = NSColor.clear.cgColor
-            layer.borderColor = MD3.outlineVariant.cgColor
-            layer.borderWidth = 1.0
+            layer.borderColor = (isSelected ? MD3.primary : MD3.outlineVariant).cgColor
+            layer.borderWidth = isSelected ? 1.5 : 1.0
             layer.shadowOpacity = 0
         }
     }
@@ -681,6 +701,8 @@ final class MD3NodeTileView: NSView, MD3Themeable {
     let nameLabel = NSTextField(labelWithString: "")
     let subLabel = NSTextField(labelWithString: "")
     let actionButton = NSButton()
+    private let radioCircle = NSView()
+    private let radioDot = NSView()
 
     var isSelected: Bool = false {
         didSet {
@@ -724,14 +746,31 @@ final class MD3NodeTileView: NSView, MD3Themeable {
 
     private func setup() {
         wantsLayer = true
-        layer?.cornerRadius = 6
+        layer?.cornerRadius = 8
+        layer?.borderWidth = 1
+
+        radioCircle.wantsLayer = true
+        radioCircle.layer?.cornerRadius = 7
+        radioCircle.layer?.borderWidth = 1.5
+        radioCircle.translatesAutoresizingMaskIntoConstraints = false
+
+        radioDot.wantsLayer = true
+        radioDot.layer?.cornerRadius = 3.5
+        radioDot.translatesAutoresizingMaskIntoConstraints = false
+        radioCircle.addSubview(radioDot)
+
+        NSLayoutConstraint.activate([
+            radioDot.centerXAnchor.constraint(equalTo: radioCircle.centerXAnchor),
+            radioDot.centerYAnchor.constraint(equalTo: radioCircle.centerYAnchor),
+            radioDot.widthAnchor.constraint(equalToConstant: 7),
+            radioDot.heightAnchor.constraint(equalToConstant: 7)
+        ])
 
         nameLabel.font = .systemFont(ofSize: 12, weight: .medium)
         nameLabel.textColor = MD3.onSurface
         nameLabel.translatesAutoresizingMaskIntoConstraints = false
         nameLabel.lineBreakMode = .byTruncatingTail
         nameLabel.maximumNumberOfLines = 1
-        // 内容不能强制把 cell 撑宽：超长名字必须收敛，由外层 fillEqually 决定列宽。
         nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         nameLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
@@ -745,7 +784,7 @@ final class MD3NodeTileView: NSView, MD3Themeable {
 
         actionButton.isBordered = false
         actionButton.wantsLayer = true
-        actionButton.layer?.cornerRadius = 4
+        actionButton.layer?.cornerRadius = 5
         actionButton.font = .monospacedDigitSystemFont(ofSize: 10, weight: .bold)
         actionButton.translatesAutoresizingMaskIntoConstraints = false
         actionButton.target = self
@@ -753,6 +792,7 @@ final class MD3NodeTileView: NSView, MD3Themeable {
         actionButton.isEnabled = isActionEnabled
         actionButton.isHidden = !isActionEnabled
 
+        addSubview(radioCircle)
         addSubview(nameLabel)
         addSubview(subLabel)
         addSubview(actionButton)
@@ -761,9 +801,14 @@ final class MD3NodeTileView: NSView, MD3Themeable {
         actionButton.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         NSLayoutConstraint.activate([
-            nameLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            radioCircle.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            radioCircle.centerYAnchor.constraint(equalTo: centerYAnchor),
+            radioCircle.widthAnchor.constraint(equalToConstant: 14),
+            radioCircle.heightAnchor.constraint(equalToConstant: 14),
+
+            nameLabel.leadingAnchor.constraint(equalTo: radioCircle.trailingAnchor, constant: 8),
             nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: 6),
-            nameLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: actionButton.leadingAnchor, constant: -6),
 
             subLabel.leadingAnchor.constraint(equalTo: nameLabel.leadingAnchor),
             subLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 1),
@@ -771,9 +816,9 @@ final class MD3NodeTileView: NSView, MD3Themeable {
             subLabel.trailingAnchor.constraint(lessThanOrEqualTo: actionButton.leadingAnchor, constant: -6),
 
             actionButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            actionButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
-            actionButton.heightAnchor.constraint(equalToConstant: 18),
-            actionButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 28)
+            actionButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            actionButton.heightAnchor.constraint(equalToConstant: 20),
+            actionButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 32)
         ])
 
         updateStyle()
@@ -785,22 +830,43 @@ final class MD3NodeTileView: NSView, MD3Themeable {
 
     private func updateStyle() {
         if isSelected && !isInteractive {
-            // Current auto-pick inside a urltest group: mark it as selected but
-            // with a softer container tint so it reads as "locked, not clickable".
             layer?.backgroundColor = MD3.primaryContainer.cgColor
+            layer?.borderColor = MD3.primary.withAlphaComponent(0.6).cgColor
+            layer?.borderWidth = 1.5
+            radioCircle.layer?.borderColor = MD3.primary.cgColor
+            radioDot.layer?.backgroundColor = MD3.primary.cgColor
+            radioDot.isHidden = false
             nameLabel.textColor = MD3.onPrimaryContainer
             subLabel.textColor = MD3.onPrimaryContainer.withAlphaComponent(0.7)
+        } else if isSelected {
+            layer?.backgroundColor = MD3.isDark 
+                ? MD3.primary.withAlphaComponent(0.12).cgColor 
+                : MD3.primaryContainer.withAlphaComponent(0.4).cgColor
+            layer?.borderColor = MD3.primary.cgColor
+            layer?.borderWidth = 1.5
+            radioCircle.layer?.borderColor = MD3.primary.cgColor
+            radioDot.layer?.backgroundColor = MD3.primary.cgColor
+            radioDot.isHidden = false
+            nameLabel.textColor = MD3.onSurface
+            nameLabel.font = .systemFont(ofSize: 12, weight: .bold)
+            subLabel.textColor = MD3.onSurfaceVariant
         } else if !isInteractive {
             layer?.backgroundColor = MD3.surfaceContainerLow.cgColor
+            layer?.borderColor = MD3.outlineVariant.withAlphaComponent(0.3).cgColor
+            layer?.borderWidth = 1
+            radioCircle.layer?.borderColor = MD3.outlineVariant.withAlphaComponent(0.5).cgColor
+            radioDot.isHidden = true
             nameLabel.textColor = MD3.onSurfaceVariant.withAlphaComponent(0.6)
+            nameLabel.font = .systemFont(ofSize: 12, weight: .medium)
             subLabel.textColor = MD3.onSurfaceVariant.withAlphaComponent(0.4)
-        } else if isSelected {
-            layer?.backgroundColor = MD3.primary.cgColor
-            nameLabel.textColor = MD3.onPrimary
-            subLabel.textColor = MD3.onPrimary.withAlphaComponent(0.7)
         } else {
             layer?.backgroundColor = MD3.surfaceContainerLow.cgColor
+            layer?.borderColor = MD3.outlineVariant.withAlphaComponent(0.4).cgColor
+            layer?.borderWidth = 1
+            radioCircle.layer?.borderColor = MD3.outlineVariant.cgColor
+            radioDot.isHidden = true
             nameLabel.textColor = MD3.onSurface
+            nameLabel.font = .systemFont(ofSize: 12, weight: .medium)
             subLabel.textColor = MD3.onSurfaceVariant
         }
         updateDelayState()
@@ -813,48 +879,44 @@ final class MD3NodeTileView: NSView, MD3Themeable {
             actionButton.image = nil
             actionButton.title = "..."
             actionButton.layer?.backgroundColor = NSColor.clear.cgColor
-            actionButton.contentTintColor = (isSelected && isInteractive) ? MD3.onPrimary : MD3.primary
+            actionButton.contentTintColor = MD3.primary
         } else if delay.isEmpty || delay == "未测试" || delay == "—" {
             actionButton.image = NSImage(systemSymbolName: "bolt", accessibilityDescription: "测试延迟")
             actionButton.title = ""
             actionButton.layer?.backgroundColor = NSColor.clear.cgColor
-            actionButton.contentTintColor = (isSelected && isInteractive) ? MD3.onPrimary : (isInteractive ? MD3.onSurfaceVariant : MD3.onSurfaceVariant.withAlphaComponent(0.6))
+            actionButton.contentTintColor = MD3.onSurfaceVariant.withAlphaComponent(0.7)
         } else {
             actionButton.image = nil
             let numStr = delay.replacingOccurrences(of: " ms", with: "")
             actionButton.title = numStr
 
-            let colors = getDelayColors(delayStr: delay, isSelected: isSelected && isInteractive)
+            let colors = getDelayColors(delayStr: delay)
             actionButton.layer?.backgroundColor = colors.bg.cgColor
             actionButton.contentTintColor = colors.text
         }
     }
 
-    private func getDelayColors(delayStr: String, isSelected: Bool) -> (bg: NSColor, text: NSColor) {
-        if isSelected {
-            return (NSColor.white.withAlphaComponent(0.2), NSColor.white)
-        }
-
+    private func getDelayColors(delayStr: String) -> (bg: NSColor, text: NSColor) {
         let cleaned = delayStr.replacingOccurrences(of: " ms", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard let ms = Int(cleaned) else {
+            if delayStr.contains("超时") || delayStr.contains("失败") {
+                return (MD3.errorContainer, MD3.onErrorContainer)
+            }
             return (MD3.surfaceContainer, MD3.onSurfaceVariant)
         }
 
-        if ms < 400 {
-            // Good (Green)
-            let bg = NSColor(red: 0.88, green: 0.96, blue: 0.90, alpha: 1.0)
-            let text = NSColor(red: 0.15, green: 0.54, blue: 0.28, alpha: 1.0)
-            return (bg, text)
-        } else if ms < 800 {
-            // Fair (Orange)
-            let bg = NSColor(red: 0.99, green: 0.96, blue: 0.85, alpha: 1.0)
-            let text = NSColor(red: 0.65, green: 0.45, blue: 0.05, alpha: 1.0)
+        if ms < 350 {
+            return (MD3.successContainer, MD3.onSuccessContainer)
+        } else if ms < 750 {
+            let bg = MD3.isDark 
+                ? NSColor(calibratedRed: 0.35, green: 0.26, blue: 0.08, alpha: 0.6) 
+                : NSColor(calibratedRed: 0.98, green: 0.92, blue: 0.78, alpha: 0.9)
+            let text = MD3.isDark 
+                ? NSColor(calibratedRed: 0.96, green: 0.78, blue: 0.35, alpha: 1.0) 
+                : NSColor(calibratedRed: 0.68, green: 0.44, blue: 0.05, alpha: 1.0)
             return (bg, text)
         } else {
-            // Poor (Red)
-            let bg = NSColor(red: 0.99, green: 0.90, blue: 0.90, alpha: 1.0)
-            let text = NSColor(red: 0.80, green: 0.20, blue: 0.20, alpha: 1.0)
-            return (bg, text)
+            return (MD3.errorContainer, MD3.onErrorContainer)
         }
     }
 

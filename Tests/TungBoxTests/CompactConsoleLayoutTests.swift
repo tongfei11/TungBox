@@ -84,7 +84,7 @@ final class CompactConsoleLayoutTests: XCTestCase {
                 chip.status = state
                 root.layoutSubtreeIfNeeded()
                 root.layoutSubtreeIfNeeded()
-                XCTAssertEqual(root.sidebar.frame.width, 156, accuracy: 0.5)
+                XCTAssertEqual(root.sidebar.frame.width, ConsoleLayout.sidebarWidth, accuracy: 0.5)
                 let label = try XCTUnwrap(descendants(chip).compactMap { $0 as? NSTextField }.first)
                 XCTAssertGreaterThanOrEqual(label.frame.width + 0.5, label.intrinsicContentSize.width)
                 XCTAssertTrue(chip.bounds.insetBy(dx: -0.5, dy: -0.5).contains(chip.convert(label.bounds, from: label)))

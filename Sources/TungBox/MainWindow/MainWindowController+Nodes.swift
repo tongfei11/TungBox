@@ -5,27 +5,43 @@ extension MainWindowController {
     
     func makeNodesView() -> NSView {
         let title = NSTextField(labelWithString: "节点")
-        title.font = .systemFont(ofSize: 30, weight: .bold)
+        title.font = .systemFont(ofSize: 26, weight: .bold)
         title.textColor = MD3.onSurface
         title.translatesAutoresizingMaskIntoConstraints = false
+        tightenLabelCell(title)
         registerThemeObserver { [weak title] in
             title?.textColor = MD3.onSurface
         }
 
-        nodesModeControl.items = ["直连/绕过代理", "全局代理", "规则判定"]
+        let subtitle = NSTextField(labelWithString: "选择节点或让系统自动选择最优节点")
+        subtitle.font = .systemFont(ofSize: 12)
+        subtitle.textColor = MD3.onSurfaceVariant
+        subtitle.translatesAutoresizingMaskIntoConstraints = false
+        tightenLabelCell(subtitle)
+        registerThemeObserver { [weak subtitle] in
+            subtitle?.textColor = MD3.onSurfaceVariant
+        }
+
+        let headerStack = NSStackView(views: [title, subtitle])
+        headerStack.orientation = .vertical
+        headerStack.alignment = .leading
+        headerStack.spacing = 3
+        headerStack.translatesAutoresizingMaskIntoConstraints = false
+
+        nodesModeControl.items = ["直连 / 绕过代理", "全局代理", "规则判定"]
         nodesModeControl.selectedSegment = 2
         nodesModeControl.target = self
         nodesModeControl.action = #selector(nodesModeChanged)
         nodesModeControl.translatesAutoresizingMaskIntoConstraints = false
-        nodesModeControl.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        nodesModeControl.heightAnchor.constraint(equalToConstant: 34).isActive = true
 
         let testButton = MD3Button()
-        testButton.title = "延迟测试"
-        testButton.style = .tonal
+        testButton.title = "⚡ 延迟测试"
+        testButton.style = .filled
         testButton.target = self
         testButton.action = #selector(testAllNodesClicked)
         testButton.translatesAutoresizingMaskIntoConstraints = false
-        testButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        testButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
         testButton.widthAnchor.constraint(equalToConstant: 120).isActive = true
 
         let spacer = NSView()
@@ -62,25 +78,24 @@ extension MainWindowController {
         scroll.documentView = document
         document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor).isActive = true
 
-        // 不再用有底色的 MD3Panel 包裹，scroll 直接贴 view，卡片左缘和标题/工具栏对齐
         let view = NSView()
-        view.addSubview(title)
+        view.addSubview(headerStack)
         view.addSubview(topBar)
         view.addSubview(scroll)
 
         NSLayoutConstraint.activate([
-            title.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
-            title.topAnchor.constraint(equalTo: view.topAnchor, constant: 28),
+            headerStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
+            headerStack.topAnchor.constraint(equalTo: view.topAnchor, constant: 28),
 
-            topBar.leadingAnchor.constraint(equalTo: title.leadingAnchor),
+            topBar.leadingAnchor.constraint(equalTo: headerStack.leadingAnchor),
             topBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
-            topBar.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 20),
-            topBar.heightAnchor.constraint(equalToConstant: 42),
-            nodesModeControl.widthAnchor.constraint(equalToConstant: 520),
+            topBar.topAnchor.constraint(equalTo: headerStack.bottomAnchor, constant: 18),
+            topBar.heightAnchor.constraint(equalToConstant: 38),
+            nodesModeControl.widthAnchor.constraint(equalToConstant: 480),
 
-            scroll.leadingAnchor.constraint(equalTo: title.leadingAnchor),
+            scroll.leadingAnchor.constraint(equalTo: headerStack.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
-            scroll.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 12),
+            scroll.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 14),
             scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -24)
         ])
 
@@ -310,7 +325,8 @@ extension MainWindowController {
             }
         }
         
-        tile.nameLabel.stringValue = displayName
+        let flag = CountryFlagHelper.flag(for: displayName)
+        tile.nameLabel.stringValue = "\(flag) \(displayName)"
         tile.subLabel.stringValue = nodeSubLabel(displayType: displayType, node: node)
         tile.delayValue = displayDelay
         
@@ -331,7 +347,7 @@ extension MainWindowController {
         }
 
         tile.translatesAutoresizingMaskIntoConstraints = false
-        tile.heightAnchor.constraint(equalToConstant: 42).isActive = true
+        tile.heightAnchor.constraint(equalToConstant: 46).isActive = true
         
         return tile
     }

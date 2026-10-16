@@ -150,20 +150,29 @@ final class MD3ProfileCellView: NSTableCellView {
 }
 
 final class MD3SubscriptionItemView: NSView, MD3Themeable {
-    // 仿 Clash Verge 排版：
-    //   左侧顶部：站点名（粗体）+ 域名（小）
-    //   左侧底部：流量进度条 + 「已用 / 总量」文本
-    //   右侧顶部：刷新按钮
-    //   右侧底部：上次刷新时间 + 到期日期
     private let card = NSView()
     let titleLabel = NSTextField(labelWithString: "")
-    let domainLabel = NSTextField(labelWithString: "")
-    let trafficLabel = NSTextField(labelWithString: "")
-    let trafficBar = NSView()      // 进度条背景
-    let trafficFill = NSView()     // 进度条填充
-    private var trafficFillWidth: NSLayoutConstraint!
-    private let refreshButton = NSButton()
+    let updatedAtPill = NSView()
     let updatedAtLabel = NSTextField(labelWithString: "")
+    let refreshButton = NSButton()
+
+    let domainStack = NSStackView()
+    let linkIconView = NSImageView()
+    let domainLabel = NSTextField(labelWithString: "")
+
+    let trafficBox = NSView()
+    let trafficHeaderLabel = NSTextField(labelWithString: "已用流量")
+    let trafficLabel = NSTextField(labelWithString: "")
+    let trafficPercentLabel = NSTextField(labelWithString: "")
+    let trafficBar = NSView()
+    let trafficFill = NSView()
+    private var trafficFillWidth: NSLayoutConstraint!
+
+    let expireRow = NSStackView()
+    let expireIconCircle = NSView()
+    let expireIconView = NSImageView()
+    let expireTextCol = NSStackView()
+    let expireTitleLabel = NSTextField(labelWithString: "到期时间")
     let expiresLabel = NSTextField(labelWithString: "")
     let errorLabel = NSTextField(labelWithString: "")
 
@@ -203,7 +212,7 @@ final class MD3SubscriptionItemView: NSView, MD3Themeable {
         wantsLayer = true
 
         card.wantsLayer = true
-        card.layer?.cornerRadius = 12
+        card.layer?.cornerRadius = 14
         card.layer?.borderWidth = 1
         card.translatesAutoresizingMaskIntoConstraints = false
         addSubview(card)
@@ -213,45 +222,104 @@ final class MD3SubscriptionItemView: NSView, MD3Themeable {
         titleLabel.maximumNumberOfLines = 1
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        domainLabel.font = .systemFont(ofSize: 11)
-        domainLabel.lineBreakMode = .byTruncatingTail
-        domainLabel.maximumNumberOfLines = 1
-        domainLabel.translatesAutoresizingMaskIntoConstraints = false
+        updatedAtPill.wantsLayer = true
+        updatedAtPill.layer?.cornerRadius = 10
+        updatedAtPill.translatesAutoresizingMaskIntoConstraints = false
 
-        trafficBar.wantsLayer = true
-        trafficBar.layer?.cornerRadius = 2
-        trafficBar.translatesAutoresizingMaskIntoConstraints = false
-
-        trafficFill.wantsLayer = true
-        trafficFill.layer?.cornerRadius = 2
-        trafficFill.translatesAutoresizingMaskIntoConstraints = false
-        trafficBar.addSubview(trafficFill)
-
-        trafficLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
-        trafficLabel.lineBreakMode = .byTruncatingTail
-        trafficLabel.maximumNumberOfLines = 1
-        trafficLabel.translatesAutoresizingMaskIntoConstraints = false
+        updatedAtLabel.font = .systemFont(ofSize: 10, weight: .medium)
+        updatedAtLabel.alignment = .center
+        updatedAtLabel.lineBreakMode = .byTruncatingTail
+        updatedAtLabel.maximumNumberOfLines = 1
+        updatedAtLabel.translatesAutoresizingMaskIntoConstraints = false
+        updatedAtPill.addSubview(updatedAtLabel)
 
         refreshButton.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "刷新")
         refreshButton.isBordered = false
         refreshButton.bezelStyle = .regularSquare
         refreshButton.imageScaling = .scaleProportionallyDown
         refreshButton.translatesAutoresizingMaskIntoConstraints = false
-        refreshButton.wantsLayer = true   // 旋转动画需要
+        refreshButton.wantsLayer = true
+        refreshButton.layer?.cornerRadius = 13
         refreshButton.target = self
         refreshButton.action = #selector(refreshClicked)
 
-        updatedAtLabel.font = .systemFont(ofSize: 10)
-        updatedAtLabel.alignment = .right
-        updatedAtLabel.lineBreakMode = .byTruncatingTail
-        updatedAtLabel.maximumNumberOfLines = 1
-        updatedAtLabel.translatesAutoresizingMaskIntoConstraints = false
+        linkIconView.image = NSImage(systemSymbolName: "link", accessibilityDescription: nil)
+        linkIconView.translatesAutoresizingMaskIntoConstraints = false
+        linkIconView.imageScaling = .scaleProportionallyDown
 
-        expiresLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .semibold)
-        expiresLabel.alignment = .right
-        expiresLabel.lineBreakMode = .byTruncatingTail
-        expiresLabel.maximumNumberOfLines = 1
+        domainLabel.font = .systemFont(ofSize: 11)
+        domainLabel.lineBreakMode = .byTruncatingTail
+        domainLabel.maximumNumberOfLines = 1
+        domainLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        domainStack.orientation = .horizontal
+        domainStack.spacing = 4
+        domainStack.alignment = .centerY
+        domainStack.translatesAutoresizingMaskIntoConstraints = false
+        domainStack.addArrangedSubview(linkIconView)
+        domainStack.addArrangedSubview(domainLabel)
+
+        // Traffic Box
+        trafficBox.wantsLayer = true
+        trafficBox.layer?.cornerRadius = 8
+        trafficBox.translatesAutoresizingMaskIntoConstraints = false
+
+        trafficHeaderLabel.font = .systemFont(ofSize: 10, weight: .medium)
+        trafficHeaderLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        trafficLabel.font = .monospacedDigitSystemFont(ofSize: 14, weight: .bold)
+        trafficLabel.lineBreakMode = .byTruncatingTail
+        trafficLabel.maximumNumberOfLines = 1
+        trafficLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        trafficPercentLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        trafficPercentLabel.alignment = .right
+        trafficPercentLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        trafficBar.wantsLayer = true
+        trafficBar.layer?.cornerRadius = 3
+        trafficBar.translatesAutoresizingMaskIntoConstraints = false
+
+        trafficFill.wantsLayer = true
+        trafficFill.layer?.cornerRadius = 3
+        trafficFill.translatesAutoresizingMaskIntoConstraints = false
+        trafficBar.addSubview(trafficFill)
+
+        trafficBox.addSubview(trafficHeaderLabel)
+        trafficBox.addSubview(trafficLabel)
+        trafficBox.addSubview(trafficPercentLabel)
+        trafficBox.addSubview(trafficBar)
+
+        trafficFillWidth = trafficFill.widthAnchor.constraint(equalTo: trafficBar.widthAnchor, multiplier: 0)
+
+        // Expiration Row
+        expireIconCircle.wantsLayer = true
+        expireIconCircle.layer?.cornerRadius = 12
+        expireIconCircle.translatesAutoresizingMaskIntoConstraints = false
+
+        expireIconView.translatesAutoresizingMaskIntoConstraints = false
+        expireIconView.imageScaling = .scaleProportionallyDown
+        expireIconCircle.addSubview(expireIconView)
+
+        expireTitleLabel.font = .systemFont(ofSize: 9, weight: .regular)
+        expireTitleLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        expiresLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
         expiresLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        expireTextCol.orientation = .vertical
+        expireTextCol.spacing = 1
+        expireTextCol.alignment = .leading
+        expireTextCol.translatesAutoresizingMaskIntoConstraints = false
+        expireTextCol.addArrangedSubview(expireTitleLabel)
+        expireTextCol.addArrangedSubview(expiresLabel)
+
+        expireRow.orientation = .horizontal
+        expireRow.spacing = 8
+        expireRow.alignment = .centerY
+        expireRow.translatesAutoresizingMaskIntoConstraints = false
+        expireRow.addArrangedSubview(expireIconCircle)
+        expireRow.addArrangedSubview(expireTextCol)
 
         errorLabel.font = .systemFont(ofSize: 10, weight: .medium)
         errorLabel.lineBreakMode = .byTruncatingTail
@@ -259,21 +327,17 @@ final class MD3SubscriptionItemView: NSView, MD3Themeable {
         errorLabel.translatesAutoresizingMaskIntoConstraints = false
         errorLabel.isHidden = true
 
-        // Long subscription metadata must truncate inside the card, not widen it.
-        for label in [titleLabel, domainLabel, trafficLabel, updatedAtLabel, expiresLabel, errorLabel] {
+        for label in [titleLabel, domainLabel, trafficLabel, trafficPercentLabel, updatedAtLabel, expiresLabel, errorLabel] {
             label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         }
 
         card.addSubview(titleLabel)
-        card.addSubview(domainLabel)
-        card.addSubview(trafficLabel)
-        card.addSubview(trafficBar)
+        card.addSubview(updatedAtPill)
         card.addSubview(refreshButton)
-        card.addSubview(updatedAtLabel)
-        card.addSubview(expiresLabel)
+        card.addSubview(domainStack)
+        card.addSubview(trafficBox)
+        card.addSubview(expireRow)
         card.addSubview(errorLabel)
-
-        trafficFillWidth = trafficFill.widthAnchor.constraint(equalTo: trafficBar.widthAnchor, multiplier: 0)
 
         NSLayoutConstraint.activate([
             card.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -281,45 +345,73 @@ final class MD3SubscriptionItemView: NSView, MD3Themeable {
             card.topAnchor.constraint(equalTo: topAnchor),
             card.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-            // === 第一行：左 titleLabel ↔ 右 refreshButton ===
-            titleLabel.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 14),
-            titleLabel.topAnchor.constraint(equalTo: card.topAnchor, constant: 10),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: refreshButton.leadingAnchor, constant: -8),
+            // Top Row
+            titleLabel.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
+            titleLabel.topAnchor.constraint(equalTo: card.topAnchor, constant: 14),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: updatedAtPill.leadingAnchor, constant: -8),
 
             refreshButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-            refreshButton.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -10),
-            refreshButton.widthAnchor.constraint(equalToConstant: 22),
-            refreshButton.heightAnchor.constraint(equalToConstant: 22),
+            refreshButton.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12),
+            refreshButton.widthAnchor.constraint(equalToConstant: 26),
+            refreshButton.heightAnchor.constraint(equalToConstant: 26),
 
-            // === 第二行：左 domainLabel ↔ 右 updatedAtLabel ===
-            domainLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
-            domainLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 2),
-            domainLabel.trailingAnchor.constraint(lessThanOrEqualTo: updatedAtLabel.leadingAnchor, constant: -8),
+            updatedAtPill.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+            updatedAtPill.trailingAnchor.constraint(equalTo: refreshButton.leadingAnchor, constant: -6),
+            updatedAtPill.heightAnchor.constraint(equalToConstant: 20),
 
-            updatedAtLabel.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -14),
-            updatedAtLabel.centerYAnchor.constraint(equalTo: domainLabel.centerYAnchor),
+            updatedAtLabel.leadingAnchor.constraint(equalTo: updatedAtPill.leadingAnchor, constant: 8),
+            updatedAtLabel.trailingAnchor.constraint(equalTo: updatedAtPill.trailingAnchor, constant: -8),
+            updatedAtLabel.centerYAnchor.constraint(equalTo: updatedAtPill.centerYAnchor),
 
-            // === 第三行（底部）：左 trafficLabel ↔ 右 expiresLabel；进度条贴底缘 ===
-            trafficBar.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
-            trafficBar.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -14),
-            trafficBar.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -10),
-            trafficBar.heightAnchor.constraint(equalToConstant: 4),
+            // Sub-header
+            linkIconView.widthAnchor.constraint(equalToConstant: 12),
+            linkIconView.heightAnchor.constraint(equalToConstant: 12),
 
-            trafficLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
-            trafficLabel.bottomAnchor.constraint(equalTo: trafficBar.topAnchor, constant: -4),
-            trafficLabel.trailingAnchor.constraint(lessThanOrEqualTo: expiresLabel.leadingAnchor, constant: -8),
+            domainStack.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            domainStack.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 3),
+            domainStack.trailingAnchor.constraint(lessThanOrEqualTo: card.trailingAnchor, constant: -16),
 
-            expiresLabel.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -14),
-            expiresLabel.centerYAnchor.constraint(equalTo: trafficLabel.centerYAnchor),
+            // Traffic Box
+            trafficBox.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 14),
+            trafficBox.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -14),
+            trafficBox.topAnchor.constraint(equalTo: domainStack.bottomAnchor, constant: 10),
+            trafficBox.heightAnchor.constraint(equalToConstant: 50),
+
+            trafficHeaderLabel.leadingAnchor.constraint(equalTo: trafficBox.leadingAnchor, constant: 10),
+            trafficHeaderLabel.topAnchor.constraint(equalTo: trafficBox.topAnchor, constant: 6),
+
+            trafficLabel.leadingAnchor.constraint(equalTo: trafficHeaderLabel.leadingAnchor),
+            trafficLabel.topAnchor.constraint(equalTo: trafficHeaderLabel.bottomAnchor, constant: 1),
+            trafficLabel.trailingAnchor.constraint(lessThanOrEqualTo: trafficPercentLabel.leadingAnchor, constant: -8),
+
+            trafficPercentLabel.trailingAnchor.constraint(equalTo: trafficBox.trailingAnchor, constant: -10),
+            trafficPercentLabel.centerYAnchor.constraint(equalTo: trafficLabel.centerYAnchor),
+
+            trafficBar.leadingAnchor.constraint(equalTo: trafficBox.leadingAnchor, constant: 10),
+            trafficBar.trailingAnchor.constraint(equalTo: trafficBox.trailingAnchor, constant: -10),
+            trafficBar.bottomAnchor.constraint(equalTo: trafficBox.bottomAnchor, constant: -7),
+            trafficBar.heightAnchor.constraint(equalToConstant: 5),
 
             trafficFill.leadingAnchor.constraint(equalTo: trafficBar.leadingAnchor),
             trafficFill.topAnchor.constraint(equalTo: trafficBar.topAnchor),
             trafficFill.bottomAnchor.constraint(equalTo: trafficBar.bottomAnchor),
             trafficFillWidth,
 
-            errorLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
-            errorLabel.bottomAnchor.constraint(equalTo: trafficBar.topAnchor, constant: -4),
-            errorLabel.trailingAnchor.constraint(lessThanOrEqualTo: card.trailingAnchor, constant: -14)
+            // Expiration Row
+            expireIconCircle.widthAnchor.constraint(equalToConstant: 24),
+            expireIconCircle.heightAnchor.constraint(equalToConstant: 24),
+            expireIconView.centerXAnchor.constraint(equalTo: expireIconCircle.centerXAnchor),
+            expireIconView.centerYAnchor.constraint(equalTo: expireIconCircle.centerYAnchor),
+            expireIconView.widthAnchor.constraint(equalToConstant: 13),
+            expireIconView.heightAnchor.constraint(equalToConstant: 13),
+
+            expireRow.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
+            expireRow.topAnchor.constraint(equalTo: trafficBox.bottomAnchor, constant: 9),
+            expireRow.trailingAnchor.constraint(lessThanOrEqualTo: card.trailingAnchor, constant: -16),
+
+            errorLabel.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
+            errorLabel.topAnchor.constraint(equalTo: trafficBox.bottomAnchor, constant: 10),
+            errorLabel.trailingAnchor.constraint(lessThanOrEqualTo: card.trailingAnchor, constant: -16)
         ])
 
         updateColors()
@@ -370,9 +462,10 @@ final class MD3SubscriptionItemView: NSView, MD3Themeable {
         // 流量
         let used = SubscriptionTraffic.used(upload: sub.upload, download: sub.download)
         if let total = sub.total, total > 0 {
-            let warning = SubscriptionTraffic.isInconsistent(used: used, total: total) ? "（数据异常）" : ""
+            let warning = SubscriptionTraffic.isInconsistent(used: used, total: total) ? " (异常)" : ""
             trafficLabel.stringValue = "\(Self.formatBytes(used)) / \(Self.formatBytes(total))\(warning)"
             let frac = max(0, min(1, Double(used) / Double(total)))
+            trafficPercentLabel.stringValue = String(format: "%.1f%%", frac * 100)
             trafficFillWidth.isActive = false
             trafficFillWidth = trafficFill.widthAnchor.constraint(equalTo: trafficBar.widthAnchor, multiplier: CGFloat(max(frac, 0.001)))
             trafficFillWidth.isActive = true
@@ -380,8 +473,9 @@ final class MD3SubscriptionItemView: NSView, MD3Themeable {
             if let total = sub.total, SubscriptionTraffic.isInconsistent(used: used, total: total) {
                 trafficLabel.stringValue = "流量数据异常"
             } else {
-                trafficLabel.stringValue = used > 0 ? "已用 \(Self.formatBytes(used)) / 不限" : "未获取流量信息"
+                trafficLabel.stringValue = used > 0 ? "\(Self.formatBytes(used)) / 不限" : "未获取流量信息"
             }
+            trafficPercentLabel.stringValue = ""
             trafficFillWidth.isActive = false
             trafficFillWidth = trafficFill.widthAnchor.constraint(equalTo: trafficBar.widthAnchor, multiplier: 0)
             trafficFillWidth.isActive = true
@@ -399,8 +493,12 @@ final class MD3SubscriptionItemView: NSView, MD3Themeable {
             let f = DateFormatter()
             f.dateFormat = "yyyy-MM-dd"
             expiresLabel.stringValue = f.string(from: exp)
+            expireTitleLabel.stringValue = "到期时间"
+            expireIconView.image = NSImage(systemSymbolName: "calendar", accessibilityDescription: "到期时间")
         } else {
             expiresLabel.stringValue = "无限期"
+            expireTitleLabel.stringValue = "有效期"
+            expireIconView.image = NSImage(systemSymbolName: "infinity", accessibilityDescription: "无限期")
         }
 
         // 错误
@@ -408,41 +506,62 @@ final class MD3SubscriptionItemView: NSView, MD3Themeable {
             errorLabel.stringValue = "失败：\(String(err.prefix(60)))"
             errorLabel.isHidden = false
             trafficLabel.isHidden = true
+            expireRow.isHidden = true
         } else {
             errorLabel.isHidden = true
             trafficLabel.isHidden = false
+            expireRow.isHidden = false
         }
 
         updateColors()
     }
 
     func updateColors() {
+        let isDark = MD3.isDark
         if isSelected {
-            card.layer?.backgroundColor = MD3.primaryContainer.cgColor
+            card.layer?.backgroundColor = isDark
+                ? MD3.primary.withAlphaComponent(0.12).cgColor
+                : MD3.primaryContainer.withAlphaComponent(0.4).cgColor
             card.layer?.borderColor = MD3.primary.cgColor
-            card.layer?.borderWidth = 1.5
-            titleLabel.textColor = MD3.onPrimaryContainer
-            domainLabel.textColor = MD3.onPrimaryContainer.withAlphaComponent(0.75)
-            trafficLabel.textColor = MD3.onPrimaryContainer
-            updatedAtLabel.textColor = MD3.onPrimaryContainer.withAlphaComponent(0.7)
-            expiresLabel.textColor = MD3.onPrimaryContainer
-            refreshButton.contentTintColor = MD3.onPrimaryContainer
-            trafficBar.layer?.backgroundColor = MD3.onPrimaryContainer.withAlphaComponent(0.2).cgColor
-            trafficFill.layer?.backgroundColor = MD3.primary.cgColor
+            card.layer?.borderWidth = 1.8
+            card.layer?.shadowColor = MD3.primary.cgColor
+            card.layer?.shadowRadius = 8
+            card.layer?.shadowOpacity = 0.28
+            card.layer?.shadowOffset = .zero
         } else {
-            let bg = isHovered ? MD3.surfaceContainer : MD3.surface
+            let bg = isHovered ? MD3.surfaceContainerHigh : MD3.surfaceContainer
             card.layer?.backgroundColor = bg.cgColor
-            card.layer?.borderColor = MD3.outlineVariant.cgColor
+            card.layer?.borderColor = MD3.outlineVariant.withAlphaComponent(0.35).cgColor
             card.layer?.borderWidth = 1
-            titleLabel.textColor = MD3.onSurface
-            domainLabel.textColor = MD3.onSurfaceVariant
-            trafficLabel.textColor = MD3.onSurface
-            updatedAtLabel.textColor = MD3.onSurfaceVariant
-            expiresLabel.textColor = MD3.onSurface
-            refreshButton.contentTintColor = MD3.primary
-            trafficBar.layer?.backgroundColor = MD3.outlineVariant.cgColor
-            trafficFill.layer?.backgroundColor = MD3.primary.cgColor
+            card.layer?.shadowOpacity = 0
         }
+
+        titleLabel.textColor = MD3.onSurface
+        domainLabel.textColor = MD3.onSurfaceVariant
+        linkIconView.contentTintColor = MD3.onSurfaceVariant
+
+        updatedAtPill.layer?.backgroundColor = MD3.surfaceContainerHighest.withAlphaComponent(0.6).cgColor
+        updatedAtLabel.textColor = MD3.onSurfaceVariant
+
+        refreshButton.layer?.backgroundColor = MD3.surfaceContainerHighest.cgColor
+        refreshButton.contentTintColor = MD3.primary
+
+        trafficBox.layer?.backgroundColor = isDark
+            ? MD3.surfaceContainerLow.cgColor
+            : MD3.surface.cgColor
+        trafficBox.layer?.borderColor = MD3.outlineVariant.withAlphaComponent(0.2).cgColor
+        trafficBox.layer?.borderWidth = 1
+
+        trafficHeaderLabel.textColor = MD3.onSurfaceVariant
+        trafficLabel.textColor = MD3.primary
+        trafficPercentLabel.textColor = MD3.onSurfaceVariant
+        trafficBar.layer?.backgroundColor = MD3.surfaceContainerHighest.cgColor
+        trafficFill.layer?.backgroundColor = MD3.primary.cgColor
+
+        expireIconCircle.layer?.backgroundColor = MD3.surfaceContainerHighest.cgColor
+        expireIconView.contentTintColor = MD3.primary
+        expireTitleLabel.textColor = MD3.onSurfaceVariant
+        expiresLabel.textColor = MD3.onSurface
         errorLabel.textColor = MD3.error
     }
 
@@ -702,8 +821,126 @@ final class ConnectionTextCell: NSTableCellView, MD3Themeable {
         textField?.textColor = MD3.onSurface
     }
 
-    func update(text: String) {
+    func update(text: String, isMuted: Bool = false) {
         if textField?.stringValue != text { textField?.stringValue = text }
-        if textField?.textColor != MD3.onSurface { textField?.textColor = MD3.onSurface }
+        let color = isMuted ? MD3.onSurfaceVariant : MD3.onSurface
+        if textField?.textColor != color { textField?.textColor = color }
     }
+}
+
+final class ConnectionPillCell: NSTableCellView, MD3Themeable {
+    let pill = NSView()
+    let label = NSTextField(labelWithString: "")
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        pill.wantsLayer = true
+        pill.layer?.cornerRadius = 5
+        pill.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(pill)
+
+        label.font = .monospacedSystemFont(ofSize: 11, weight: .semibold)
+        label.alignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        pill.addSubview(label)
+
+        NSLayoutConstraint.activate([
+            pill.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            pill.centerYAnchor.constraint(equalTo: centerYAnchor),
+            pill.heightAnchor.constraint(equalToConstant: 20),
+            pill.widthAnchor.constraint(greaterThanOrEqualToConstant: 40),
+
+            label.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: 6),
+            label.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -6),
+            label.centerYAnchor.constraint(equalTo: pill.centerYAnchor)
+        ])
+        updateColors()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func update(network: String) {
+        label.stringValue = network.lowercased()
+        updateColors()
+    }
+
+    func updateColors() {
+        pill.layer?.backgroundColor = MD3.surfaceContainerHighest.withAlphaComponent(0.45).cgColor
+        pill.layer?.borderColor = MD3.outlineVariant.withAlphaComponent(0.25).cgColor
+        pill.layer?.borderWidth = 1
+        label.textColor = MD3.onSurface
+    }
+
+    func themeChanged() { updateColors() }
+}
+
+final class ConnectionStatusCell: NSTableCellView, MD3Themeable {
+    let pill = NSView()
+    let dot = NSView()
+    let label = NSTextField(labelWithString: "")
+    private var currentStatus: String = ""
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        pill.wantsLayer = true
+        pill.layer?.cornerRadius = 10
+        pill.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(pill)
+
+        dot.wantsLayer = true
+        dot.layer?.cornerRadius = 3.5
+        dot.translatesAutoresizingMaskIntoConstraints = false
+        pill.addSubview(dot)
+
+        label.font = .systemFont(ofSize: 11, weight: .medium)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        pill.addSubview(label)
+
+        NSLayoutConstraint.activate([
+            pill.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            pill.centerYAnchor.constraint(equalTo: centerYAnchor),
+            pill.heightAnchor.constraint(equalToConstant: 20),
+
+            dot.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: 7),
+            dot.centerYAnchor.constraint(equalTo: pill.centerYAnchor),
+            dot.widthAnchor.constraint(equalToConstant: 7),
+            dot.heightAnchor.constraint(equalToConstant: 7),
+
+            label.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 5),
+            label.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -8),
+            label.centerYAnchor.constraint(equalTo: pill.centerYAnchor)
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func update(status: String) {
+        currentStatus = status
+        updateColors()
+    }
+
+    func updateColors() {
+        let s = currentStatus.lowercased()
+        let isSuccess = s.contains("成功") || s == "active" || s == "open" || s == "established"
+        let isPending = s.contains("pending") || s.contains("connecting")
+
+        if isSuccess {
+            label.stringValue = "成功"
+            label.textColor = MD3.onSuccessContainer
+            dot.layer?.backgroundColor = MD3.success.cgColor
+            pill.layer?.backgroundColor = MD3.successContainer.withAlphaComponent(0.6).cgColor
+        } else if isPending {
+            label.stringValue = "pending"
+            label.textColor = MD3.warning
+            dot.layer?.backgroundColor = MD3.warning.cgColor
+            pill.layer?.backgroundColor = MD3.warning.withAlphaComponent(0.15).cgColor
+        } else {
+            label.stringValue = currentStatus
+            label.textColor = MD3.onSurfaceVariant
+            dot.layer?.backgroundColor = MD3.onSurfaceVariant.cgColor
+            pill.layer?.backgroundColor = MD3.surfaceContainerHighest.withAlphaComponent(0.4).cgColor
+        }
+    }
+
+    func themeChanged() { updateColors() }
 }

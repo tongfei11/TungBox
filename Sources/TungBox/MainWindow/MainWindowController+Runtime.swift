@@ -128,6 +128,9 @@ extension MainWindowController {
                     self.applySystemProxyBlocking(enabled: false, port: input.mixedProxyPort)
                 }
             },
+            restoreSelectors: { [self] in
+                await self.reconcileSelectorSelectionsToConfigAsync()
+            },
             currentSwitches: { [self] in .init(systemProxyEnabled: isSystemProxyEnabled, tunEnabled: isTunEnabled) }
         )
     }
@@ -161,7 +164,6 @@ extension MainWindowController {
             refreshStatus()
             showError(error)
         case .userProxyReady(let port): runDeferredNetworkChecksAfterConnection(proxyPort: port)
-        case .restoreSelectors: reconcileSelectorSelectionsToConfig()
         case .finished(let refreshNodeDelays):
             refreshStatus()
             scheduleConnectionsRefreshAfterStart()
@@ -674,7 +676,7 @@ extension MainWindowController {
     /// API. sing-box's cache_file remembers the previously selected outbound and
     /// restores it on (re)start, which otherwise overrides the user's last explicit
     /// choice when sing-box is restarted (e.g. switching capture mode into TUN).
-    func reconcileSelectorSelectionsToConfig() {
+    func reconcileSelectorSelectionsToConfigAsync() async {
         guard let config = parseConfigObject(from: editor.string),
               let outbounds = config["outbounds"] as? [[String: Any]] else { return }
         var targets: [(group: String, node: String)] = []
@@ -688,13 +690,17 @@ extension MainWindowController {
         let apiPorts = activeSelectorAPIPorts()
         let selectionID = selectorSelectionID
         let transitionID = runtimeTransitionID
-        Task {
-            for target in targets {
-                for apiPort in apiPorts {
-                    guard selectionID == selectorSelectionID, transitionID == runtimeTransitionID else { return }
-                    try? await ClashAPI.selectProxy(group: target.group, node: target.node, port: apiPort)
-                }
+        for target in targets {
+            for apiPort in apiPorts {
+                guard selectionID == selectorSelectionID, transitionID == runtimeTransitionID else { return }
+                try? await ClashAPI.selectProxy(group: target.group, node: target.node, port: apiPort)
             }
+        }
+    }
+
+    func reconcileSelectorSelectionsToConfig() {
+        Task { [weak self] in
+            await self?.reconcileSelectorSelectionsToConfigAsync()
         }
     }
 }
