@@ -517,6 +517,7 @@ final class MD3SubscriptionItemView: NSView, MD3Themeable {
     }
 
     func updateColors() {
+        layer?.backgroundColor = NSColor.clear.cgColor
         let isDark = MD3.isDark
         if isSelected {
             card.layer?.backgroundColor = isDark

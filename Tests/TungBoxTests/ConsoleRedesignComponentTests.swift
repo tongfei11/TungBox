@@ -112,6 +112,9 @@ final class ConsoleRedesignComponentTests: XCTestCase {
         XCTAssertTrue(trend.needsDisplay)
         XCTAssertTrue(donut.needsDisplay)
         XCTAssertTrue(ring.needsDisplay)
+        XCTAssertTrue(eq.needsDisplay)
+    }
+
     @MainActor
     func testRedesignedSubscriptionItemViewAndThemeSwitching() {
         let itemView = MD3SubscriptionItemView(frame: NSRect(x: 0, y: 0, width: 350, height: 150))
@@ -142,7 +145,7 @@ final class ConsoleRedesignComponentTests: XCTestCase {
             for schemeIdx in 0..<MD3.colorSchemes.count {
                 MD3.currentSchemeIndex = schemeIdx
                 itemView.themeChanged()
-                XCTAssertNotNil(itemView.layer?.backgroundColor)
+                XCTAssertNotNil(itemView.subviews.first?.layer?.backgroundColor)
             }
         }
     }

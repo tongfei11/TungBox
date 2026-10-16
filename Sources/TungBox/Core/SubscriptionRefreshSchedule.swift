@@ -9,7 +9,7 @@ enum SubscriptionRefreshSchedule {
 
     static func minutes(defaults: UserDefaults = .standard) -> Int {
         guard let saved = defaults.object(forKey: defaultsKey) as? Int,
-              options.contains(where: { $0.minutes == saved }) else { return 60 }
+              options.contains(where: { $0.minutes == saved }) else { return 0 }
         return saved
     }
 

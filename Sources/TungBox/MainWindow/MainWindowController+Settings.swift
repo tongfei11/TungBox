@@ -142,7 +142,7 @@ extension MainWindowController {
         if let idx = intervals.firstIndex(where: { $0.1 == savedMinutes }) {
             refreshPopup.selectItem(at: idx)
         } else {
-            refreshPopup.selectItem(at: 2) // default 1h
+            refreshPopup.selectItem(at: 0) // default 关闭
         }
         refreshPopup.target = self
         refreshPopup.action = #selector(subscriptionRefreshIntervalChanged(_:))

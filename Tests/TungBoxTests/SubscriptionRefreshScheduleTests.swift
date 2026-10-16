@@ -4,10 +4,10 @@ import XCTest
 @testable import TungBox
 
 final class SubscriptionRefreshScheduleTests: XCTestCase {
-    func testMissingPreferenceEnablesOneHourDefault() throws {
+    func testMissingPreferenceDefaultsToOff() throws {
         try withDefaults { defaults in
-            XCTAssertEqual(SubscriptionRefreshSchedule.minutes(defaults: defaults), 60)
-            XCTAssertEqual(SubscriptionRefreshSchedule.statusText(minutes: SubscriptionRefreshSchedule.minutes(defaults: defaults)), "每 1 小时")
+            XCTAssertEqual(SubscriptionRefreshSchedule.minutes(defaults: defaults), 0)
+            XCTAssertEqual(SubscriptionRefreshSchedule.statusText(minutes: SubscriptionRefreshSchedule.minutes(defaults: defaults)), "已关闭")
         }
     }
 
@@ -23,14 +23,14 @@ final class SubscriptionRefreshScheduleTests: XCTestCase {
         }
     }
 
-    func testInvalidSavedIntervalFallsBackToOneHour() throws {
+    func testInvalidSavedIntervalFallsBackToOff() throws {
         try withDefaults { defaults in
             for value in [-1, 1, 59, Int.max] {
                 defaults.set(value, forKey: SubscriptionRefreshSchedule.defaultsKey)
-                XCTAssertEqual(SubscriptionRefreshSchedule.minutes(defaults: defaults), 60)
+                XCTAssertEqual(SubscriptionRefreshSchedule.minutes(defaults: defaults), 0)
             }
             defaults.set("invalid", forKey: SubscriptionRefreshSchedule.defaultsKey)
-            XCTAssertEqual(SubscriptionRefreshSchedule.minutes(defaults: defaults), 60)
+            XCTAssertEqual(SubscriptionRefreshSchedule.minutes(defaults: defaults), 0)
         }
     }
 
