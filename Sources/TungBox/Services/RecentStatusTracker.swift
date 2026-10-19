@@ -33,6 +33,9 @@ final class RecentStatusTracker {
     }
 
     func record(_ message: String, level: Level = .info) {
+        if let first = items.first, first.message == message && abs(first.timestamp.timeIntervalSinceNow) < 5 {
+            return
+        }
         let item = Item(id: UUID(), timestamp: Date(), message: message, level: level)
         items.insert(item, at: 0)
         if items.count > maxCount {

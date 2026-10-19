@@ -649,6 +649,7 @@ extension MainWindowController {
             refreshHomeFeatureStatus()
         }
         appendLog("[订阅] \(subscription.name) 已刷新并写入配置\n")
+        RecentStatusTracker.shared.record("订阅「\(subscription.name)」已更新", level: .success)
         showToast("订阅「\(subscription.name)」已更新", style: .success)
 
         // runner 重启**只**在当前 profile 被刷新时做。其他订阅的刷新不应该惊动当前

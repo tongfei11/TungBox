@@ -31,22 +31,22 @@ enum HomeDashboardLayout {
         let spacing: CGFloat = 12
 
         NSLayoutConstraint.activate([
-            // --- Row 1 (4 Cards: 191 : 176 : 226 : 168, Height: 82) ---
+            // --- Row 1 (4 Cards: 182 : 172 : 208 : 190, Height: 82) ---
             systemProxyCard.topAnchor.constraint(equalTo: container.topAnchor),
             systemProxyCard.leadingAnchor.constraint(equalTo: container.leadingAnchor),
 
             tunCard.topAnchor.constraint(equalTo: container.topAnchor),
             tunCard.leadingAnchor.constraint(equalTo: systemProxyCard.trailingAnchor, constant: spacing),
-            tunCard.widthAnchor.constraint(equalTo: systemProxyCard.widthAnchor, multiplier: 176.0 / 191.0),
+            tunCard.widthAnchor.constraint(equalTo: systemProxyCard.widthAnchor, multiplier: 172.0 / 182.0),
 
             outboundCard.topAnchor.constraint(equalTo: container.topAnchor),
             outboundCard.leadingAnchor.constraint(equalTo: tunCard.trailingAnchor, constant: spacing),
-            outboundCard.widthAnchor.constraint(equalTo: systemProxyCard.widthAnchor, multiplier: 226.0 / 191.0),
+            outboundCard.widthAnchor.constraint(equalTo: systemProxyCard.widthAnchor, multiplier: 208.0 / 182.0),
 
             currentNodeCard.topAnchor.constraint(equalTo: container.topAnchor),
             currentNodeCard.leadingAnchor.constraint(equalTo: outboundCard.trailingAnchor, constant: spacing),
             currentNodeCard.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            currentNodeCard.widthAnchor.constraint(equalTo: systemProxyCard.widthAnchor, multiplier: 168.0 / 191.0),
+            currentNodeCard.widthAnchor.constraint(equalTo: systemProxyCard.widthAnchor, multiplier: 190.0 / 182.0),
 
             systemProxyCard.heightAnchor.constraint(equalToConstant: 82),
             tunCard.heightAnchor.constraint(equalTo: systemProxyCard.heightAnchor),
@@ -171,24 +171,27 @@ enum HomeDashboardLayout {
         let titleStack = NSStackView()
         titleStack.orientation = .horizontal
         titleStack.alignment = .centerY
-        titleStack.spacing = 8
+        titleStack.spacing = 6
         titleStack.translatesAutoresizingMaskIntoConstraints = false
 
         var iconImageView: NSImageView?
         if let icon = iconName, let img = NSImage(systemSymbolName: icon, accessibilityDescription: nil) {
-            img.isTemplate = true
-            let iconView = NSImageView(image: img)
+            let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+            let iconImg = img.withSymbolConfiguration(config) ?? img
+            iconImg.isTemplate = true
+            let iconView = NSImageView(image: iconImg)
             iconView.contentTintColor = MD3.primary
             iconView.translatesAutoresizingMaskIntoConstraints = false
-            iconView.widthAnchor.constraint(equalToConstant: 16).isActive = true
-            iconView.heightAnchor.constraint(equalToConstant: 16).isActive = true
+            iconView.widthAnchor.constraint(equalToConstant: 20).isActive = true
+            iconView.heightAnchor.constraint(equalToConstant: 20).isActive = true
             titleStack.addArrangedSubview(iconView)
             iconImageView = iconView
         }
 
         let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.font = .systemFont(ofSize: 15, weight: .bold)
+        titleLabel.font = .systemFont(ofSize: 13, weight: .bold)
         titleLabel.textColor = MD3.onSurface
+        titleLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleStack.addArrangedSubview(titleLabel)
 

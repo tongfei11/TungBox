@@ -275,9 +275,23 @@ final class ConsoleRedesignComponentTests: XCTestCase {
             views: [content]
         )
         XCTAssertEqual(result.title.stringValue, "测试标题")
+        XCTAssertEqual(result.title.font?.pointSize, 13)
         XCTAssertNotNil(result.iconView)
         XCTAssertEqual(result.subtitle?.stringValue, "测试副标题")
         XCTAssertEqual(result.view.type, .elevated)
+    }
+
+    @MainActor
+    func testRecentStatusTrackerDeduplication() {
+        let tracker = RecentStatusTracker()
+        tracker.record("重复事件", level: .success)
+        let countAfterFirst = tracker.items.count
+        tracker.record("重复事件", level: .success)
+        XCTAssertEqual(tracker.items.count, countAfterFirst)
+
+        tracker.record("不同事件", level: .info)
+        XCTAssertEqual(tracker.items.count, countAfterFirst + 1)
+        XCTAssertEqual(tracker.items.first?.message, "不同事件")
     }
 }
 

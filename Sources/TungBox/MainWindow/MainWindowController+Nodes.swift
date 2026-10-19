@@ -593,6 +593,7 @@ extension MainWindowController {
         nodesModeControl.selectedSegment = modeControl.selectedSegment
         do {
             try applySelectedMode()
+            RecentStatusTracker.shared.record("出站模式切换为\(selectedMode().displayName)", level: .info)
             showToast("出站模式：\(selectedMode().displayName)", style: .info)
         } catch {
             refreshModeFromEditor()
@@ -604,6 +605,7 @@ extension MainWindowController {
         modeControl.selectedSegment = nodesModeControl.selectedSegment
         do {
             try applySelectedMode()
+            RecentStatusTracker.shared.record("出站模式切换为\(selectedMode().displayName)", level: .info)
             showToast("出站模式：\(selectedMode().displayName)", style: .info)
         } catch {
             refreshModeFromEditor()
@@ -767,6 +769,7 @@ extension MainWindowController {
                     self.editor.string = try self.renderConfig(config)
                     _ = try self.saveCurrent()
                     self.appendLog("[节点] \(groupTag) 已选择: \(nodeTag)\n")
+                    RecentStatusTracker.shared.record("切换节点至 \(nodeTag)", level: .info)
                     self.refreshNodesFromEditor()
                     if self.isProxyRuntimeRunning() && !switchedByAPI {
                         if self.isTunEnabled {

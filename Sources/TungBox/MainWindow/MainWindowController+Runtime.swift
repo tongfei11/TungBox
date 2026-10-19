@@ -163,7 +163,9 @@ extension MainWindowController {
         case .shutdownFailed(let error):
             refreshStatus()
             reportRuntimeFailure(error, operation: .systemProxyStop)
-        case .userProxyReady(let port): runDeferredNetworkChecksAfterConnection(proxyPort: port)
+        case .userProxyReady(let port):
+            runDeferredNetworkChecksAfterConnection(proxyPort: port)
+            RecentStatusTracker.shared.record("代理核心已就绪", level: .success)
         case .finished(let refreshNodeDelays):
             refreshStatus()
             scheduleConnectionsRefreshAfterStart()

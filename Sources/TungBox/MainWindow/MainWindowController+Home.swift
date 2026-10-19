@@ -209,25 +209,29 @@ extension MainWindowController {
         currentNodeNameLabel.textColor = MD3.onSurface
         currentNodeNameLabel.lineBreakMode = .byTruncatingTail
         currentNodeNameLabel.maximumNumberOfLines = 1
+        currentNodeNameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         currentNodeNameLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        currentNodeAutoBadge.font = .systemFont(ofSize: 10, weight: .semibold)
+        currentNodeAutoBadge.font = .systemFont(ofSize: 11, weight: .semibold)
         currentNodeAutoBadge.textColor = MD3.onSuccessContainer
         currentNodeAutoBadge.backgroundColor = MD3.successContainer
         currentNodeAutoBadge.drawsBackground = true
         currentNodeAutoBadge.isBezeled = false
         currentNodeAutoBadge.alignment = .center
         currentNodeAutoBadge.wantsLayer = true
-        currentNodeAutoBadge.layer?.cornerRadius = 6
+        currentNodeAutoBadge.layer?.cornerRadius = 12
         currentNodeAutoBadge.layer?.masksToBounds = true
         currentNodeAutoBadge.translatesAutoresizingMaskIntoConstraints = false
         currentNodeAutoBadge.isHidden = true
-        currentNodeAutoBadge.heightAnchor.constraint(equalToConstant: 18).isActive = true
+        currentNodeAutoBadge.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        currentNodeAutoBadge.widthAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
 
         currentNodeDelayLabel.font = .systemFont(ofSize: 14, weight: .bold)
         currentNodeDelayLabel.textColor = MD3.success
         currentNodeDelayLabel.lineBreakMode = .byClipping
         currentNodeDelayLabel.maximumNumberOfLines = 1
+        currentNodeDelayLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        currentNodeDelayLabel.setContentHuggingPriority(.required, for: .horizontal)
         currentNodeDelayLabel.translatesAutoresizingMaskIntoConstraints = false
 
         let nodeSpacer = NSView()
@@ -257,7 +261,7 @@ extension MainWindowController {
         trafficPeriodControl.heightAnchor.constraint(equalToConstant: 24).isActive = true
         trafficPeriodControl.widthAnchor.constraint(equalToConstant: 185).isActive = true
 
-        trafficTotalValueLabel.font = .systemFont(ofSize: 22, weight: .bold)
+        trafficTotalValueLabel.font = .systemFont(ofSize: 26, weight: .bold)
         trafficTotalValueLabel.textColor = MD3.onSurface
         trafficTotalValueLabel.translatesAutoresizingMaskIntoConstraints = false
 
@@ -431,7 +435,7 @@ extension MainWindowController {
         )
 
         // Card 7: 活动连接
-        connectionsValueLabel.font = .systemFont(ofSize: 26, weight: .bold)
+        connectionsValueLabel.font = .systemFont(ofSize: 32, weight: .bold)
         connectionsValueLabel.textColor = MD3.onSurface
         let connUnit = NSTextField(labelWithString: "个活动连接")
         connUnit.font = .systemFont(ofSize: 11)
@@ -541,8 +545,8 @@ extension MainWindowController {
 
         // Card 8: 流量去向
         trafficDonutChartView.translatesAutoresizingMaskIntoConstraints = false
-        trafficDonutChartView.widthAnchor.constraint(equalToConstant: 120).isActive = true
-        trafficDonutChartView.heightAnchor.constraint(equalToConstant: 120).isActive = true
+        trafficDonutChartView.widthAnchor.constraint(equalToConstant: 104).isActive = true
+        trafficDonutChartView.heightAnchor.constraint(equalToConstant: 104).isActive = true
 
         func makeLegendTabularRow(color: NSColor, name: String, amountLabel: NSTextField, ratioLabel: NSTextField) -> (row: NSStackView, dot: NSView, nameLabel: NSTextField, ratioLabel: NSTextField) {
             let dot = NSView()
@@ -563,24 +567,25 @@ extension MainWindowController {
             nameStack.alignment = .centerY
             nameStack.spacing = 6
             nameStack.translatesAutoresizingMaskIntoConstraints = false
-            nameStack.widthAnchor.constraint(equalToConstant: 46).isActive = true
+            nameStack.widthAnchor.constraint(equalToConstant: 42).isActive = true
 
             amountLabel.font = .systemFont(ofSize: 12, weight: .bold)
             amountLabel.textColor = MD3.onSurface
             amountLabel.alignment = .right
+            amountLabel.lineBreakMode = .byClipping
             amountLabel.translatesAutoresizingMaskIntoConstraints = false
-            amountLabel.widthAnchor.constraint(equalToConstant: 58).isActive = true
+            amountLabel.widthAnchor.constraint(equalToConstant: 68).isActive = true
 
             ratioLabel.font = .systemFont(ofSize: 12)
             ratioLabel.textColor = MD3.onSurfaceVariant
             ratioLabel.alignment = .right
             ratioLabel.translatesAutoresizingMaskIntoConstraints = false
-            ratioLabel.widthAnchor.constraint(equalToConstant: 36).isActive = true
+            ratioLabel.widthAnchor.constraint(equalToConstant: 34).isActive = true
 
             let row = NSStackView(views: [nameStack, amountLabel, ratioLabel])
             row.orientation = .horizontal
             row.alignment = .centerY
-            row.spacing = 10
+            row.spacing = 8
             row.distribution = .fill
             return (row, dot, nameLabel, ratioLabel)
         }
@@ -597,7 +602,7 @@ extension MainWindowController {
         let donutContentStack = NSStackView(views: [trafficDonutChartView, legendStack])
         donutContentStack.orientation = .horizontal
         donutContentStack.alignment = .centerY
-        donutContentStack.spacing = 12
+        donutContentStack.spacing = 10
         donutContentStack.translatesAutoresizingMaskIntoConstraints = false
 
         let trafficDestinationCard = homeCard(
@@ -607,18 +612,18 @@ extension MainWindowController {
         )
 
         // Card 9: 最近运行状态
-        recentStatusPill.font = .systemFont(ofSize: 10, weight: .semibold)
+        recentStatusPill.font = .systemFont(ofSize: 11, weight: .semibold)
         recentStatusPill.textColor = MD3.onSuccessContainer
         recentStatusPill.backgroundColor = MD3.successContainer
         recentStatusPill.drawsBackground = true
         recentStatusPill.isBezeled = false
         recentStatusPill.alignment = .center
         recentStatusPill.wantsLayer = true
-        recentStatusPill.layer?.cornerRadius = 9
+        recentStatusPill.layer?.cornerRadius = 12
         recentStatusPill.layer?.masksToBounds = true
         recentStatusPill.translatesAutoresizingMaskIntoConstraints = false
-        recentStatusPill.heightAnchor.constraint(equalToConstant: 20).isActive = true
-        recentStatusPill.widthAnchor.constraint(greaterThanOrEqualToConstant: 62).isActive = true
+        recentStatusPill.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        recentStatusPill.widthAnchor.constraint(greaterThanOrEqualToConstant: 78).isActive = true
 
         recentStatusStack.orientation = .vertical
         recentStatusStack.alignment = .leading
@@ -1154,6 +1159,10 @@ extension MainWindowController {
                 let nodeName = activeNodeInfo.name.isEmpty ? "（选择中…）" : activeNodeInfo.name
                 self.currentNodeNameLabel.stringValue = nodeName
                 self.currentNodeAutoBadge.isHidden = !activeNodeInfo.isAuto
+                if !activeNodeInfo.name.isEmpty && self.lastRecordedActiveNode != activeNodeInfo.name {
+                    self.lastRecordedActiveNode = activeNodeInfo.name
+                    RecentStatusTracker.shared.record("已连接到 \(activeNodeInfo.name)", level: .success)
+                }
                 let activeDelay = self.nodes.first(where: { $0.tag == activeNodeInfo.name })?.delay ?? "—"
                 self.currentNodeDelayLabel.stringValue = activeDelay == "未测试" ? "—" : activeDelay
                 self.currentNodeDelayLabel.textColor = MD3.latencyTextColor(self.currentNodeDelayLabel.stringValue)
@@ -1343,6 +1352,7 @@ extension MainWindowController {
             try saveCurrent()
             appendLog("[TungBox] 已保存\n")
             showToast("配置已保存", style: .success)
+            RecentStatusTracker.shared.record("配置已保存并生效", level: .info)
         } catch {
             showError(error)
         }

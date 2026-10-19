@@ -66,6 +66,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     let currentNodeNameLabel = NSTextField(labelWithString: "未连接")
     let currentNodeAutoBadge = CenteredPillLabel(labelWithString: "自动")
     let currentNodeDelayLabel = NSTextField(labelWithString: "—")
+    var lastRecordedActiveNode: String?
     var totalUploadBytes = 0
     var totalDownloadBytes = 0
     let trafficStatsValueLabel = NSTextField(labelWithString: "0 B")
