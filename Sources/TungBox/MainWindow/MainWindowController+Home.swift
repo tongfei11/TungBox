@@ -150,19 +150,7 @@ extension MainWindowController {
         systemProxyRow.alignment = .centerY
         systemProxyRow.translatesAutoresizingMaskIntoConstraints = false
 
-        let serviceDesc = NSTextField(labelWithString: "接管系统网络代理设置")
-        serviceDesc.font = .systemFont(ofSize: 11)
-        serviceDesc.textColor = MD3.onSurfaceVariant
-        registerThemeObserver { [weak serviceDesc] in serviceDesc?.textColor = MD3.onSurfaceVariant }
-
-        let serviceStack = NSStackView(views: [systemProxyRow, serviceDesc])
-        serviceStack.orientation = .vertical
-        serviceStack.alignment = .leading
-        serviceStack.spacing = 8
-        serviceStack.translatesAutoresizingMaskIntoConstraints = false
-        systemProxyRow.leadingAnchor.constraint(equalTo: serviceStack.leadingAnchor).isActive = true
-        systemProxyRow.trailingAnchor.constraint(equalTo: serviceStack.trailingAnchor).isActive = true
-        let serviceCard = homeCard(title: "系统代理", iconName: "network", views: [serviceStack])
+        let serviceCard = homeCard(title: "系统代理", iconName: "display", views: [systemProxyRow])
 
         // Card 2: TUN 模式
         tunStatusChip.translatesAutoresizingMaskIntoConstraints = false
@@ -183,19 +171,7 @@ extension MainWindowController {
         tunControlRow.alignment = .centerY
         tunControlRow.translatesAutoresizingMaskIntoConstraints = false
 
-        let tunDesc = NSTextField(labelWithString: "虚拟网卡接管所有流量")
-        tunDesc.font = .systemFont(ofSize: 11)
-        tunDesc.textColor = MD3.onSurfaceVariant
-        registerThemeObserver { [weak tunDesc] in tunDesc?.textColor = MD3.onSurfaceVariant }
-
-        let tunStack = NSStackView(views: [tunControlRow, tunDesc])
-        tunStack.orientation = .vertical
-        tunStack.alignment = .leading
-        tunStack.spacing = 8
-        tunStack.translatesAutoresizingMaskIntoConstraints = false
-        tunControlRow.leadingAnchor.constraint(equalTo: tunStack.leadingAnchor).isActive = true
-        tunControlRow.trailingAnchor.constraint(equalTo: tunStack.trailingAnchor).isActive = true
-        let tunCard = homeCard(title: "TUN 模式", iconName: "shield.checkerboard", views: [tunStack])
+        let tunCard = homeCard(title: "TUN 模式", iconName: "network.badge.shield.half.filled", views: [tunControlRow])
 
         // Card 3: 出站模式
         modeControl.items = ["直接连接", "全局代理", "规则判定"]
@@ -203,27 +179,13 @@ extension MainWindowController {
         modeControl.action = #selector(modeChanged)
         modeControl.selectedSegment = 2
         modeControl.translatesAutoresizingMaskIntoConstraints = false
-        modeControl.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        modeControl.heightAnchor.constraint(equalToConstant: 28).isActive = true
 
-        modeStatusLabel.textColor = MD3.onSurfaceVariant
-        modeStatusLabel.font = .systemFont(ofSize: 11)
-        modeStatusLabel.translatesAutoresizingMaskIntoConstraints = false
-        registerThemeObserver { [weak self] in
-            self?.modeStatusLabel.textColor = MD3.onSurfaceVariant
-        }
-
-        let outboundStack = NSStackView(views: [modeControl, modeStatusLabel])
-        outboundStack.orientation = .vertical
-        outboundStack.alignment = .leading
-        outboundStack.spacing = 8
-        outboundStack.translatesAutoresizingMaskIntoConstraints = false
-        modeControl.leadingAnchor.constraint(equalTo: outboundStack.leadingAnchor).isActive = true
-        modeControl.trailingAnchor.constraint(equalTo: outboundStack.trailingAnchor).isActive = true
-        let outboundCard = homeCard(title: "出站模式", iconName: "arrow.triangle.swap", views: [outboundStack])
+        let outboundCard = homeCard(title: "出站模式", iconName: "arrow.triangle.swap", views: [modeControl])
 
         // Card 4: 当前节点
-        currentNodeNameLabel.font = .systemFont(ofSize: 16, weight: .bold)
-        currentNodeNameLabel.textColor = MD3.primary
+        currentNodeNameLabel.font = .systemFont(ofSize: 17, weight: .bold)
+        currentNodeNameLabel.textColor = MD3.onSurface
         currentNodeNameLabel.lineBreakMode = .byTruncatingTail
         currentNodeNameLabel.maximumNumberOfLines = 1
         currentNodeNameLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -240,147 +202,247 @@ extension MainWindowController {
         currentNodeAutoBadge.translatesAutoresizingMaskIntoConstraints = false
         currentNodeAutoBadge.isHidden = true
         currentNodeAutoBadge.heightAnchor.constraint(equalToConstant: 18).isActive = true
-        currentNodeAutoBadge.widthAnchor.constraint(greaterThanOrEqualToConstant: 34).isActive = true
 
-        let delayTitleLabel = NSTextField(labelWithString: "延迟:")
-        delayTitleLabel.font = .systemFont(ofSize: 11)
-        delayTitleLabel.textColor = MD3.onSurfaceVariant
-
-        currentNodeDelayLabel.font = .systemFont(ofSize: 13, weight: .bold)
+        currentNodeDelayLabel.font = .systemFont(ofSize: 14, weight: .bold)
         currentNodeDelayLabel.textColor = MD3.success
         currentNodeDelayLabel.lineBreakMode = .byClipping
         currentNodeDelayLabel.maximumNumberOfLines = 1
         currentNodeDelayLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        let delayRow = NSStackView(views: [delayTitleLabel, currentNodeDelayLabel])
-        delayRow.orientation = .horizontal
-        delayRow.alignment = .centerY
-        delayRow.spacing = 4
+        let nodeSpacer = NSView()
+        nodeSpacer.translatesAutoresizingMaskIntoConstraints = false
+        nodeSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
-        let nodeStack = NSStackView(views: [currentNodeNameLabel, delayRow])
-        nodeStack.orientation = .vertical
-        nodeStack.alignment = .leading
-        nodeStack.spacing = 8
-        nodeStack.translatesAutoresizingMaskIntoConstraints = false
-        currentNodeNameLabel.leadingAnchor.constraint(equalTo: nodeStack.leadingAnchor).isActive = true
-        currentNodeNameLabel.trailingAnchor.constraint(equalTo: nodeStack.trailingAnchor).isActive = true
+        let nodeRow = NSStackView(views: [currentNodeNameLabel, nodeSpacer, currentNodeDelayLabel])
+        nodeRow.orientation = .horizontal
+        nodeRow.alignment = .centerY
+        nodeRow.distribution = .fill
+        nodeRow.translatesAutoresizingMaskIntoConstraints = false
+        nodeRow.heightAnchor.constraint(equalToConstant: 28).isActive = true
+
         let currentNodeCard = homeCard(
             title: "当前节点",
-            iconName: "antenna.radiowaves.left.and.right",
+            iconName: "globe",
             titleAccessoryView: currentNodeAutoBadge,
-            views: [nodeStack]
+            views: [nodeRow]
         )
 
         // Card 5: 流量趋势
-        trafficPeriodControl.items = ["今日", "近7天", "近30天"]
+        trafficPeriodControl.items = ["今日", "近 7 天", "近 30 天"]
         trafficPeriodControl.target = self
         trafficPeriodControl.action = #selector(trafficPeriodChanged)
         trafficPeriodControl.selectedSegment = 0
         trafficPeriodControl.translatesAutoresizingMaskIntoConstraints = false
         trafficPeriodControl.heightAnchor.constraint(equalToConstant: 24).isActive = true
-        trafficPeriodControl.widthAnchor.constraint(equalToConstant: 170).isActive = true
+        trafficPeriodControl.widthAnchor.constraint(equalToConstant: 185).isActive = true
 
-        trafficUploadStatLabel.font = .systemFont(ofSize: 11, weight: .medium)
-        trafficUploadStatLabel.textColor = MD3.primary
-        trafficDownloadStatLabel.font = .systemFont(ofSize: 11, weight: .medium)
-        trafficDownloadStatLabel.textColor = NSColor(calibratedRed: 0.22, green: 0.74, blue: 0.97, alpha: 1.0)
+        trafficTotalValueLabel.font = .systemFont(ofSize: 22, weight: .bold)
+        trafficTotalValueLabel.textColor = MD3.onSurface
+        trafficTotalValueLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        let statsHeaderRow = NSStackView(views: [trafficUploadStatLabel, trafficDownloadStatLabel])
-        statsHeaderRow.orientation = .horizontal
-        statsHeaderRow.spacing = 16
+        let trafficTotalDescLabel = NSTextField(labelWithString: "总流量")
+        trafficTotalDescLabel.font = .systemFont(ofSize: 11)
+        trafficTotalDescLabel.textColor = MD3.onSurfaceVariant
+        trafficTotalDescLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let totalCol = NSStackView(views: [trafficTotalValueLabel, trafficTotalDescLabel])
+        totalCol.orientation = .vertical
+        totalCol.alignment = .leading
+        totalCol.spacing = 2
+
+        func makeTrendStatRow(dotColor: NSColor, title: String, valueLabel: NSTextField) -> NSStackView {
+            let dot = NSView()
+            dot.wantsLayer = true
+            dot.layer?.backgroundColor = dotColor.cgColor
+            dot.layer?.cornerRadius = 3
+            dot.translatesAutoresizingMaskIntoConstraints = false
+            dot.widthAnchor.constraint(equalToConstant: 6).isActive = true
+            dot.heightAnchor.constraint(equalToConstant: 6).isActive = true
+
+            let tLabel = NSTextField(labelWithString: title)
+            tLabel.font = .systemFont(ofSize: 11)
+            tLabel.textColor = MD3.onSurfaceVariant
+
+            valueLabel.font = .systemFont(ofSize: 12, weight: .bold)
+            valueLabel.textColor = MD3.onSurface
+
+            let row = NSStackView(views: [dot, tLabel, valueLabel])
+            row.orientation = .horizontal
+            row.alignment = .centerY
+            row.spacing = 6
+            return row
+        }
+
+        let upTrendRow = makeTrendStatRow(dotColor: MD3.primary, title: "上传", valueLabel: trafficUploadStatLabel)
+        let downTrendRow = makeTrendStatRow(dotColor: NSColor(calibratedRed: 0.22, green: 0.74, blue: 0.97, alpha: 1.0), title: "下载", valueLabel: trafficDownloadStatLabel)
+
+        let trendStatsCol = NSStackView(views: [totalCol, upTrendRow, downTrendRow])
+        trendStatsCol.orientation = .vertical
+        trendStatsCol.alignment = .leading
+        trendStatsCol.spacing = 10
+        trendStatsCol.translatesAutoresizingMaskIntoConstraints = false
+        trendStatsCol.widthAnchor.constraint(equalToConstant: 115).isActive = true
 
         trafficTrendChartView.translatesAutoresizingMaskIntoConstraints = false
+        trafficTrendChartView.heightAnchor.constraint(greaterThanOrEqualToConstant: 115).isActive = true
 
-        let trendStack = NSStackView(views: [statsHeaderRow, trafficTrendChartView])
-        trendStack.orientation = .vertical
-        trendStack.alignment = .leading
-        trendStack.spacing = 6
-        trendStack.translatesAutoresizingMaskIntoConstraints = false
-        trafficTrendChartView.leadingAnchor.constraint(equalTo: trendStack.leadingAnchor).isActive = true
-        trafficTrendChartView.trailingAnchor.constraint(equalTo: trendStack.trailingAnchor).isActive = true
-        trafficTrendChartView.heightAnchor.constraint(greaterThanOrEqualToConstant: 105).isActive = true
+        let trendContentRow = NSStackView(views: [trendStatsCol, trafficTrendChartView])
+        trendContentRow.orientation = .horizontal
+        trendContentRow.alignment = .centerY
+        trendContentRow.spacing = 8
+        trendContentRow.distribution = .fill
+        trendContentRow.translatesAutoresizingMaskIntoConstraints = false
+        trafficTrendChartView.trailingAnchor.constraint(equalTo: trendContentRow.trailingAnchor).isActive = true
 
         let trafficTrendCard = homeCard(
             title: "流量趋势",
-            iconName: "chart.xyaxis.line",
+            iconName: "chart.bar.xaxis",
             titleAccessoryView: trafficPeriodControl,
-            views: [trendStack]
+            views: [trendContentRow]
         )
 
         // Card 6: 实时速度
-        uploadValueLabel.font = .systemFont(ofSize: 14, weight: .bold)
-        uploadValueLabel.textColor = MD3.primary
-        let uploadTag = NSTextField(labelWithString: "上传")
-        uploadTag.font = .systemFont(ofSize: 11, weight: .medium)
-        uploadTag.textColor = MD3.onSurfaceVariant
-        let uploadHeader = NSStackView(views: [uploadTag, uploadValueLabel])
-        uploadHeader.orientation = .horizontal
-        uploadHeader.spacing = 6
-        uploadHeader.alignment = .centerY
+        let speedSublabel = NSTextField(labelWithString: "当前网络传输速度")
+        speedSublabel.font = .systemFont(ofSize: 11)
+        speedSublabel.textColor = MD3.onSurfaceVariant.withAlphaComponent(0.7)
 
-        uploadWaveChartView.translatesAutoresizingMaskIntoConstraints = false
+        func makeSpeedRow(iconName: String, iconColor: NSColor, tagText: String, valueLabel: NSTextField, chartView: SpeedWaveChartView) -> NSStackView {
+            let iconContainer = NSView()
+            iconContainer.wantsLayer = true
+            iconContainer.layer?.cornerRadius = 9
+            iconContainer.layer?.backgroundColor = iconColor.withAlphaComponent(0.18).cgColor
+            iconContainer.translatesAutoresizingMaskIntoConstraints = false
+            iconContainer.widthAnchor.constraint(equalToConstant: 18).isActive = true
+            iconContainer.heightAnchor.constraint(equalToConstant: 18).isActive = true
+
+            if let img = NSImage(systemSymbolName: iconName, accessibilityDescription: nil) {
+                img.isTemplate = true
+                let iv = NSImageView(image: img)
+                iv.contentTintColor = iconColor
+                iv.translatesAutoresizingMaskIntoConstraints = false
+                iconContainer.addSubview(iv)
+                NSLayoutConstraint.activate([
+                    iv.centerXAnchor.constraint(equalTo: iconContainer.centerXAnchor),
+                    iv.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor),
+                    iv.widthAnchor.constraint(equalToConstant: 11),
+                    iv.heightAnchor.constraint(equalToConstant: 11)
+                ])
+            }
+
+            let tagLabel = NSTextField(labelWithString: tagText)
+            tagLabel.font = .systemFont(ofSize: 11)
+            tagLabel.textColor = MD3.onSurfaceVariant
+
+            let tagHeader = NSStackView(views: [iconContainer, tagLabel])
+            tagHeader.orientation = .horizontal
+            tagHeader.alignment = .centerY
+            tagHeader.spacing = 5
+
+            valueLabel.font = .systemFont(ofSize: 15, weight: .bold)
+            valueLabel.textColor = iconColor
+
+            let textCol = NSStackView(views: [tagHeader, valueLabel])
+            textCol.orientation = .vertical
+            textCol.alignment = .leading
+            textCol.spacing = 3
+            textCol.translatesAutoresizingMaskIntoConstraints = false
+            textCol.widthAnchor.constraint(equalToConstant: 92).isActive = true
+
+            chartView.translatesAutoresizingMaskIntoConstraints = false
+            chartView.heightAnchor.constraint(equalToConstant: 42).isActive = true
+
+            let row = NSStackView(views: [textCol, chartView])
+            row.orientation = .horizontal
+            row.alignment = .centerY
+            row.spacing = 8
+            row.distribution = .fill
+            row.translatesAutoresizingMaskIntoConstraints = false
+            chartView.trailingAnchor.constraint(equalTo: row.trailingAnchor).isActive = true
+            return row
+        }
+
         uploadWaveChartView.lineColor = MD3.primary
-        uploadWaveChartView.heightAnchor.constraint(equalToConstant: 44).isActive = true
-
-        let uploadSub = NSStackView(views: [uploadHeader, uploadWaveChartView])
-        uploadSub.orientation = .vertical
-        uploadSub.alignment = .leading
-        uploadSub.spacing = 2
-        uploadSub.translatesAutoresizingMaskIntoConstraints = false
-        uploadWaveChartView.leadingAnchor.constraint(equalTo: uploadSub.leadingAnchor).isActive = true
-        uploadWaveChartView.trailingAnchor.constraint(equalTo: uploadSub.trailingAnchor).isActive = true
-
-        downloadValueLabel.font = .systemFont(ofSize: 14, weight: .bold)
-        downloadValueLabel.textColor = NSColor(calibratedRed: 0.22, green: 0.74, blue: 0.97, alpha: 1.0)
-        let downloadTag = NSTextField(labelWithString: "下载")
-        downloadTag.font = .systemFont(ofSize: 11, weight: .medium)
-        downloadTag.textColor = MD3.onSurfaceVariant
-        let downloadHeader = NSStackView(views: [downloadTag, downloadValueLabel])
-        downloadHeader.orientation = .horizontal
-        downloadHeader.spacing = 6
-        downloadHeader.alignment = .centerY
-
-        downloadWaveChartView.translatesAutoresizingMaskIntoConstraints = false
         downloadWaveChartView.lineColor = NSColor(calibratedRed: 0.22, green: 0.74, blue: 0.97, alpha: 1.0)
-        downloadWaveChartView.heightAnchor.constraint(equalToConstant: 44).isActive = true
 
-        let downloadSub = NSStackView(views: [downloadHeader, downloadWaveChartView])
-        downloadSub.orientation = .vertical
-        downloadSub.alignment = .leading
-        downloadSub.spacing = 2
-        downloadSub.translatesAutoresizingMaskIntoConstraints = false
-        downloadWaveChartView.leadingAnchor.constraint(equalTo: downloadSub.leadingAnchor).isActive = true
-        downloadWaveChartView.trailingAnchor.constraint(equalTo: downloadSub.trailingAnchor).isActive = true
+        let uploadRow = makeSpeedRow(iconName: "arrow.up", iconColor: MD3.primary, tagText: "上传", valueLabel: uploadValueLabel, chartView: uploadWaveChartView)
+        let downloadRow = makeSpeedRow(iconName: "arrow.down", iconColor: NSColor(calibratedRed: 0.22, green: 0.74, blue: 0.97, alpha: 1.0), tagText: "下载", valueLabel: downloadValueLabel, chartView: downloadWaveChartView)
 
-        let speedStack = NSStackView(views: [uploadSub, downloadSub])
+        let speedStack = NSStackView(views: [uploadRow, downloadRow])
         speedStack.orientation = .vertical
         speedStack.alignment = .leading
-        speedStack.spacing = 8
+        speedStack.spacing = 10
         speedStack.translatesAutoresizingMaskIntoConstraints = false
-        uploadSub.leadingAnchor.constraint(equalTo: speedStack.leadingAnchor).isActive = true
-        uploadSub.trailingAnchor.constraint(equalTo: speedStack.trailingAnchor).isActive = true
-        downloadSub.leadingAnchor.constraint(equalTo: speedStack.leadingAnchor).isActive = true
-        downloadSub.trailingAnchor.constraint(equalTo: speedStack.trailingAnchor).isActive = true
+        uploadRow.leadingAnchor.constraint(equalTo: speedStack.leadingAnchor).isActive = true
+        uploadRow.trailingAnchor.constraint(equalTo: speedStack.trailingAnchor).isActive = true
+        downloadRow.leadingAnchor.constraint(equalTo: speedStack.leadingAnchor).isActive = true
+        downloadRow.trailingAnchor.constraint(equalTo: speedStack.trailingAnchor).isActive = true
 
         let realtimeSpeedCard = homeCard(
             title: "实时速度",
-            iconName: "speedometer",
+            iconName: "waveform.path.ecg",
+            titleAccessoryView: speedSublabel,
             views: [speedStack]
         )
 
-        // Card 7: 活动连接与内存
+        // Card 7: 活动连接
         connectionsValueLabel.font = .systemFont(ofSize: 26, weight: .bold)
-        connectionsValueLabel.textColor = MD3.primary
+        connectionsValueLabel.textColor = MD3.onSurface
         let connUnit = NSTextField(labelWithString: "个活动连接")
-        connUnit.font = .systemFont(ofSize: 12)
+        connUnit.font = .systemFont(ofSize: 11)
         connUnit.textColor = MD3.onSurfaceVariant
-        let connRow = NSStackView(views: [connectionsValueLabel, connUnit])
+        let connTextCol = NSStackView(views: [connectionsValueLabel, connUnit])
+        connTextCol.orientation = .vertical
+        connTextCol.alignment = .leading
+        connTextCol.spacing = 1
+
+        equalizerBarsView.translatesAutoresizingMaskIntoConstraints = false
+        equalizerBarsView.heightAnchor.constraint(equalToConstant: 22).isActive = true
+        equalizerBarsView.widthAnchor.constraint(equalToConstant: 60).isActive = true
+
+        let connSpacer = NSView()
+        connSpacer.translatesAutoresizingMaskIntoConstraints = false
+        connSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        let connRow = NSStackView(views: [connTextCol, connSpacer, equalizerBarsView])
         connRow.orientation = .horizontal
-        connRow.alignment = .lastBaseline
-        connRow.spacing = 6
+        connRow.alignment = .centerY
+        connRow.distribution = .fill
+        connRow.translatesAutoresizingMaskIntoConstraints = false
+
+        // Memory Subcard (单独底色)
+        let memSubcard = NSView()
+        memSubcard.wantsLayer = true
+        memSubcard.layer?.cornerRadius = 8
+        memSubcard.layer?.backgroundColor = MD3.surfaceContainer.mixed(with: MD3.surface, ratio: 0.5).cgColor
+        registerThemeObserver { [weak memSubcard] in
+            memSubcard?.layer?.backgroundColor = MD3.surfaceContainer.mixed(with: MD3.surface, ratio: 0.5).cgColor
+        }
+        memSubcard.translatesAutoresizingMaskIntoConstraints = false
+
+        let memIconContainer = NSView()
+        memIconContainer.wantsLayer = true
+        memIconContainer.layer?.cornerRadius = 6
+        memIconContainer.layer?.backgroundColor = MD3.primary.withAlphaComponent(0.16).cgColor
+        memIconContainer.translatesAutoresizingMaskIntoConstraints = false
+        memIconContainer.widthAnchor.constraint(equalToConstant: 24).isActive = true
+        memIconContainer.heightAnchor.constraint(equalToConstant: 24).isActive = true
+
+        if let memImg = NSImage(systemSymbolName: "memorychip", accessibilityDescription: nil) ?? NSImage(systemSymbolName: "cpu", accessibilityDescription: nil) {
+            memImg.isTemplate = true
+            let iv = NSImageView(image: memImg)
+            iv.contentTintColor = MD3.primary
+            iv.translatesAutoresizingMaskIntoConstraints = false
+            memIconContainer.addSubview(iv)
+            NSLayoutConstraint.activate([
+                iv.centerXAnchor.constraint(equalTo: memIconContainer.centerXAnchor),
+                iv.centerYAnchor.constraint(equalTo: memIconContainer.centerYAnchor),
+                iv.widthAnchor.constraint(equalToConstant: 14),
+                iv.heightAnchor.constraint(equalToConstant: 14)
+            ])
+        }
 
         let memTitle = NSTextField(labelWithString: "内存占用")
-        memTitle.font = .systemFont(ofSize: 12, weight: .medium)
+        memTitle.font = .systemFont(ofSize: 10, weight: .medium)
         memTitle.textColor = MD3.onSurfaceVariant
 
         memoryValueLabel.font = .systemFont(ofSize: 13, weight: .bold)
@@ -389,31 +451,43 @@ extension MainWindowController {
         let memInfoCol = NSStackView(views: [memTitle, memoryValueLabel])
         memInfoCol.orientation = .vertical
         memInfoCol.alignment = .leading
-        memInfoCol.spacing = 2
+        memInfoCol.spacing = 1
 
         memoryRingView.translatesAutoresizingMaskIntoConstraints = false
         memoryRingView.heightAnchor.constraint(equalToConstant: 28).isActive = true
-        memoryRingView.widthAnchor.constraint(equalToConstant: 68).isActive = true
+        memoryRingView.widthAnchor.constraint(equalToConstant: 58).isActive = true
 
-        let memRow = NSStackView(views: [memInfoCol, memoryRingView])
+        let memSpacer = NSView()
+        memSpacer.translatesAutoresizingMaskIntoConstraints = false
+        memSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        let memRow = NSStackView(views: [memIconContainer, memInfoCol, memSpacer, memoryRingView])
         memRow.orientation = .horizontal
         memRow.alignment = .centerY
-        memRow.spacing = 10
+        memRow.spacing = 8
+        memRow.translatesAutoresizingMaskIntoConstraints = false
+        memSubcard.addSubview(memRow)
 
-        let connAndMemStack = NSStackView(views: [connRow, memRow])
+        NSLayoutConstraint.activate([
+            memRow.leadingAnchor.constraint(equalTo: memSubcard.leadingAnchor, constant: 10),
+            memRow.trailingAnchor.constraint(equalTo: memSubcard.trailingAnchor, constant: -10),
+            memRow.topAnchor.constraint(equalTo: memSubcard.topAnchor, constant: 7),
+            memRow.bottomAnchor.constraint(equalTo: memSubcard.bottomAnchor, constant: -7)
+        ])
+
+        let connAndMemStack = NSStackView(views: [connRow, memSubcard])
         connAndMemStack.orientation = .vertical
         connAndMemStack.alignment = .leading
-        connAndMemStack.spacing = 16
+        connAndMemStack.spacing = 10
         connAndMemStack.translatesAutoresizingMaskIntoConstraints = false
-
-        equalizerBarsView.translatesAutoresizingMaskIntoConstraints = false
-        equalizerBarsView.heightAnchor.constraint(equalToConstant: 18).isActive = true
-        equalizerBarsView.widthAnchor.constraint(equalToConstant: 54).isActive = true
+        connRow.leadingAnchor.constraint(equalTo: connAndMemStack.leadingAnchor).isActive = true
+        connRow.trailingAnchor.constraint(equalTo: connAndMemStack.trailingAnchor).isActive = true
+        memSubcard.leadingAnchor.constraint(equalTo: connAndMemStack.leadingAnchor).isActive = true
+        memSubcard.trailingAnchor.constraint(equalTo: connAndMemStack.trailingAnchor).isActive = true
 
         let activeConnectionsCard = homeCard(
-            title: "活动连接与内存",
-            iconName: "bolt.horizontal",
-            titleAccessoryView: equalizerBarsView,
+            title: "活动连接",
+            iconName: "link",
             views: [connAndMemStack]
         )
 
@@ -422,36 +496,61 @@ extension MainWindowController {
         trafficDonutChartView.widthAnchor.constraint(equalToConstant: 92).isActive = true
         trafficDonutChartView.heightAnchor.constraint(equalToConstant: 92).isActive = true
 
-        func makeLegendRow(color: NSColor, label: NSTextField) -> NSStackView {
+        func makeLegendTabularRow(color: NSColor, name: String, amountLabel: NSTextField, ratioLabel: NSTextField) -> NSStackView {
             let dot = NSView()
             dot.wantsLayer = true
             dot.layer?.backgroundColor = color.cgColor
-            dot.layer?.cornerRadius = 4
+            dot.layer?.cornerRadius = 3.5
             dot.translatesAutoresizingMaskIntoConstraints = false
-            dot.widthAnchor.constraint(equalToConstant: 8).isActive = true
-            dot.heightAnchor.constraint(equalToConstant: 8).isActive = true
-            label.font = .systemFont(ofSize: 11)
-            label.textColor = MD3.onSurfaceVariant
-            let row = NSStackView(views: [dot, label])
+            dot.widthAnchor.constraint(equalToConstant: 7).isActive = true
+            dot.heightAnchor.constraint(equalToConstant: 7).isActive = true
+
+            let nameLabel = NSTextField(labelWithString: name)
+            nameLabel.font = .systemFont(ofSize: 11)
+            nameLabel.textColor = MD3.onSurfaceVariant
+            nameLabel.translatesAutoresizingMaskIntoConstraints = false
+            nameLabel.widthAnchor.constraint(equalToConstant: 34).isActive = true
+
+            let nameStack = NSStackView(views: [dot, nameLabel])
+            nameStack.orientation = .horizontal
+            nameStack.alignment = .centerY
+            nameStack.spacing = 5
+            nameStack.translatesAutoresizingMaskIntoConstraints = false
+            nameStack.widthAnchor.constraint(equalToConstant: 48).isActive = true
+
+            amountLabel.font = .systemFont(ofSize: 11, weight: .bold)
+            amountLabel.textColor = MD3.onSurface
+            amountLabel.alignment = .right
+            amountLabel.translatesAutoresizingMaskIntoConstraints = false
+            amountLabel.widthAnchor.constraint(equalToConstant: 52).isActive = true
+
+            ratioLabel.font = .systemFont(ofSize: 11)
+            ratioLabel.textColor = MD3.onSurfaceVariant
+            ratioLabel.alignment = .right
+            ratioLabel.translatesAutoresizingMaskIntoConstraints = false
+            ratioLabel.widthAnchor.constraint(equalToConstant: 32).isActive = true
+
+            let row = NSStackView(views: [nameStack, amountLabel, ratioLabel])
             row.orientation = .horizontal
             row.alignment = .centerY
             row.spacing = 6
+            row.distribution = .fill
             return row
         }
 
-        let proxyRow = makeLegendRow(color: MD3.primary, label: donutProxyLabel)
-        let directRow = makeLegendRow(color: NSColor(calibratedRed: 0.22, green: 0.74, blue: 0.97, alpha: 1.0), label: donutDirectLabel)
-        let otherRow = makeLegendRow(color: MD3.outlineVariant, label: donutOtherLabel)
+        let proxyRow = makeLegendTabularRow(color: MD3.primary, name: "代理", amountLabel: donutProxyAmountLabel, ratioLabel: donutProxyRatioLabel)
+        let directRow = makeLegendTabularRow(color: NSColor(calibratedRed: 0.22, green: 0.74, blue: 0.97, alpha: 1.0), name: "直连", amountLabel: donutDirectAmountLabel, ratioLabel: donutDirectRatioLabel)
+        let otherRow = makeLegendTabularRow(color: MD3.outlineVariant, name: "其他", amountLabel: donutOtherAmountLabel, ratioLabel: donutOtherRatioLabel)
 
         let legendStack = NSStackView(views: [proxyRow, directRow, otherRow])
         legendStack.orientation = .vertical
         legendStack.alignment = .leading
-        legendStack.spacing = 6
+        legendStack.spacing = 10
 
         let donutContentStack = NSStackView(views: [trafficDonutChartView, legendStack])
         donutContentStack.orientation = .horizontal
         donutContentStack.alignment = .centerY
-        donutContentStack.spacing = 12
+        donutContentStack.spacing = 14
         donutContentStack.translatesAutoresizingMaskIntoConstraints = false
 
         let trafficDestinationCard = homeCard(
@@ -468,15 +567,15 @@ extension MainWindowController {
         recentStatusPill.isBezeled = false
         recentStatusPill.alignment = .center
         recentStatusPill.wantsLayer = true
-        recentStatusPill.layer?.cornerRadius = 8
+        recentStatusPill.layer?.cornerRadius = 9
         recentStatusPill.layer?.masksToBounds = true
         recentStatusPill.translatesAutoresizingMaskIntoConstraints = false
-        recentStatusPill.heightAnchor.constraint(equalToConstant: 18).isActive = true
-        recentStatusPill.widthAnchor.constraint(greaterThanOrEqualToConstant: 54).isActive = true
+        recentStatusPill.heightAnchor.constraint(equalToConstant: 20).isActive = true
+        recentStatusPill.widthAnchor.constraint(greaterThanOrEqualToConstant: 62).isActive = true
 
         recentStatusStack.orientation = .vertical
         recentStatusStack.alignment = .leading
-        recentStatusStack.spacing = 8
+        recentStatusStack.spacing = 10
         recentStatusStack.translatesAutoresizingMaskIntoConstraints = false
 
         RecentStatusTracker.shared.onItemsUpdated = { [weak self] items in
@@ -542,16 +641,21 @@ extension MainWindowController {
             guard let self = self else { return }
             title?.textColor = MD3.onSurface
             subtitle?.textColor = MD3.onSurfaceVariant
-            self.currentNodeNameLabel.textColor = MD3.primary
+            self.currentNodeNameLabel.textColor = MD3.onSurface
             self.currentNodeDelayLabel.textColor = MD3.latencyTextColor(self.currentNodeDelayLabel.stringValue)
+            self.trafficTotalValueLabel.textColor = MD3.onSurface
             self.trafficStatsValueLabel.textColor = MD3.primary
             self.trafficStatsDetailLabel.textColor = MD3.onSurfaceVariant
-            self.trafficUploadStatLabel.textColor = MD3.primary
+            self.trafficUploadStatLabel.textColor = MD3.onSurface
+            self.trafficDownloadStatLabel.textColor = MD3.onSurface
             self.uploadValueLabel.textColor = MD3.primary
             self.uploadWaveChartView.lineColor = MD3.primary
-            self.connectionsValueLabel.textColor = MD3.primary
+            self.connectionsValueLabel.textColor = MD3.onSurface
             self.connectionsDetailLabel.textColor = MD3.onSurfaceVariant
             self.memoryValueLabel.textColor = MD3.onSurface
+            self.donutProxyAmountLabel.textColor = MD3.onSurface
+            self.donutDirectAmountLabel.textColor = MD3.onSurface
+            self.donutOtherAmountLabel.textColor = MD3.onSurface
             wifiImageView?.contentTintColor = MD3.primary
             ipImageView?.contentTintColor = MD3.primary
             self.wifiStatusLabel.textColor = MD3.onSurface
@@ -687,10 +791,11 @@ extension MainWindowController {
         }
         
         let total = SaturatingArithmetic.add(up, down)
+        trafficTotalValueLabel.stringValue = formatBytes(total)
         trafficStatsValueLabel.stringValue = formatBytes(total)
         trafficStatsDetailLabel.stringValue = "上传: \(formatBytes(up))   下载: \(formatBytes(down))"
-        trafficUploadStatLabel.stringValue = "上传: \(formatBytes(up))"
-        trafficDownloadStatLabel.stringValue = "下载: \(formatBytes(down))"
+        trafficUploadStatLabel.stringValue = formatBytes(up)
+        trafficDownloadStatLabel.stringValue = formatBytes(down)
         trafficTrendChartView.data = TrafficTrendStore.trendData(for: period, totalUploadBytes: Int64(up), totalDownloadBytes: Int64(down))
         trafficDonutChartView.centerTotalText = formatBytes(total)
     }
@@ -778,8 +883,8 @@ extension MainWindowController {
             msgLabel.lineBreakMode = .byTruncatingTail
             msgLabel.maximumNumberOfLines = 1
 
-            row.addArrangedSubview(timeLabel)
             row.addArrangedSubview(dot)
+            row.addArrangedSubview(timeLabel)
             row.addArrangedSubview(msgLabel)
 
             recentStatusStack.addArrangedSubview(row)
@@ -902,8 +1007,7 @@ extension MainWindowController {
                 }
                 let activeNodeInfo = self.resolveActiveOutbound(proxiesObj: proxiesObj)
                 let nodeName = activeNodeInfo.name.isEmpty ? "（选择中…）" : activeNodeInfo.name
-                let flag = CountryFlagHelper.flag(for: nodeName)
-                self.currentNodeNameLabel.stringValue = "\(flag) \(nodeName)"
+                self.currentNodeNameLabel.stringValue = nodeName
                 self.currentNodeAutoBadge.isHidden = !activeNodeInfo.isAuto
                 let activeDelay = self.nodes.first(where: { $0.tag == activeNodeInfo.name })?.delay ?? "—"
                 self.currentNodeDelayLabel.stringValue = activeDelay == "未测试" ? "—" : activeDelay
@@ -938,14 +1042,28 @@ extension MainWindowController {
                     self.donutProxyLabel.stringValue = "代理 \(proxyCount) (\(Int(pRatio * 100))%)"
                     self.donutDirectLabel.stringValue = "直连 \(directCount) (\(Int(dRatio * 100))%)"
                     self.donutOtherLabel.stringValue = "其他 \(otherCount) (\(Int(oRatio * 100))%)"
+
+                    let totalBytes = SaturatingArithmetic.add(self.totalUploadBytes, self.totalDownloadBytes)
+                    if totalBytes > 0 {
+                        self.donutProxyAmountLabel.stringValue = self.formatBytes(Int(Double(totalBytes) * pRatio))
+                        self.donutDirectAmountLabel.stringValue = self.formatBytes(Int(Double(totalBytes) * dRatio))
+                        self.donutOtherAmountLabel.stringValue = self.formatBytes(Int(Double(totalBytes) * oRatio))
+                    } else {
+                        self.donutProxyAmountLabel.stringValue = "\(proxyCount) 条"
+                        self.donutDirectAmountLabel.stringValue = "\(directCount) 条"
+                        self.donutOtherAmountLabel.stringValue = "\(otherCount) 条"
+                    }
+                    self.donutProxyRatioLabel.stringValue = "\(Int(pRatio * 100))%"
+                    self.donutDirectRatioLabel.stringValue = "\(Int(dRatio * 100))%"
+                    self.donutOtherRatioLabel.stringValue = "\(Int(oRatio * 100))%"
                 }
 
                 if self.isProxyRuntimeRunning() {
-                    self.recentStatusPill.stringValue = "运行正常"
+                    self.recentStatusPill.stringValue = "● 运行正常"
                     self.recentStatusPill.textColor = MD3.onSuccessContainer
                     self.recentStatusPill.backgroundColor = MD3.successContainer
                 } else {
-                    self.recentStatusPill.stringValue = "服务未启动"
+                    self.recentStatusPill.stringValue = "● 服务未启动"
                     self.recentStatusPill.textColor = MD3.onSurfaceVariant
                     self.recentStatusPill.backgroundColor = MD3.surfaceContainer
                 }

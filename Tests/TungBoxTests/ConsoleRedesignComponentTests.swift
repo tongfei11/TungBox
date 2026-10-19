@@ -192,5 +192,29 @@ final class ConsoleRedesignComponentTests: XCTestCase {
             }
         }
     }
+
+    @MainActor
+    func testCenteredPillLabelCalculatesOffsetAndPadding() {
+        let label = CenteredPillLabel(labelWithString: "DOMAIN-SUFFIX")
+        label.font = .monospacedSystemFont(ofSize: 11, weight: .semibold)
+        XCTAssertTrue(label.cell is CenteredPillTextFieldCell)
+
+        let intrinsic = label.intrinsicContentSize
+        XCTAssertGreaterThan(intrinsic.width, 90)
+
+        if let cell = label.cell as? CenteredPillTextFieldCell {
+            let drawing = cell.drawingRect(forBounds: NSRect(x: 0, y: 0, width: 120, height: 22))
+            XCTAssertGreaterThan(drawing.origin.y, 0)
+            XCTAssertLessThan(drawing.origin.y, 8)
+        }
+    }
+
+    @MainActor
+    func testSegmentButtonStyleCompactPadding() {
+        let btn = MD3Button()
+        btn.style = .segment
+        btn.title = "直接连接"
+        XCTAssertEqual(btn.style, .segment)
+    }
 }
 

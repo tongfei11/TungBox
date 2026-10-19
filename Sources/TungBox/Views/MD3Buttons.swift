@@ -156,6 +156,10 @@ final class MD3Button: NSButton, MD3Themeable {
         if style == .nav {
             constraints.append(contentStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16))
             constraints.append(contentStack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -16))
+        } else if style == .segment {
+            constraints.append(contentStack.centerXAnchor.constraint(equalTo: centerXAnchor))
+            constraints.append(contentStack.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 4))
+            constraints.append(contentStack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -4))
         } else if title.isEmpty && !iconView.isHidden {
             constraints.append(contentStack.centerXAnchor.constraint(equalTo: centerXAnchor))
         } else {
@@ -266,9 +270,14 @@ final class MD3Button: NSButton, MD3Themeable {
         let colors = getColors()
 
         labelField.textColor = colors.textCol
-        let font = style == .nav
-            ? NSFont.systemFont(ofSize: 14, weight: self.state == .on ? .bold : .medium)
-            : NSFont.systemFont(ofSize: 13, weight: .semibold)
+        let font: NSFont
+        if style == .nav {
+            font = NSFont.systemFont(ofSize: 14, weight: self.state == .on ? .bold : .medium)
+        } else if style == .segment {
+            font = NSFont.systemFont(ofSize: 11.5, weight: .medium)
+        } else {
+            font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        }
         labelField.font = font
 
         if let img = iconView.image {

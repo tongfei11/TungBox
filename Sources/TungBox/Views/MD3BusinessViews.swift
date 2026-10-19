@@ -308,6 +308,38 @@ final class CenteredLabel: NSTextField {
     }
 }
 
+final class CenteredPillTextFieldCell: NSTextFieldCell {
+    var horizontalPadding: CGFloat = 16
+
+    override func drawingRect(forBounds rect: NSRect) -> NSRect {
+        let titleSize = super.cellSize(forBounds: rect)
+        var newRect = rect
+        let yOffset = (rect.height - titleSize.height) / 2.0
+        newRect.origin.y += yOffset
+        newRect.size.height = titleSize.height
+        return newRect
+    }
+
+    override var cellSize: NSSize {
+        var size = super.cellSize
+        size.width += horizontalPadding
+        return size
+    }
+
+    override func cellSize(forBounds rect: NSRect) -> NSSize {
+        var size = super.cellSize(forBounds: rect)
+        size.width += horizontalPadding
+        return size
+    }
+}
+
+final class CenteredPillLabel: NSTextField {
+    override class var cellClass: AnyClass? {
+        get { CenteredPillTextFieldCell.self }
+        set {}
+    }
+}
+
 final class MD3AppVersionFooter: NSControl, MD3Themeable {
     private let stackView = NSStackView()
     private let versionLabel = NSTextField(labelWithString: "")

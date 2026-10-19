@@ -60,7 +60,7 @@ enum RuleTableCell {
         }
 
         if columnID == "type" && !rule.isSection && !rule.type.isEmpty {
-            let label = NSTextField(labelWithString: rule.type)
+            let label = CenteredPillLabel(labelWithString: rule.type)
             label.font = .monospacedSystemFont(ofSize: 11, weight: .semibold)
             label.alignment = .center
             label.lineBreakMode = .byTruncatingTail
@@ -90,7 +90,7 @@ enum RuleTableCell {
         }
 
         if columnID == "strategy" && !rule.isSection && !rule.strategy.isEmpty {
-            let label = NSTextField(labelWithString: rule.strategy)
+            let label = CenteredPillLabel(labelWithString: rule.strategy)
             label.font = .systemFont(ofSize: 11, weight: .semibold)
             label.alignment = .center
             label.lineBreakMode = .byTruncatingTail
