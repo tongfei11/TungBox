@@ -277,6 +277,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             observer()
         }
         window?.contentView?.layer?.backgroundColor = MD3.background.cgColor
+        for item in pages.tabViewItems {
+            item.view?.refreshSubviews()
+        }
         window?.contentView?.refreshSubviews()
     }
 

@@ -138,6 +138,8 @@ final class MD3StatusChip: NSView, MD3Themeable {
     }
 
     func themeChanged() {
+        updateLayer()
+        label.needsDisplay = true
         self.needsDisplay = true
     }
 }

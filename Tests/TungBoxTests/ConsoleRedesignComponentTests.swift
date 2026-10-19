@@ -216,5 +216,68 @@ final class ConsoleRedesignComponentTests: XCTestCase {
         btn.title = "直接连接"
         XCTAssertEqual(btn.style, .segment)
     }
+
+    @MainActor
+    func testLightAndDarkThemePaletteContrast() {
+        let savedDark = MD3.isDark
+        defer { MD3.isDark = savedDark }
+
+        MD3.isDark = false
+        let lightDownload = MD3.downloadColor
+        let lightSuccess = MD3.success
+        let lightOnSuccessContainer = MD3.onSuccessContainer
+        XCTAssertNotNil(lightDownload)
+        XCTAssertNotNil(lightSuccess)
+        XCTAssertNotNil(lightOnSuccessContainer)
+
+        MD3.isDark = true
+        let darkDownload = MD3.downloadColor
+        let darkSuccess = MD3.success
+        XCTAssertNotNil(darkDownload)
+        XCTAssertNotNil(darkSuccess)
+    }
+
+    @MainActor
+    func testSegmentedControlAndStatusChipThemeCascade() {
+        let savedDark = MD3.isDark
+        defer { MD3.isDark = savedDark }
+
+        let segmented = MD3SegmentedControl()
+        segmented.items = ["今日", "近 7 天", "近 30 天"]
+        segmented.selectedSegment = 0
+
+        let chip = MD3StatusChip()
+        chip.status = .active
+
+        MD3.isDark = false
+        segmented.themeChanged()
+        chip.themeChanged()
+
+        XCTAssertEqual(segmented.items.count, 3)
+        XCTAssertNotNil(segmented.layer?.backgroundColor)
+        XCTAssertNotNil(chip.layer?.backgroundColor)
+
+        MD3.isDark = true
+        segmented.themeChanged()
+        chip.themeChanged()
+
+        XCTAssertNotNil(segmented.layer?.backgroundColor)
+        XCTAssertNotNil(chip.layer?.backgroundColor)
+    }
+
+    @MainActor
+    func testHomeDashboardLayoutCardTupleElements() {
+        let content = NSView()
+        let result = HomeDashboardLayout.card(
+            title: "测试标题",
+            iconName: "globe",
+            subtitle: "测试副标题",
+            views: [content]
+        )
+        XCTAssertEqual(result.title.stringValue, "测试标题")
+        XCTAssertNotNil(result.iconView)
+        XCTAssertEqual(result.subtitle?.stringValue, "测试副标题")
+        XCTAssertEqual(result.view.type, .elevated)
+    }
 }
 

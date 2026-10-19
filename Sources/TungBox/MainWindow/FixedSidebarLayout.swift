@@ -1,8 +1,8 @@
 import AppKit
 
 enum ConsoleLayout {
-    static let defaultContentSize = NSSize(width: 1024, height: 680)
-    static let sidebarWidth: CGFloat = 168
+    static let defaultContentSize = NSSize(width: 960, height: 600)
+    static let sidebarWidth: CGFloat = 140
 }
 
 /// Navigation is always visible. Avoid split-view collapse and restoration state.

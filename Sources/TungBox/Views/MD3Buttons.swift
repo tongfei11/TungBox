@@ -254,7 +254,7 @@ final class MD3Button: NSButton, MD3Themeable {
         case .segment:
             let isSelected = (self.state == .on)
             bg = NSColor.clear
-            textCol = isSelected ? MD3.onPrimary : MD3.onSurfaceVariant
+            textCol = isSelected ? MD3.onPrimary : (MD3.isDark ? MD3.onSurfaceVariant : MD3.onSurface)
         }
 
         if isPressed {

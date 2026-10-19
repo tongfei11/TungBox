@@ -41,7 +41,7 @@ final class SpeedWaveChartView: NSView, MD3Themeable {
 
         let textAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 9, weight: .regular),
-            .foregroundColor: MD3.onSurfaceVariant.withAlphaComponent(0.6)
+            .foregroundColor: MD3.isDark ? MD3.onSurfaceVariant.withAlphaComponent(0.65) : MD3.onSurfaceVariant
         ]
 
         // Reference ticks
@@ -52,7 +52,8 @@ final class SpeedWaveChartView: NSView, MD3Themeable {
         ]
 
         ctx.setLineWidth(0.5)
-        ctx.setStrokeColor(MD3.outlineVariant.withAlphaComponent(0.25).cgColor)
+        let strokeColor = MD3.isDark ? MD3.outlineVariant.withAlphaComponent(0.25) : MD3.outlineVariant.withAlphaComponent(0.5)
+        ctx.setStrokeColor(strokeColor.cgColor)
 
         for tick in ticks {
             let y = paddingBottom + chartHeight * tick.ratio

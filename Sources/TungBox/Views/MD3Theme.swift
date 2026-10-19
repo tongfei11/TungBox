@@ -212,13 +212,13 @@ enum MD3 {
 
     // Status colors
     static var success: NSColor {
-        isDark ? NSColor(calibratedRed: 0.44, green: 0.81, blue: 0.55, alpha: 1) : NSColor(calibratedRed: 0.10, green: 0.55, blue: 0.23, alpha: 1)
+        isDark ? NSColor(calibratedRed: 0.44, green: 0.81, blue: 0.55, alpha: 1) : NSColor(calibratedRed: 0.08, green: 0.52, blue: 0.20, alpha: 1)
     }
     static var successContainer: NSColor {
-        isDark ? NSColor(calibratedRed: 0.05, green: 0.28, blue: 0.12, alpha: 1) : NSColor(calibratedRed: 0.85, green: 0.95, blue: 0.88, alpha: 1)
+        isDark ? NSColor(calibratedRed: 0.05, green: 0.28, blue: 0.12, alpha: 1) : NSColor(calibratedRed: 0.86, green: 0.95, blue: 0.88, alpha: 1)
     }
     static var onSuccessContainer: NSColor {
-        isDark ? NSColor(calibratedRed: 0.70, green: 0.94, blue: 0.76, alpha: 1) : NSColor(calibratedRed: 0.03, green: 0.22, blue: 0.07, alpha: 1)
+        isDark ? NSColor(calibratedRed: 0.70, green: 0.94, blue: 0.76, alpha: 1) : NSColor(calibratedRed: 0.05, green: 0.35, blue: 0.14, alpha: 1)
     }
 
     static var error: NSColor {
@@ -233,6 +233,11 @@ enum MD3 {
 
     static var warning: NSColor {
         isDark ? NSColor(calibratedRed: 1.00, green: 0.70, blue: 0.30, alpha: 1) : NSColor(calibratedRed: 0.85, green: 0.50, blue: 0.05, alpha: 1)
+    }
+
+    /// Primary accent for download speeds & traffic across light and dark modes
+    static var downloadColor: NSColor {
+        isDark ? NSColor(hex: 0x38BDF8) : NSColor(hex: 0x0284C7)
     }
 
     /// Text color for a latency string: < 400ms green, < 800ms orange, ≥ 800ms red.

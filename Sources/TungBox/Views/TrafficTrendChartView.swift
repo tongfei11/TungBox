@@ -37,11 +37,12 @@ final class TrafficTrendChartView: NSView, MD3Themeable {
         let gridSteps = 4
         let textAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 10, weight: .regular),
-            .foregroundColor: MD3.onSurfaceVariant.withAlphaComponent(0.65)
+            .foregroundColor: MD3.isDark ? MD3.onSurfaceVariant.withAlphaComponent(0.75) : MD3.onSurfaceVariant
         ]
 
         ctx.setLineWidth(1.0)
-        ctx.setStrokeColor(MD3.outlineVariant.withAlphaComponent(0.35).cgColor)
+        let strokeColor = MD3.isDark ? MD3.outlineVariant.withAlphaComponent(0.35) : MD3.outlineVariant.withAlphaComponent(0.65)
+        ctx.setStrokeColor(strokeColor.cgColor)
 
         for i in 0...gridSteps {
             let ratio = CGFloat(i) / CGFloat(gridSteps)

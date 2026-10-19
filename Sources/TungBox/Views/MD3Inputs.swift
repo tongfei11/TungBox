@@ -182,6 +182,7 @@ final class MD3SegmentedControl: NSView, MD3Themeable {
             stackView.topAnchor.constraint(equalTo: topAnchor),
             stackView.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
+        updateLayer()
     }
 
     override func layout() {
@@ -197,7 +198,9 @@ final class MD3SegmentedControl: NSView, MD3Themeable {
         super.updateLayer()
         layer?.borderColor = MD3.outlineVariant.cgColor
         layer?.borderWidth = 1
-        layer?.backgroundColor = MD3.surfaceContainer.mixed(with: MD3.outlineVariant, ratio: 0.3).cgColor
+        layer?.backgroundColor = (MD3.isDark
+            ? MD3.surfaceContainer.mixed(with: MD3.outlineVariant, ratio: 0.3)
+            : MD3.surfaceContainerHighest.mixed(with: MD3.surface, ratio: 0.4)).cgColor
     }
 
     private func setupSegments() {
@@ -252,8 +255,11 @@ final class MD3SegmentedControl: NSView, MD3Themeable {
     }
 
     func themeChanged() {
-        self.needsDisplay = true
+        updateLayer()
         slidingPill.themeChanged()
+        for button in buttons {
+            button.themeChanged()
+        }
     }
 }
 // MARK: - MD3 Switch
