@@ -311,7 +311,10 @@ final class MD3LatencyChip: NSView, MD3Themeable {
 // MARK: - Equalizer Bars View
 
 final class EqualizerBarsView: NSView, MD3Themeable {
-    private let barCount = 10
+    private let barCount = 16
+    private var currentHeights: [CGFloat] = [0.25, 0.45, 0.8, 0.35, 0.9, 0.65, 0.55, 0.85, 0.5, 0.3, 0.7, 0.4, 0.9, 0.6, 0.75, 0.35]
+    private var targetHeights: [CGFloat] = [0.25, 0.45, 0.8, 0.35, 0.9, 0.65, 0.55, 0.85, 0.5, 0.3, 0.7, 0.4, 0.9, 0.6, 0.75, 0.35]
+    private weak var animTimer: Timer?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -323,6 +326,50 @@ final class EqualizerBarsView: NSView, MD3Themeable {
         wantsLayer = true
     }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil {
+            startAnimation()
+        } else {
+            stopAnimation()
+        }
+    }
+
+    private func startAnimation() {
+        stopAnimation()
+        let timer = Timer(timeInterval: 0.08, repeats: true) { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.tick()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        animTimer = timer
+    }
+
+    private func stopAnimation() {
+        animTimer?.invalidate()
+        animTimer = nil
+    }
+
+    private func tick() {
+        var needsNewTargets = false
+        for i in 0..<barCount {
+            let diff = targetHeights[i] - currentHeights[i]
+            if abs(diff) < 0.05 {
+                needsNewTargets = true
+            }
+            currentHeights[i] += diff * 0.22
+        }
+        if needsNewTargets {
+            for i in 0..<barCount {
+                if abs(targetHeights[i] - currentHeights[i]) < 0.08 {
+                    targetHeights[i] = CGFloat.random(in: 0.15...0.95)
+                }
+            }
+        }
+        needsDisplay = true
+    }
+
     func themeChanged() {
         needsDisplay = true
     }
@@ -330,20 +377,25 @@ final class EqualizerBarsView: NSView, MD3Themeable {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-        let heights: [CGFloat] = [0.25, 0.45, 0.8, 0.35, 0.9, 0.65, 0.55, 0.85, 0.5, 0.3]
-        let barW: CGFloat = 3.0
+        let barW: CGFloat = 3.5
         let spacing: CGFloat = 3.0
         let totalW = CGFloat(barCount) * barW + CGFloat(barCount - 1) * spacing
         let startX = max(bounds.width - totalW, 0)
-        ctx.setFillColor(MD3.primary.withAlphaComponent(0.8).cgColor)
+        let barColor = MD3.primary.withAlphaComponent(0.85).cgColor
+
+        ctx.setFillColor(barColor)
         for i in 0..<barCount {
-            let h = max(bounds.height * heights[i % heights.count], 3)
-            let r = CGRect(x: startX + CGFloat(i) * (barW + spacing), y: 0, width: barW, height: h)
-            ctx.fill(r)
+            let h = max(bounds.height * currentHeights[i % currentHeights.count], 3)
+            let y = isFlipped ? (bounds.height - h) : 0
+            let r = CGRect(x: startX + CGFloat(i) * (barW + spacing), y: y, width: barW, height: h)
+            let path = CGPath(roundedRect: r, cornerWidth: 1.5, cornerHeight: 1.5, transform: nil)
+            ctx.addPath(path)
+            ctx.fillPath()
         }
     }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: 58, height: 20)
+        NSSize(width: 101, height: 32)
     }
 }
+

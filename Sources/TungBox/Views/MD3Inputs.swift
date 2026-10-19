@@ -572,12 +572,22 @@ final class MD3PopUpButton: NSPopUpButton, MD3Themeable {
         setup()
     }
 
+    var isBorderless: Bool = false {
+        didSet {
+            invalidateIntrinsicContentSize()
+            needsDisplay = true
+        }
+    }
+
     override var intrinsicContentSize: NSSize {
         let titleString = titleOfSelectedItem ?? ""
         let attrs: [NSAttributedString.Key: Any] = [
             .font: font ?? NSFont.systemFont(ofSize: 13)
         ]
         let titleSize = titleString.size(withAttributes: attrs)
+        if isBorderless {
+            return NSSize(width: max(40, titleSize.width + 16), height: 24)
+        }
         return NSSize(width: max(100, titleSize.width + 48), height: 36)
     }
 
@@ -626,23 +636,25 @@ final class MD3PopUpButton: NSPopUpButton, MD3Themeable {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let isHighlighted = cell?.isHighlighted == true
-        let inset: CGFloat = isHighlighted ? 1.5 : 1.0
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: inset, dy: inset), xRadius: 8, yRadius: 8)
+        if !isBorderless {
+            let isHighlighted = cell?.isHighlighted == true
+            let inset: CGFloat = isHighlighted ? 1.5 : 1.0
+            let path = NSBezierPath(roundedRect: bounds.insetBy(dx: inset, dy: inset), xRadius: 8, yRadius: 8)
 
-        if isHovered {
-            MD3.surfaceContainer.setFill()
-        } else {
-            MD3.surfaceContainerLow.setFill()
+            if isHovered {
+                MD3.surfaceContainer.setFill()
+            } else {
+                MD3.surfaceContainerLow.setFill()
+            }
+            path.fill()
+
+            let strokeColor = isHighlighted ? MD3.primary : MD3.outlineVariant
+            let strokeWidth: CGFloat = isHighlighted ? 2.0 : 1.0
+
+            strokeColor.setStroke()
+            path.lineWidth = strokeWidth
+            path.stroke()
         }
-        path.fill()
-
-        let strokeColor = isHighlighted ? MD3.primary : MD3.outlineVariant
-        let strokeWidth: CGFloat = isHighlighted ? 2.0 : 1.0
-
-        strokeColor.setStroke()
-        path.lineWidth = strokeWidth
-        path.stroke()
 
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.alignment = .left
@@ -653,14 +665,17 @@ final class MD3PopUpButton: NSPopUpButton, MD3Themeable {
             .paragraphStyle: paragraphStyle
         ]
 
+        let textX: CGFloat = isBorderless ? 0 : 12
+        let textRightMargin: CGFloat = isBorderless ? 16 : 36
+
         // Prefer the selected item's attributed title (the rule-type popup uses it to
         // grey the Chinese half); fall back to the plain title for other popups.
         if let attributed = selectedItem?.attributedTitle, attributed.length > 0 {
             let size = attributed.size()
             let rect = NSRect(
-                x: 12,
+                x: textX,
                 y: (bounds.height - size.height) / 2,
-                width: bounds.width - 36,
+                width: max(bounds.width - textRightMargin, 0),
                 height: size.height
             )
             attributed.draw(in: rect)
@@ -668,9 +683,9 @@ final class MD3PopUpButton: NSPopUpButton, MD3Themeable {
             let titleString = titleOfSelectedItem ?? ""
             let titleSize = titleString.size(withAttributes: attrs)
             let titleRect = NSRect(
-                x: 12,
+                x: textX,
                 y: (bounds.height - titleSize.height) / 2,
-                width: bounds.width - 36,
+                width: max(bounds.width - textRightMargin, 0),
                 height: titleSize.height
             )
             titleString.draw(in: titleRect, withAttributes: attrs)
@@ -678,7 +693,7 @@ final class MD3PopUpButton: NSPopUpButton, MD3Themeable {
 
         // Draw custom chevron arrow
         let isFlipped = self.isFlipped
-        let iconCenterX = bounds.width - 18
+        let iconCenterX = isBorderless ? bounds.width - 6 : bounds.width - 18
         let iconCenterY = bounds.height / 2
 
         let pathArrow = NSBezierPath()

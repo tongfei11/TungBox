@@ -31,7 +31,20 @@ extension MainWindowController {
         titleCol.alignment = .leading
         titleCol.spacing = 3
 
-        // Header Pill 1: Wi-Fi status pill
+        func makeHeaderDivider() -> NSView {
+            let div = NSView()
+            div.wantsLayer = true
+            div.layer?.backgroundColor = MD3.outlineVariant.withAlphaComponent(0.35).cgColor
+            registerThemeObserver { [weak div] in
+                div?.layer?.backgroundColor = MD3.outlineVariant.withAlphaComponent(0.35).cgColor
+            }
+            div.translatesAutoresizingMaskIntoConstraints = false
+            div.widthAnchor.constraint(equalToConstant: 1).isActive = true
+            div.heightAnchor.constraint(equalToConstant: 13).isActive = true
+            return div
+        }
+
+        // Section 1: Wi-Fi status
         let wifiImageView = NSImageView()
         if let wifiIcon = NSImage(systemSymbolName: "wifi", accessibilityDescription: nil) {
             wifiIcon.isTemplate = true
@@ -39,8 +52,8 @@ extension MainWindowController {
         }
         wifiImageView.contentTintColor = MD3.primary
         wifiImageView.translatesAutoresizingMaskIntoConstraints = false
-        wifiImageView.widthAnchor.constraint(equalToConstant: 14).isActive = true
-        wifiImageView.heightAnchor.constraint(equalToConstant: 14).isActive = true
+        wifiImageView.widthAnchor.constraint(equalToConstant: 13).isActive = true
+        wifiImageView.heightAnchor.constraint(equalToConstant: 13).isActive = true
 
         wifiStatusLabel.font = .systemFont(ofSize: 11, weight: .medium)
         wifiStatusLabel.textColor = MD3.onSurface
@@ -50,43 +63,42 @@ extension MainWindowController {
             self?.wifiStatusLabel.stringValue = type.rawValue
         }
 
-        let wifiPill = MD3Panel()
-        wifiPill.type = .filled
-        wifiPill.translatesAutoresizingMaskIntoConstraints = false
         let wifiStack = NSStackView(views: [wifiImageView, wifiStatusLabel])
         wifiStack.orientation = .horizontal
         wifiStack.alignment = .centerY
-        wifiStack.spacing = 6
-        wifiStack.translatesAutoresizingMaskIntoConstraints = false
-        wifiPill.addSubview(wifiStack)
-        NSLayoutConstraint.activate([
-            wifiPill.heightAnchor.constraint(equalToConstant: 30),
-            wifiStack.leadingAnchor.constraint(equalTo: wifiPill.leadingAnchor, constant: 10),
-            wifiStack.trailingAnchor.constraint(equalTo: wifiPill.trailingAnchor, constant: -10),
-            wifiStack.centerYAnchor.constraint(equalTo: wifiPill.centerYAnchor)
-        ])
+        wifiStack.spacing = 5
 
-        // Header Pill 2: Profile / Subscription Popup
+        // Section 2: Profile / Subscription Popup
+        let profileTitleLabel = NSTextField(labelWithString: "配置")
+        profileTitleLabel.font = .systemFont(ofSize: 11)
+        profileTitleLabel.textColor = MD3.onSurfaceVariant
+
+        homeProfileSelectorPopup.isBorderless = true
+        homeProfileSelectorPopup.font = .systemFont(ofSize: 11, weight: .medium)
         homeProfileSelectorPopup.translatesAutoresizingMaskIntoConstraints = false
-        homeProfileSelectorPopup.heightAnchor.constraint(equalToConstant: 30).isActive = true
         homeProfileSelectorPopup.target = self
         homeProfileSelectorPopup.action = #selector(homeProfilePopupChanged(_:))
         refreshHomeProfilePopup()
 
-        // Header Pill 3: External IP Pill
-        let ipImageView = NSImageView()
-        if let ipIcon = NSImage(systemSymbolName: "network", accessibilityDescription: nil) {
-            ipIcon.isTemplate = true
-            ipImageView.image = ipIcon
-        }
-        ipImageView.contentTintColor = MD3.primary
-        ipImageView.translatesAutoresizingMaskIntoConstraints = false
-        ipImageView.widthAnchor.constraint(equalToConstant: 14).isActive = true
-        ipImageView.heightAnchor.constraint(equalToConstant: 14).isActive = true
+        let profileStack = NSStackView(views: [profileTitleLabel, homeProfileSelectorPopup])
+        profileStack.orientation = .horizontal
+        profileStack.alignment = .centerY
+        profileStack.spacing = 4
+
+        // Section 3: External IP
+        let ipTitleLabel = NSTextField(labelWithString: "外部 IP")
+        ipTitleLabel.font = .systemFont(ofSize: 11)
+        ipTitleLabel.textColor = MD3.onSurfaceVariant
 
         externalIPLabel.font = .systemFont(ofSize: 11, weight: .medium)
         externalIPLabel.textColor = MD3.onSurface
 
+        let ipStack = NSStackView(views: [ipTitleLabel, externalIPLabel])
+        ipStack.orientation = .horizontal
+        ipStack.alignment = .centerY
+        ipStack.spacing = 4
+
+        // Section 4: External IP Reload
         externalIPRefreshButton.bezelStyle = .inline
         externalIPRefreshButton.isBordered = false
         externalIPRefreshButton.title = ""
@@ -99,39 +111,49 @@ extension MainWindowController {
         externalIPRefreshButton.action = #selector(refreshExternalIPClicked(_:))
         externalIPRefreshButton.toolTip = "刷新公网 IP"
         externalIPRefreshButton.translatesAutoresizingMaskIntoConstraints = false
-        externalIPRefreshButton.widthAnchor.constraint(equalToConstant: 14).isActive = true
-        externalIPRefreshButton.heightAnchor.constraint(equalToConstant: 14).isActive = true
-
-        let ipPill = MD3Panel()
-        ipPill.type = .filled
-        ipPill.translatesAutoresizingMaskIntoConstraints = false
-        let ipStack = NSStackView(views: [ipImageView, externalIPLabel, externalIPRefreshButton])
-        ipStack.orientation = .horizontal
-        ipStack.alignment = .centerY
-        ipStack.spacing = 6
-        ipStack.translatesAutoresizingMaskIntoConstraints = false
-        ipPill.addSubview(ipStack)
-        NSLayoutConstraint.activate([
-            ipPill.heightAnchor.constraint(equalToConstant: 30),
-            ipStack.leadingAnchor.constraint(equalTo: ipPill.leadingAnchor, constant: 10),
-            ipStack.trailingAnchor.constraint(equalTo: ipPill.trailingAnchor, constant: -10),
-            ipStack.centerYAnchor.constraint(equalTo: ipPill.centerYAnchor)
-        ])
+        externalIPRefreshButton.widthAnchor.constraint(equalToConstant: 13).isActive = true
+        externalIPRefreshButton.heightAnchor.constraint(equalToConstant: 13).isActive = true
 
         refreshExternalIP(force: false)
 
-        let headerAccessories = NSStackView(views: [wifiPill, homeProfileSelectorPopup, ipPill])
-        headerAccessories.orientation = .horizontal
-        headerAccessories.alignment = .centerY
-        headerAccessories.spacing = 8
+        let div1 = makeHeaderDivider()
+        let div2 = makeHeaderDivider()
+        let div3 = makeHeaderDivider()
 
-        let headerSpacer = NSView()
-        headerSpacer.translatesAutoresizingMaskIntoConstraints = false
-        let headerRow = NSStackView(views: [titleCol, headerSpacer, headerAccessories])
-        headerRow.orientation = .horizontal
-        headerRow.distribution = .fill
-        headerRow.alignment = .centerY
+        let pillStack = NSStackView(views: [wifiStack, div1, profileStack, div2, ipStack, div3, externalIPRefreshButton])
+        pillStack.orientation = .horizontal
+        pillStack.alignment = .centerY
+        pillStack.spacing = 9
+        pillStack.translatesAutoresizingMaskIntoConstraints = false
+
+        let unifiedHeaderPill = MD3Panel()
+        unifiedHeaderPill.type = .filled
+        unifiedHeaderPill.wantsLayer = true
+        unifiedHeaderPill.layer?.cornerRadius = 15.5
+        unifiedHeaderPill.layer?.masksToBounds = true
+        unifiedHeaderPill.translatesAutoresizingMaskIntoConstraints = false
+        unifiedHeaderPill.addSubview(pillStack)
+
+        NSLayoutConstraint.activate([
+            unifiedHeaderPill.heightAnchor.constraint(equalToConstant: 31),
+            pillStack.leadingAnchor.constraint(equalTo: unifiedHeaderPill.leadingAnchor, constant: 14),
+            pillStack.trailingAnchor.constraint(equalTo: unifiedHeaderPill.trailingAnchor, constant: -14),
+            pillStack.centerYAnchor.constraint(equalTo: unifiedHeaderPill.centerYAnchor)
+        ])
+
+        let headerRow = NSView()
         headerRow.translatesAutoresizingMaskIntoConstraints = false
+        headerRow.addSubview(titleCol)
+        headerRow.addSubview(unifiedHeaderPill)
+
+        NSLayoutConstraint.activate([
+            titleCol.leadingAnchor.constraint(equalTo: headerRow.leadingAnchor),
+            titleCol.topAnchor.constraint(equalTo: headerRow.topAnchor),
+            titleCol.bottomAnchor.constraint(equalTo: headerRow.bottomAnchor),
+
+            unifiedHeaderPill.trailingAnchor.constraint(equalTo: headerRow.trailingAnchor),
+            unifiedHeaderPill.centerYAnchor.constraint(equalTo: title.centerYAnchor)
+        ])
 
         // Card 1: 系统代理
         statusChip.translatesAutoresizingMaskIntoConstraints = false
@@ -306,14 +328,29 @@ extension MainWindowController {
         speedSublabel.font = .systemFont(ofSize: 11)
         speedSublabel.textColor = MD3.onSurfaceVariant.withAlphaComponent(0.7)
 
-        func makeSpeedRow(iconName: String, iconColor: NSColor, tagText: String, valueLabel: NSTextField, chartView: SpeedWaveChartView) -> NSStackView {
+        func makeSpeedSubcard(
+            iconName: String,
+            iconColor: NSColor,
+            tagText: String,
+            valueLabel: NSTextField,
+            chartView: SpeedWaveChartView
+        ) -> NSView {
+            let subcard = NSView()
+            subcard.wantsLayer = true
+            subcard.layer?.cornerRadius = 10
+            subcard.layer?.backgroundColor = MD3.surfaceContainer.mixed(with: MD3.surface, ratio: 0.25).cgColor
+            registerThemeObserver { [weak subcard] in
+                subcard?.layer?.backgroundColor = MD3.surfaceContainer.mixed(with: MD3.surface, ratio: 0.25).cgColor
+            }
+            subcard.translatesAutoresizingMaskIntoConstraints = false
+
             let iconContainer = NSView()
             iconContainer.wantsLayer = true
-            iconContainer.layer?.cornerRadius = 9
+            iconContainer.layer?.cornerRadius = 10
             iconContainer.layer?.backgroundColor = iconColor.withAlphaComponent(0.18).cgColor
             iconContainer.translatesAutoresizingMaskIntoConstraints = false
-            iconContainer.widthAnchor.constraint(equalToConstant: 18).isActive = true
-            iconContainer.heightAnchor.constraint(equalToConstant: 18).isActive = true
+            iconContainer.widthAnchor.constraint(equalToConstant: 20).isActive = true
+            iconContainer.heightAnchor.constraint(equalToConstant: 20).isActive = true
 
             if let img = NSImage(systemSymbolName: iconName, accessibilityDescription: nil) {
                 img.isTemplate = true
@@ -324,21 +361,21 @@ extension MainWindowController {
                 NSLayoutConstraint.activate([
                     iv.centerXAnchor.constraint(equalTo: iconContainer.centerXAnchor),
                     iv.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor),
-                    iv.widthAnchor.constraint(equalToConstant: 11),
-                    iv.heightAnchor.constraint(equalToConstant: 11)
+                    iv.widthAnchor.constraint(equalToConstant: 12),
+                    iv.heightAnchor.constraint(equalToConstant: 12)
                 ])
             }
 
             let tagLabel = NSTextField(labelWithString: tagText)
-            tagLabel.font = .systemFont(ofSize: 11)
-            tagLabel.textColor = MD3.onSurfaceVariant
+            tagLabel.font = .systemFont(ofSize: 12, weight: .medium)
+            tagLabel.textColor = MD3.onSurface
 
             let tagHeader = NSStackView(views: [iconContainer, tagLabel])
             tagHeader.orientation = .horizontal
             tagHeader.alignment = .centerY
-            tagHeader.spacing = 5
+            tagHeader.spacing = 6
 
-            valueLabel.font = .systemFont(ofSize: 15, weight: .bold)
+            valueLabel.font = .systemFont(ofSize: 19, weight: .bold)
             valueLabel.textColor = iconColor
 
             let textCol = NSStackView(views: [tagHeader, valueLabel])
@@ -346,36 +383,45 @@ extension MainWindowController {
             textCol.alignment = .leading
             textCol.spacing = 3
             textCol.translatesAutoresizingMaskIntoConstraints = false
-            textCol.widthAnchor.constraint(equalToConstant: 92).isActive = true
+            textCol.widthAnchor.constraint(equalToConstant: 95).isActive = true
 
             chartView.translatesAutoresizingMaskIntoConstraints = false
-            chartView.heightAnchor.constraint(equalToConstant: 42).isActive = true
 
             let row = NSStackView(views: [textCol, chartView])
             row.orientation = .horizontal
             row.alignment = .centerY
-            row.spacing = 8
+            row.spacing = 6
             row.distribution = .fill
             row.translatesAutoresizingMaskIntoConstraints = false
-            chartView.trailingAnchor.constraint(equalTo: row.trailingAnchor).isActive = true
-            return row
+            subcard.addSubview(row)
+
+            NSLayoutConstraint.activate([
+                subcard.heightAnchor.constraint(equalToConstant: 64),
+                row.leadingAnchor.constraint(equalTo: subcard.leadingAnchor, constant: 10),
+                row.trailingAnchor.constraint(equalTo: subcard.trailingAnchor, constant: -6),
+                row.topAnchor.constraint(equalTo: subcard.topAnchor, constant: 6),
+                row.bottomAnchor.constraint(equalTo: subcard.bottomAnchor, constant: -6),
+                chartView.heightAnchor.constraint(equalTo: row.heightAnchor)
+            ])
+
+            return subcard
         }
 
         uploadWaveChartView.lineColor = MD3.primary
         downloadWaveChartView.lineColor = NSColor(calibratedRed: 0.22, green: 0.74, blue: 0.97, alpha: 1.0)
 
-        let uploadRow = makeSpeedRow(iconName: "arrow.up", iconColor: MD3.primary, tagText: "上传", valueLabel: uploadValueLabel, chartView: uploadWaveChartView)
-        let downloadRow = makeSpeedRow(iconName: "arrow.down", iconColor: NSColor(calibratedRed: 0.22, green: 0.74, blue: 0.97, alpha: 1.0), tagText: "下载", valueLabel: downloadValueLabel, chartView: downloadWaveChartView)
+        let uploadSubcard = makeSpeedSubcard(iconName: "arrow.up", iconColor: MD3.primary, tagText: "上传", valueLabel: uploadValueLabel, chartView: uploadWaveChartView)
+        let downloadSubcard = makeSpeedSubcard(iconName: "arrow.down", iconColor: NSColor(calibratedRed: 0.22, green: 0.74, blue: 0.97, alpha: 1.0), tagText: "下载", valueLabel: downloadValueLabel, chartView: downloadWaveChartView)
 
-        let speedStack = NSStackView(views: [uploadRow, downloadRow])
+        let speedStack = NSStackView(views: [uploadSubcard, downloadSubcard])
         speedStack.orientation = .vertical
         speedStack.alignment = .leading
-        speedStack.spacing = 10
+        speedStack.spacing = 8
         speedStack.translatesAutoresizingMaskIntoConstraints = false
-        uploadRow.leadingAnchor.constraint(equalTo: speedStack.leadingAnchor).isActive = true
-        uploadRow.trailingAnchor.constraint(equalTo: speedStack.trailingAnchor).isActive = true
-        downloadRow.leadingAnchor.constraint(equalTo: speedStack.leadingAnchor).isActive = true
-        downloadRow.trailingAnchor.constraint(equalTo: speedStack.trailingAnchor).isActive = true
+        uploadSubcard.leadingAnchor.constraint(equalTo: speedStack.leadingAnchor).isActive = true
+        uploadSubcard.trailingAnchor.constraint(equalTo: speedStack.trailingAnchor).isActive = true
+        downloadSubcard.leadingAnchor.constraint(equalTo: speedStack.leadingAnchor).isActive = true
+        downloadSubcard.trailingAnchor.constraint(equalTo: speedStack.trailingAnchor).isActive = true
 
         let realtimeSpeedCard = homeCard(
             title: "实时速度",
@@ -385,7 +431,7 @@ extension MainWindowController {
         )
 
         // Card 7: 活动连接
-        connectionsValueLabel.font = .systemFont(ofSize: 26, weight: .bold)
+        connectionsValueLabel.font = .systemFont(ofSize: 28, weight: .bold)
         connectionsValueLabel.textColor = MD3.onSurface
         let connUnit = NSTextField(labelWithString: "个活动连接")
         connUnit.font = .systemFont(ofSize: 11)
@@ -396,8 +442,8 @@ extension MainWindowController {
         connTextCol.spacing = 1
 
         equalizerBarsView.translatesAutoresizingMaskIntoConstraints = false
-        equalizerBarsView.heightAnchor.constraint(equalToConstant: 22).isActive = true
-        equalizerBarsView.widthAnchor.constraint(equalToConstant: 60).isActive = true
+        equalizerBarsView.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        equalizerBarsView.widthAnchor.constraint(equalToConstant: 102).isActive = true
 
         let connSpacer = NSView()
         connSpacer.translatesAutoresizingMaskIntoConstraints = false
@@ -405,27 +451,27 @@ extension MainWindowController {
 
         let connRow = NSStackView(views: [connTextCol, connSpacer, equalizerBarsView])
         connRow.orientation = .horizontal
-        connRow.alignment = .centerY
+        connRow.alignment = .bottom
         connRow.distribution = .fill
         connRow.translatesAutoresizingMaskIntoConstraints = false
 
         // Memory Subcard (单独底色)
         let memSubcard = NSView()
         memSubcard.wantsLayer = true
-        memSubcard.layer?.cornerRadius = 8
-        memSubcard.layer?.backgroundColor = MD3.surfaceContainer.mixed(with: MD3.surface, ratio: 0.5).cgColor
+        memSubcard.layer?.cornerRadius = 10
+        memSubcard.layer?.backgroundColor = MD3.surfaceContainer.mixed(with: MD3.surface, ratio: 0.3).cgColor
         registerThemeObserver { [weak memSubcard] in
-            memSubcard?.layer?.backgroundColor = MD3.surfaceContainer.mixed(with: MD3.surface, ratio: 0.5).cgColor
+            memSubcard?.layer?.backgroundColor = MD3.surfaceContainer.mixed(with: MD3.surface, ratio: 0.3).cgColor
         }
         memSubcard.translatesAutoresizingMaskIntoConstraints = false
 
         let memIconContainer = NSView()
         memIconContainer.wantsLayer = true
-        memIconContainer.layer?.cornerRadius = 6
-        memIconContainer.layer?.backgroundColor = MD3.primary.withAlphaComponent(0.16).cgColor
+        memIconContainer.layer?.cornerRadius = 8
+        memIconContainer.layer?.backgroundColor = MD3.primary.withAlphaComponent(0.18).cgColor
         memIconContainer.translatesAutoresizingMaskIntoConstraints = false
-        memIconContainer.widthAnchor.constraint(equalToConstant: 24).isActive = true
-        memIconContainer.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        memIconContainer.widthAnchor.constraint(equalToConstant: 30).isActive = true
+        memIconContainer.heightAnchor.constraint(equalToConstant: 30).isActive = true
 
         if let memImg = NSImage(systemSymbolName: "memorychip", accessibilityDescription: nil) ?? NSImage(systemSymbolName: "cpu", accessibilityDescription: nil) {
             memImg.isTemplate = true
@@ -436,26 +482,26 @@ extension MainWindowController {
             NSLayoutConstraint.activate([
                 iv.centerXAnchor.constraint(equalTo: memIconContainer.centerXAnchor),
                 iv.centerYAnchor.constraint(equalTo: memIconContainer.centerYAnchor),
-                iv.widthAnchor.constraint(equalToConstant: 14),
-                iv.heightAnchor.constraint(equalToConstant: 14)
+                iv.widthAnchor.constraint(equalToConstant: 18),
+                iv.heightAnchor.constraint(equalToConstant: 18)
             ])
         }
 
         let memTitle = NSTextField(labelWithString: "内存占用")
-        memTitle.font = .systemFont(ofSize: 10, weight: .medium)
+        memTitle.font = .systemFont(ofSize: 11, weight: .regular)
         memTitle.textColor = MD3.onSurfaceVariant
 
-        memoryValueLabel.font = .systemFont(ofSize: 13, weight: .bold)
+        memoryValueLabel.font = .systemFont(ofSize: 15, weight: .bold)
         memoryValueLabel.textColor = MD3.onSurface
 
         let memInfoCol = NSStackView(views: [memTitle, memoryValueLabel])
         memInfoCol.orientation = .vertical
         memInfoCol.alignment = .leading
-        memInfoCol.spacing = 1
+        memInfoCol.spacing = 2
 
         memoryRingView.translatesAutoresizingMaskIntoConstraints = false
-        memoryRingView.heightAnchor.constraint(equalToConstant: 28).isActive = true
-        memoryRingView.widthAnchor.constraint(equalToConstant: 58).isActive = true
+        memoryRingView.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        memoryRingView.widthAnchor.constraint(equalToConstant: 64).isActive = true
 
         let memSpacer = NSView()
         memSpacer.translatesAutoresizingMaskIntoConstraints = false
@@ -464,21 +510,22 @@ extension MainWindowController {
         let memRow = NSStackView(views: [memIconContainer, memInfoCol, memSpacer, memoryRingView])
         memRow.orientation = .horizontal
         memRow.alignment = .centerY
-        memRow.spacing = 8
+        memRow.spacing = 10
         memRow.translatesAutoresizingMaskIntoConstraints = false
         memSubcard.addSubview(memRow)
 
         NSLayoutConstraint.activate([
-            memRow.leadingAnchor.constraint(equalTo: memSubcard.leadingAnchor, constant: 10),
-            memRow.trailingAnchor.constraint(equalTo: memSubcard.trailingAnchor, constant: -10),
-            memRow.topAnchor.constraint(equalTo: memSubcard.topAnchor, constant: 7),
-            memRow.bottomAnchor.constraint(equalTo: memSubcard.bottomAnchor, constant: -7)
+            memSubcard.heightAnchor.constraint(equalToConstant: 58),
+            memRow.leadingAnchor.constraint(equalTo: memSubcard.leadingAnchor, constant: 12),
+            memRow.trailingAnchor.constraint(equalTo: memSubcard.trailingAnchor, constant: -12),
+            memRow.centerYAnchor.constraint(equalTo: memSubcard.centerYAnchor),
+            equalizerBarsView.bottomAnchor.constraint(equalTo: connUnit.bottomAnchor)
         ])
 
         let connAndMemStack = NSStackView(views: [connRow, memSubcard])
         connAndMemStack.orientation = .vertical
         connAndMemStack.alignment = .leading
-        connAndMemStack.spacing = 10
+        connAndMemStack.spacing = 14
         connAndMemStack.translatesAutoresizingMaskIntoConstraints = false
         connRow.leadingAnchor.constraint(equalTo: connAndMemStack.leadingAnchor).isActive = true
         connRow.trailingAnchor.constraint(equalTo: connAndMemStack.trailingAnchor).isActive = true
@@ -493,47 +540,46 @@ extension MainWindowController {
 
         // Card 8: 流量去向
         trafficDonutChartView.translatesAutoresizingMaskIntoConstraints = false
-        trafficDonutChartView.widthAnchor.constraint(equalToConstant: 92).isActive = true
-        trafficDonutChartView.heightAnchor.constraint(equalToConstant: 92).isActive = true
+        trafficDonutChartView.widthAnchor.constraint(equalToConstant: 114).isActive = true
+        trafficDonutChartView.heightAnchor.constraint(equalToConstant: 114).isActive = true
 
         func makeLegendTabularRow(color: NSColor, name: String, amountLabel: NSTextField, ratioLabel: NSTextField) -> NSStackView {
             let dot = NSView()
             dot.wantsLayer = true
             dot.layer?.backgroundColor = color.cgColor
-            dot.layer?.cornerRadius = 3.5
+            dot.layer?.cornerRadius = 4
             dot.translatesAutoresizingMaskIntoConstraints = false
-            dot.widthAnchor.constraint(equalToConstant: 7).isActive = true
-            dot.heightAnchor.constraint(equalToConstant: 7).isActive = true
+            dot.widthAnchor.constraint(equalToConstant: 8).isActive = true
+            dot.heightAnchor.constraint(equalToConstant: 8).isActive = true
 
             let nameLabel = NSTextField(labelWithString: name)
-            nameLabel.font = .systemFont(ofSize: 11)
-            nameLabel.textColor = MD3.onSurfaceVariant
+            nameLabel.font = .systemFont(ofSize: 12, weight: .medium)
+            nameLabel.textColor = MD3.onSurface
             nameLabel.translatesAutoresizingMaskIntoConstraints = false
-            nameLabel.widthAnchor.constraint(equalToConstant: 34).isActive = true
 
             let nameStack = NSStackView(views: [dot, nameLabel])
             nameStack.orientation = .horizontal
             nameStack.alignment = .centerY
-            nameStack.spacing = 5
+            nameStack.spacing = 6
             nameStack.translatesAutoresizingMaskIntoConstraints = false
-            nameStack.widthAnchor.constraint(equalToConstant: 48).isActive = true
+            nameStack.widthAnchor.constraint(equalToConstant: 44).isActive = true
 
-            amountLabel.font = .systemFont(ofSize: 11, weight: .bold)
+            amountLabel.font = .systemFont(ofSize: 12, weight: .bold)
             amountLabel.textColor = MD3.onSurface
             amountLabel.alignment = .right
             amountLabel.translatesAutoresizingMaskIntoConstraints = false
-            amountLabel.widthAnchor.constraint(equalToConstant: 52).isActive = true
+            amountLabel.widthAnchor.constraint(equalToConstant: 54).isActive = true
 
-            ratioLabel.font = .systemFont(ofSize: 11)
+            ratioLabel.font = .systemFont(ofSize: 12)
             ratioLabel.textColor = MD3.onSurfaceVariant
             ratioLabel.alignment = .right
             ratioLabel.translatesAutoresizingMaskIntoConstraints = false
-            ratioLabel.widthAnchor.constraint(equalToConstant: 32).isActive = true
+            ratioLabel.widthAnchor.constraint(equalToConstant: 34).isActive = true
 
             let row = NSStackView(views: [nameStack, amountLabel, ratioLabel])
             row.orientation = .horizontal
             row.alignment = .centerY
-            row.spacing = 6
+            row.spacing = 8
             row.distribution = .fill
             return row
         }
@@ -545,12 +591,12 @@ extension MainWindowController {
         let legendStack = NSStackView(views: [proxyRow, directRow, otherRow])
         legendStack.orientation = .vertical
         legendStack.alignment = .leading
-        legendStack.spacing = 10
+        legendStack.spacing = 12
 
         let donutContentStack = NSStackView(views: [trafficDonutChartView, legendStack])
         donutContentStack.orientation = .horizontal
         donutContentStack.alignment = .centerY
-        donutContentStack.spacing = 14
+        donutContentStack.spacing = 10
         donutContentStack.translatesAutoresizingMaskIntoConstraints = false
 
         let trafficDestinationCard = homeCard(
@@ -627,20 +673,22 @@ extension MainWindowController {
 
             doc.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
 
-            headerRow.leadingAnchor.constraint(equalTo: doc.leadingAnchor, constant: 20),
-            headerRow.trailingAnchor.constraint(equalTo: doc.trailingAnchor, constant: -20),
+            headerRow.leadingAnchor.constraint(equalTo: doc.leadingAnchor, constant: 16),
+            headerRow.trailingAnchor.constraint(equalTo: doc.trailingAnchor, constant: -16),
             headerRow.topAnchor.constraint(equalTo: doc.topAnchor, constant: 18),
 
-            grid.leadingAnchor.constraint(equalTo: doc.leadingAnchor, constant: 20),
-            grid.trailingAnchor.constraint(equalTo: doc.trailingAnchor, constant: -20),
+            grid.leadingAnchor.constraint(equalTo: doc.leadingAnchor, constant: 16),
+            grid.trailingAnchor.constraint(equalTo: doc.trailingAnchor, constant: -16),
             grid.topAnchor.constraint(equalTo: headerRow.bottomAnchor, constant: 14),
             grid.bottomAnchor.constraint(equalTo: doc.bottomAnchor, constant: -20)
         ])
 
-        registerThemeObserver { [weak self, weak title, weak subtitle, weak wifiImageView, weak ipImageView] in
+        registerThemeObserver { [weak self, weak title, weak subtitle, weak wifiImageView, weak profileTitleLabel, weak ipTitleLabel] in
             guard let self = self else { return }
             title?.textColor = MD3.onSurface
             subtitle?.textColor = MD3.onSurfaceVariant
+            profileTitleLabel?.textColor = MD3.onSurfaceVariant
+            ipTitleLabel?.textColor = MD3.onSurfaceVariant
             self.currentNodeNameLabel.textColor = MD3.onSurface
             self.currentNodeDelayLabel.textColor = MD3.latencyTextColor(self.currentNodeDelayLabel.stringValue)
             self.trafficTotalValueLabel.textColor = MD3.onSurface
@@ -657,7 +705,6 @@ extension MainWindowController {
             self.donutDirectAmountLabel.textColor = MD3.onSurface
             self.donutOtherAmountLabel.textColor = MD3.onSurface
             wifiImageView?.contentTintColor = MD3.primary
-            ipImageView?.contentTintColor = MD3.primary
             self.wifiStatusLabel.textColor = MD3.onSurface
             self.externalIPLabel.textColor = MD3.onSurface
             self.externalIPRefreshButton.contentTintColor = MD3.onSurfaceVariant

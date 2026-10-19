@@ -27,8 +27,8 @@ final class TrafficDonutChartView: NSView, MD3Themeable {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
 
         let center = CGPoint(x: bounds.midX, y: bounds.midY)
-        let strokeWidth: CGFloat = 14
-        let radius = min(bounds.width, bounds.height) / 2 - strokeWidth / 2 - 4
+        let strokeWidth: CGFloat = 16
+        let radius = min(bounds.width, bounds.height) / 2 - strokeWidth / 2 - 2
         guard radius > 10 else { return }
 
         // Slices
@@ -64,11 +64,11 @@ final class TrafficDonutChartView: NSView, MD3Themeable {
 
         // Center Text
         let titleAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 15, weight: .bold),
+            .font: NSFont.systemFont(ofSize: 16, weight: .bold),
             .foregroundColor: MD3.onSurface
         ]
         let subAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 10, weight: .regular),
+            .font: NSFont.systemFont(ofSize: 11, weight: .regular),
             .foregroundColor: MD3.onSurfaceVariant
         ]
 
@@ -76,8 +76,15 @@ final class TrafficDonutChartView: NSView, MD3Themeable {
         let subSize = (centerSubText as NSString).size(withAttributes: subAttrs)
         let totalH = titleSize.height + subSize.height + 2
 
-        let titleY = center.y - totalH / 2 + subSize.height + 2
-        let subY = center.y - totalH / 2
+        let titleY: CGFloat
+        let subY: CGFloat
+        if isFlipped {
+            titleY = center.y - totalH / 2
+            subY = titleY + titleSize.height + 2
+        } else {
+            subY = center.y - totalH / 2
+            titleY = subY + subSize.height + 2
+        }
 
         let titleRect = CGRect(x: center.x - titleSize.width / 2, y: titleY, width: titleSize.width, height: titleSize.height)
         let subRect = CGRect(x: center.x - subSize.width / 2, y: subY, width: subSize.width, height: subSize.height)
