@@ -31,7 +31,7 @@ enum HomeDashboardLayout {
         let spacing: CGFloat = 12
 
         NSLayoutConstraint.activate([
-            // --- Row 1 (4 Cards: 192 : 176 : 226 : 168, Height: 82) ---
+            // --- Row 1 (4 Cards: 192 : 176 : 226 : 168, Height: 90) ---
             systemProxyCard.topAnchor.constraint(equalTo: container.topAnchor),
             systemProxyCard.leadingAnchor.constraint(equalTo: container.leadingAnchor),
 
@@ -48,12 +48,12 @@ enum HomeDashboardLayout {
             currentNodeCard.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             currentNodeCard.widthAnchor.constraint(equalTo: systemProxyCard.widthAnchor, multiplier: 168.0 / 192.0),
 
-            systemProxyCard.heightAnchor.constraint(equalToConstant: 82),
+            systemProxyCard.heightAnchor.constraint(equalToConstant: 90),
             tunCard.heightAnchor.constraint(equalTo: systemProxyCard.heightAnchor),
             outboundCard.heightAnchor.constraint(equalTo: systemProxyCard.heightAnchor),
             currentNodeCard.heightAnchor.constraint(equalTo: systemProxyCard.heightAnchor),
 
-            // --- Row 2 (Traffic Trend 506 : Realtime Speed 277, Height: 195) ---
+            // --- Row 2 (Traffic Trend 506 : Realtime Speed 277, Height: 215) ---
             trafficTrendCard.topAnchor.constraint(equalTo: systemProxyCard.bottomAnchor, constant: spacing),
             trafficTrendCard.leadingAnchor.constraint(equalTo: container.leadingAnchor),
 
@@ -62,10 +62,10 @@ enum HomeDashboardLayout {
             realtimeSpeedCard.trailingAnchor.constraint(equalTo: container.trailingAnchor),
 
             trafficTrendCard.widthAnchor.constraint(equalTo: container.widthAnchor, multiplier: 506.0 / 794.0, constant: -spacing * 0.5),
-            trafficTrendCard.heightAnchor.constraint(equalToConstant: 195),
+            trafficTrendCard.heightAnchor.constraint(equalToConstant: 215),
             realtimeSpeedCard.heightAnchor.constraint(equalTo: trafficTrendCard.heightAnchor),
 
-            // --- Row 3 (Connections 251 : Destinations 279 : Recent Status 243, Height: 180) ---
+            // --- Row 3 (Connections 251 : Destinations 279 : Recent Status 243, Height: 200) ---
             activeConnectionsCard.topAnchor.constraint(equalTo: trafficTrendCard.bottomAnchor, constant: spacing),
             activeConnectionsCard.leadingAnchor.constraint(equalTo: container.leadingAnchor),
 
@@ -78,7 +78,7 @@ enum HomeDashboardLayout {
             recentStatusCard.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             recentStatusCard.widthAnchor.constraint(equalTo: activeConnectionsCard.widthAnchor, multiplier: 243.0 / 251.0),
 
-            activeConnectionsCard.heightAnchor.constraint(equalToConstant: 180),
+            activeConnectionsCard.heightAnchor.constraint(equalToConstant: 200),
             trafficDestinationCard.heightAnchor.constraint(equalTo: activeConnectionsCard.heightAnchor),
             recentStatusCard.heightAnchor.constraint(equalTo: activeConnectionsCard.heightAnchor),
 

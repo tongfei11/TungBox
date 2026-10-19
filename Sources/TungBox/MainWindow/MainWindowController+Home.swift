@@ -396,11 +396,11 @@ extension MainWindowController {
             subcard.addSubview(row)
 
             NSLayoutConstraint.activate([
-                subcard.heightAnchor.constraint(equalToConstant: 64),
-                row.leadingAnchor.constraint(equalTo: subcard.leadingAnchor, constant: 10),
-                row.trailingAnchor.constraint(equalTo: subcard.trailingAnchor, constant: -6),
-                row.topAnchor.constraint(equalTo: subcard.topAnchor, constant: 6),
-                row.bottomAnchor.constraint(equalTo: subcard.bottomAnchor, constant: -6),
+                subcard.heightAnchor.constraint(equalToConstant: 72),
+                row.leadingAnchor.constraint(equalTo: subcard.leadingAnchor, constant: 12),
+                row.trailingAnchor.constraint(equalTo: subcard.trailingAnchor, constant: -8),
+                row.topAnchor.constraint(equalTo: subcard.topAnchor, constant: 8),
+                row.bottomAnchor.constraint(equalTo: subcard.bottomAnchor, constant: -8),
                 chartView.heightAnchor.constraint(equalTo: row.heightAnchor)
             ])
 
@@ -416,7 +416,7 @@ extension MainWindowController {
         let speedStack = NSStackView(views: [uploadSubcard, downloadSubcard])
         speedStack.orientation = .vertical
         speedStack.alignment = .leading
-        speedStack.spacing = 8
+        speedStack.spacing = 10
         speedStack.translatesAutoresizingMaskIntoConstraints = false
         uploadSubcard.leadingAnchor.constraint(equalTo: speedStack.leadingAnchor).isActive = true
         uploadSubcard.trailingAnchor.constraint(equalTo: speedStack.trailingAnchor).isActive = true
@@ -442,8 +442,8 @@ extension MainWindowController {
         connTextCol.spacing = 1
 
         equalizerBarsView.translatesAutoresizingMaskIntoConstraints = false
-        equalizerBarsView.heightAnchor.constraint(equalToConstant: 32).isActive = true
-        equalizerBarsView.widthAnchor.constraint(equalToConstant: 102).isActive = true
+        equalizerBarsView.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        equalizerBarsView.widthAnchor.constraint(equalToConstant: 108).isActive = true
 
         let connSpacer = NSView()
         connSpacer.translatesAutoresizingMaskIntoConstraints = false
@@ -470,8 +470,8 @@ extension MainWindowController {
         memIconContainer.layer?.cornerRadius = 8
         memIconContainer.layer?.backgroundColor = MD3.primary.withAlphaComponent(0.18).cgColor
         memIconContainer.translatesAutoresizingMaskIntoConstraints = false
-        memIconContainer.widthAnchor.constraint(equalToConstant: 30).isActive = true
-        memIconContainer.heightAnchor.constraint(equalToConstant: 30).isActive = true
+        memIconContainer.widthAnchor.constraint(equalToConstant: 34).isActive = true
+        memIconContainer.heightAnchor.constraint(equalToConstant: 34).isActive = true
 
         if let memImg = NSImage(systemSymbolName: "memorychip", accessibilityDescription: nil) ?? NSImage(systemSymbolName: "cpu", accessibilityDescription: nil) {
             memImg.isTemplate = true
@@ -482,8 +482,8 @@ extension MainWindowController {
             NSLayoutConstraint.activate([
                 iv.centerXAnchor.constraint(equalTo: memIconContainer.centerXAnchor),
                 iv.centerYAnchor.constraint(equalTo: memIconContainer.centerYAnchor),
-                iv.widthAnchor.constraint(equalToConstant: 18),
-                iv.heightAnchor.constraint(equalToConstant: 18)
+                iv.widthAnchor.constraint(equalToConstant: 20),
+                iv.heightAnchor.constraint(equalToConstant: 20)
             ])
         }
 
@@ -491,7 +491,7 @@ extension MainWindowController {
         memTitle.font = .systemFont(ofSize: 11, weight: .regular)
         memTitle.textColor = MD3.onSurfaceVariant
 
-        memoryValueLabel.font = .systemFont(ofSize: 15, weight: .bold)
+        memoryValueLabel.font = .systemFont(ofSize: 16, weight: .bold)
         memoryValueLabel.textColor = MD3.onSurface
 
         let memInfoCol = NSStackView(views: [memTitle, memoryValueLabel])
@@ -500,8 +500,8 @@ extension MainWindowController {
         memInfoCol.spacing = 2
 
         memoryRingView.translatesAutoresizingMaskIntoConstraints = false
-        memoryRingView.heightAnchor.constraint(equalToConstant: 34).isActive = true
-        memoryRingView.widthAnchor.constraint(equalToConstant: 64).isActive = true
+        memoryRingView.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        memoryRingView.widthAnchor.constraint(equalToConstant: 68).isActive = true
 
         let memSpacer = NSView()
         memSpacer.translatesAutoresizingMaskIntoConstraints = false
@@ -515,7 +515,7 @@ extension MainWindowController {
         memSubcard.addSubview(memRow)
 
         NSLayoutConstraint.activate([
-            memSubcard.heightAnchor.constraint(equalToConstant: 58),
+            memSubcard.heightAnchor.constraint(equalToConstant: 62),
             memRow.leadingAnchor.constraint(equalTo: memSubcard.leadingAnchor, constant: 12),
             memRow.trailingAnchor.constraint(equalTo: memSubcard.trailingAnchor, constant: -12),
             memRow.centerYAnchor.constraint(equalTo: memSubcard.centerYAnchor),
@@ -525,7 +525,7 @@ extension MainWindowController {
         let connAndMemStack = NSStackView(views: [connRow, memSubcard])
         connAndMemStack.orientation = .vertical
         connAndMemStack.alignment = .leading
-        connAndMemStack.spacing = 14
+        connAndMemStack.spacing = 16
         connAndMemStack.translatesAutoresizingMaskIntoConstraints = false
         connRow.leadingAnchor.constraint(equalTo: connAndMemStack.leadingAnchor).isActive = true
         connRow.trailingAnchor.constraint(equalTo: connAndMemStack.trailingAnchor).isActive = true
@@ -540,8 +540,8 @@ extension MainWindowController {
 
         // Card 8: 流量去向
         trafficDonutChartView.translatesAutoresizingMaskIntoConstraints = false
-        trafficDonutChartView.widthAnchor.constraint(equalToConstant: 114).isActive = true
-        trafficDonutChartView.heightAnchor.constraint(equalToConstant: 114).isActive = true
+        trafficDonutChartView.widthAnchor.constraint(equalToConstant: 120).isActive = true
+        trafficDonutChartView.heightAnchor.constraint(equalToConstant: 120).isActive = true
 
         func makeLegendTabularRow(color: NSColor, name: String, amountLabel: NSTextField, ratioLabel: NSTextField) -> NSStackView {
             let dot = NSView()
@@ -562,24 +562,24 @@ extension MainWindowController {
             nameStack.alignment = .centerY
             nameStack.spacing = 6
             nameStack.translatesAutoresizingMaskIntoConstraints = false
-            nameStack.widthAnchor.constraint(equalToConstant: 44).isActive = true
+            nameStack.widthAnchor.constraint(equalToConstant: 46).isActive = true
 
             amountLabel.font = .systemFont(ofSize: 12, weight: .bold)
             amountLabel.textColor = MD3.onSurface
             amountLabel.alignment = .right
             amountLabel.translatesAutoresizingMaskIntoConstraints = false
-            amountLabel.widthAnchor.constraint(equalToConstant: 54).isActive = true
+            amountLabel.widthAnchor.constraint(equalToConstant: 58).isActive = true
 
             ratioLabel.font = .systemFont(ofSize: 12)
             ratioLabel.textColor = MD3.onSurfaceVariant
             ratioLabel.alignment = .right
             ratioLabel.translatesAutoresizingMaskIntoConstraints = false
-            ratioLabel.widthAnchor.constraint(equalToConstant: 34).isActive = true
+            ratioLabel.widthAnchor.constraint(equalToConstant: 36).isActive = true
 
             let row = NSStackView(views: [nameStack, amountLabel, ratioLabel])
             row.orientation = .horizontal
             row.alignment = .centerY
-            row.spacing = 8
+            row.spacing = 10
             row.distribution = .fill
             return row
         }
@@ -591,12 +591,12 @@ extension MainWindowController {
         let legendStack = NSStackView(views: [proxyRow, directRow, otherRow])
         legendStack.orientation = .vertical
         legendStack.alignment = .leading
-        legendStack.spacing = 12
+        legendStack.spacing = 14
 
         let donutContentStack = NSStackView(views: [trafficDonutChartView, legendStack])
         donutContentStack.orientation = .horizontal
         donutContentStack.alignment = .centerY
-        donutContentStack.spacing = 10
+        donutContentStack.spacing = 12
         donutContentStack.translatesAutoresizingMaskIntoConstraints = false
 
         let trafficDestinationCard = homeCard(
@@ -673,14 +673,14 @@ extension MainWindowController {
 
             doc.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
 
-            headerRow.leadingAnchor.constraint(equalTo: doc.leadingAnchor, constant: 16),
-            headerRow.trailingAnchor.constraint(equalTo: doc.trailingAnchor, constant: -16),
-            headerRow.topAnchor.constraint(equalTo: doc.topAnchor, constant: 18),
+            headerRow.leadingAnchor.constraint(equalTo: doc.leadingAnchor, constant: 20),
+            headerRow.trailingAnchor.constraint(equalTo: doc.trailingAnchor, constant: -20),
+            headerRow.topAnchor.constraint(equalTo: doc.topAnchor, constant: 24),
 
-            grid.leadingAnchor.constraint(equalTo: doc.leadingAnchor, constant: 16),
-            grid.trailingAnchor.constraint(equalTo: doc.trailingAnchor, constant: -16),
-            grid.topAnchor.constraint(equalTo: headerRow.bottomAnchor, constant: 14),
-            grid.bottomAnchor.constraint(equalTo: doc.bottomAnchor, constant: -20)
+            grid.leadingAnchor.constraint(equalTo: doc.leadingAnchor, constant: 20),
+            grid.trailingAnchor.constraint(equalTo: doc.trailingAnchor, constant: -20),
+            grid.topAnchor.constraint(equalTo: headerRow.bottomAnchor, constant: 18),
+            grid.bottomAnchor.constraint(equalTo: doc.bottomAnchor, constant: -24)
         ])
 
         registerThemeObserver { [weak self, weak title, weak subtitle, weak wifiImageView, weak profileTitleLabel, weak ipTitleLabel] in
