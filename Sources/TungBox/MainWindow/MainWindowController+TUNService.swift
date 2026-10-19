@@ -262,7 +262,6 @@ extension MainWindowController {
                     guard stillWanted else { return false }
                     await MainActor.run { [weak self] in
                         guard let self, self.isTunEnabled, self.runtimeTransitionID == transitionID else { return }
-                        self.appendLog("[TUN] 本地控制接口认证校验失败，已停止 TUN\n")
                         self.stopTunRequestHeartbeat()
                         try? TunServiceManager.disable(store: self.store)
                         self.isTunEnabled = false
@@ -271,7 +270,7 @@ extension MainWindowController {
                         self.tunTransition = .none
                         self.syncProxyPreferenceControls()
                         self.refreshStatus()
-                        self.showToast("TUN 控制接口认证失败")
+                        self.reportRuntimeFailure(error, operation: .tunControlVerification, allowDialog: false)
                     }
                     return false
                 }
@@ -282,6 +281,7 @@ extension MainWindowController {
                 // auto stays auto.
                 return await MainActor.run { [weak self] in
                     guard let self, self.isTunEnabled, self.runtimeTransitionID == transitionID else { return false }
+                    RecentStatusTracker.shared.record("TUN 模式已开启", level: .success)
                     self.reconcileSelectorSelectionsToConfig()
                     self.runDeferredNetworkChecksAfterConnection(proxyPort: nil)
                     return true
@@ -292,10 +292,12 @@ extension MainWindowController {
                 return self.isTunEnabled && self.runtimeTransitionID == transitionID
             }
             guard stillWanted else { return false }
-            let reason = TunServiceManager.lastDaemonErrorLine() ?? "未知原因，请查看 TUN 日志"
+            let recentError = TunServiceManager.lastDaemonErrorLine()
             await MainActor.run { [weak self] in
                 guard let self, self.isTunEnabled, self.runtimeTransitionID == transitionID else { return }
-                self.appendLog("[TUN] 启动校验失败：sing-box 未在 8 秒内就绪。原因：\(reason)\n")
+                if let recentError {
+                    self.appendLog("[TUN] 守护进程最近错误（可能与本次启动无关）：\(recentError)\n")
+                }
                 self.stopTunRequestHeartbeat()
                 try? TunServiceManager.disable(store: self.store)
                 self.isTunEnabled = false
@@ -304,7 +306,10 @@ extension MainWindowController {
                 self.tunTransition = .none
                 self.syncProxyPreferenceControls()
                 self.refreshStatus()
-                self.showToast("TUN 启动失败：\(reason)")
+                self.reportRuntimeFailure(
+                    NSError.user("等待 8 秒后仍未检测到 Core 进程及 TUN 网卡就绪，已停止本次启动。请查看 TUN 日志。"),
+                    operation: .tunStart, allowDialog: false
+                )
             }
             return false
         }

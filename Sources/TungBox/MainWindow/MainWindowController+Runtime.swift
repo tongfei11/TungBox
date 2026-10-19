@@ -149,20 +149,20 @@ extension MainWindowController {
             UserDefaults.standard.set(false, forKey: "tunEnabled")
             tunTransition = .none
             syncProxyPreferenceControls()
-            showError(error)
+            reportRuntimeFailure(error, operation: .tunStart)
         case .userProxyFailed:
             isSystemProxyEnabled = false
             UserDefaults.standard.set(false, forKey: "systemProxyEnabled")
             systemProxyTransition = .none
         case .reportStartupError(let error):
             syncProxyPreferenceControls()
-            showError(error)
+            reportRuntimeFailure(error, operation: .systemProxyStart)
         case .userProxyClosing:
             systemProxyTransition = .none
             refreshStatus()
         case .shutdownFailed(let error):
             refreshStatus()
-            showError(error)
+            reportRuntimeFailure(error, operation: .systemProxyStop)
         case .userProxyReady(let port): runDeferredNetworkChecksAfterConnection(proxyPort: port)
         case .finished(let refreshNodeDelays):
             refreshStatus()
@@ -171,6 +171,17 @@ extension MainWindowController {
                 applyRuntimeMode(selectedMode().value, refreshNodeDelays: modeChangeNeedsDelayRefresh, onlyIfNeeded: true)
             }
             if refreshNodeDelays { testAllNodesClicked() }
+        }
+    }
+
+    func reportRuntimeFailure(_ error: Error, operation: ErrorPresentation.RuntimeOperation, allowDialog: Bool = true) {
+        let failure = ErrorPresentation.runtimeFailure(error, operation: operation, allowDialog: allowDialog)
+        appendLog("[运行错误] \(failure.message)\n")
+        RecentStatusTracker.shared.record(failure.message, level: .warning)
+        if failure.presentsDialog {
+            showError(NSError.user(failure.message))
+        } else {
+            showToast(failure.message, style: .warning)
         }
     }
 
@@ -630,7 +641,7 @@ extension MainWindowController {
             } catch {
                 guard isCurrent() else { return }
                 self.appendLog("[模式] 运行态模式同步失败：\(error.localizedDescription)\n")
-                self.showError(NSError.user("模式未能同步到运行中的 Core，请重试：\(error.localizedDescription)"))
+                self.reportRuntimeFailure(error, operation: .modeSynchronization)
             }
         }
     }

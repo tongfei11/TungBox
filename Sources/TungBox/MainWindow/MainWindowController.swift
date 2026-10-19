@@ -705,6 +705,11 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
     @MainActor
     func showError(_ error: Error) {
+        // A delayed request timeout must never leave a modal over the console.
+        guard !ErrorPresentation.isTimeout(error) else {
+            appendLog("[请求] 请求超时：\(error.localizedDescription)\n")
+            return
+        }
         let dialog = showMD3Dialog(
             title: "错误提示",
             message: error.localizedDescription,

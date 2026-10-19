@@ -1069,9 +1069,9 @@ extension MainWindowController {
         beginFeatureTransition(tun: tunEnabled ? .starting : .stopping)
         syncProxyPreferenceControls()
         refreshStatus()   // show 启动中/关闭中 + spinner right away
-        RecentStatusTracker.shared.record(tunEnabled ? "TUN 模式已开启" : "TUN 模式已关闭", level: tunEnabled ? .success : .info)
-        appendLog("[\(source)] TUN 模式已\(tunEnabled ? "开启" : "关闭")\n")
-        showToast(tunEnabled ? "TUN 模式已开启" : "TUN 模式已关闭", style: tunEnabled ? .success : .info)
+        RecentStatusTracker.shared.record(tunEnabled ? "正在启动 TUN" : "TUN 模式已关闭", level: .info)
+        appendLog("[\(source)] \(tunEnabled ? "正在启动 TUN" : "TUN 模式已关闭")\n")
+        showToast(tunEnabled ? "正在启动 TUN" : "TUN 模式已关闭", style: .info)
         reconcileRuntime(reason: tunEnabled ? "开启 TUN" : "关闭 TUN")
     }
 

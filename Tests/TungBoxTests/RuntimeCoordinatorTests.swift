@@ -273,6 +273,29 @@ extension RuntimeCoordinatorTests {
     }
 
     @MainActor
+    func testWakeProxyTimeoutKeepsTunAndReportsContextWithoutModal() async {
+        let f = RuntimeFlowFixture()
+        var services = f.services()
+        services.verifyUserAPI = { throw URLError(.timedOut) }
+        let request = f.request(systemProxy: true, tun: true)
+        let plan = RuntimeCoordinator.Plan(tunNeedsReconcile: false, userProxyURL: URL(fileURLWithPath: "/mock/config.json"),
+                                           userConfigText: "mock config", startedAt: Date())
+        var failures: [ErrorPresentation.RuntimeFailure] = []
+        await f.coordinator.converge(request, plan: plan, services: services) { event in
+            if case .reportStartupError(let error) = event {
+                failures.append(ErrorPresentation.runtimeFailure(error, operation: .systemProxyStart))
+            }
+        }
+        XCTAssertEqual(failures.count, 1)
+        XCTAssertEqual(failures.first?.presentsDialog, false)
+        XCTAssertTrue(failures.first?.message.hasPrefix("系统代理启动失败：") == true)
+        XCTAssertFalse(f.calls.contains("disableTun"))
+        XCTAssertFalse(f.calls.contains("apply:true"))
+        XCTAssertTrue(f.calls.contains("apply:false"))
+        XCTAssertFalse(f.coordinator.state.isTransitioning)
+    }
+
+    @MainActor
     func testLateAuthenticationCannotReenableProxyAfterNewOffIntent() async {
         let f = RuntimeFlowFixture()
         let (started, signal) = AsyncStream<Void>.makeStream()
