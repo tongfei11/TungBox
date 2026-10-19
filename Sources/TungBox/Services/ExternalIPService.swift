@@ -6,26 +6,38 @@ actor ExternalIPService {
 
     private(set) var cachedIP: String?
     private var lastFetchTime: Date?
-    private var isFetching = false
+    private var inFlightTask: Task<String?, Never>?
     private let cacheDuration: TimeInterval = 300 // 5 minutes
 
     func getExternalIP(force: Bool = false) async -> String? {
         if !force, let cached = cachedIP, let last = lastFetchTime, Date().timeIntervalSince(last) < cacheDuration {
             return cached
         }
-        if isFetching { return cachedIP }
-        isFetching = true
-        defer { isFetching = false }
+        if !force, let inFlight = inFlightTask {
+            return await inFlight.value
+        }
 
+        let task = Task<String?, Never> {
+            await self.performFetch()
+        }
+        inFlightTask = task
+        let result = await task.value
+        inFlightTask = nil
+        return result
+    }
+
+    private func performFetch() async -> String? {
         let endpoints = [
             "https://api.ipify.org",
-            "https://ifconfig.me/ip",
-            "https://icanhazip.com"
+            "https://api.ip.sb/ip",
+            "https://myip.la",
+            "https://icanhazip.com",
+            "https://ifconfig.me/ip"
         ]
 
         let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 4.0
-        config.timeoutIntervalForResource = 6.0
+        config.timeoutIntervalForRequest = 3.0
+        config.timeoutIntervalForResource = 5.0
         let session = URLSession(configuration: config)
 
         for endpoint in endpoints {
@@ -33,6 +45,7 @@ actor ExternalIPService {
             do {
                 var request = URLRequest(url: url)
                 request.httpMethod = "GET"
+                request.setValue("curl/7.64.1", forHTTPHeaderField: "User-Agent")
                 let (data, response) = try await session.data(for: request)
                 if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
                     let ip = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)

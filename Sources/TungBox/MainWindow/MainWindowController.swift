@@ -671,6 +671,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
                 if statsTimer == nil {
                     startStatsTimer()
                 }
+                if externalIPLabel.stringValue == "未获取到公网 IP" {
+                    refreshExternalIP(force: false)
+                }
             } else {
                 currentUploadSpeed = 0
                 currentDownloadSpeed = 0

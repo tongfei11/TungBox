@@ -142,8 +142,11 @@ extension MainWindowController {
         case .tunStarted:
             startTunRequestHeartbeat()
             wasTunActiveInThisSession = true
+            refreshExternalIP(force: true)
         case .tunWillStop: stopTunRequestHeartbeat()
-        case .tunStopped: wasTunActiveInThisSession = false
+        case .tunStopped:
+            wasTunActiveInThisSession = false
+            refreshExternalIP(force: true)
         case .tunFailed(let error):
             isTunEnabled = false
             UserDefaults.standard.set(false, forKey: "tunEnabled")
@@ -166,9 +169,11 @@ extension MainWindowController {
         case .userProxyReady(let port):
             runDeferredNetworkChecksAfterConnection(proxyPort: port)
             RecentStatusTracker.shared.record("代理核心已就绪", level: .success)
+            refreshExternalIP(force: true)
         case .finished(let refreshNodeDelays):
             refreshStatus()
             scheduleConnectionsRefreshAfterStart()
+            refreshExternalIP(force: false)
             if isSystemProxyEnabled || isTunEnabled {
                 applyRuntimeMode(selectedMode().value, refreshNodeDelays: modeChangeNeedsDelayRefresh, onlyIfNeeded: true)
             }

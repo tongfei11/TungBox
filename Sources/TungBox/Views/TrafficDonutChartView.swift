@@ -18,6 +18,10 @@ final class TrafficDonutChartView: NSView, MD3Themeable {
         wantsLayer = true
     }
 
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: 88, height: 88)
+    }
+
     func themeChanged() {
         needsDisplay = true
     }
@@ -27,7 +31,7 @@ final class TrafficDonutChartView: NSView, MD3Themeable {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
 
         let center = CGPoint(x: bounds.midX, y: bounds.midY)
-        let strokeWidth: CGFloat = 16
+        let strokeWidth: CGFloat = 13
         let radius = min(bounds.width, bounds.height) / 2 - strokeWidth / 2 - 2
         guard radius > 10 else { return }
 
@@ -64,11 +68,11 @@ final class TrafficDonutChartView: NSView, MD3Themeable {
 
         // Center Text
         let titleAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 16, weight: .bold),
+            .font: NSFont.systemFont(ofSize: 13, weight: .bold),
             .foregroundColor: MD3.onSurface
         ]
         let subAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 11, weight: .regular),
+            .font: NSFont.systemFont(ofSize: 10, weight: .regular),
             .foregroundColor: MD3.onSurfaceVariant
         ]
 

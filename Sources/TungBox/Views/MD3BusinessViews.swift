@@ -309,7 +309,7 @@ final class CenteredLabel: NSTextField {
 }
 
 final class CenteredPillTextFieldCell: NSTextFieldCell {
-    var horizontalPadding: CGFloat = 16
+    var horizontalPadding: CGFloat = 12
 
     override func drawingRect(forBounds rect: NSRect) -> NSRect {
         let titleSize = super.cellSize(forBounds: rect)
@@ -337,6 +337,14 @@ final class CenteredPillLabel: NSTextField {
     override class var cellClass: AnyClass? {
         get { CenteredPillTextFieldCell.self }
         set {}
+    }
+
+    var horizontalPadding: CGFloat {
+        get { (cell as? CenteredPillTextFieldCell)?.horizontalPadding ?? 12 }
+        set {
+            (cell as? CenteredPillTextFieldCell)?.horizontalPadding = newValue
+            invalidateIntrinsicContentSize()
+        }
     }
 }
 

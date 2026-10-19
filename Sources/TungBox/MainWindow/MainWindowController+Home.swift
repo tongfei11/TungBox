@@ -219,12 +219,14 @@ extension MainWindowController {
         currentNodeAutoBadge.isBezeled = false
         currentNodeAutoBadge.alignment = .center
         currentNodeAutoBadge.wantsLayer = true
-        currentNodeAutoBadge.layer?.cornerRadius = 12
+        currentNodeAutoBadge.layer?.cornerRadius = 10
         currentNodeAutoBadge.layer?.masksToBounds = true
+        currentNodeAutoBadge.horizontalPadding = 8
         currentNodeAutoBadge.translatesAutoresizingMaskIntoConstraints = false
         currentNodeAutoBadge.isHidden = true
-        currentNodeAutoBadge.heightAnchor.constraint(equalToConstant: 24).isActive = true
-        currentNodeAutoBadge.widthAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+        currentNodeAutoBadge.heightAnchor.constraint(equalToConstant: 20).isActive = true
+        currentNodeAutoBadge.setContentHuggingPriority(.required, for: .horizontal)
+        currentNodeAutoBadge.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         currentNodeDelayLabel.font = .systemFont(ofSize: 14, weight: .bold)
         currentNodeDelayLabel.textColor = MD3.success
@@ -261,7 +263,7 @@ extension MainWindowController {
         trafficPeriodControl.heightAnchor.constraint(equalToConstant: 24).isActive = true
         trafficPeriodControl.widthAnchor.constraint(equalToConstant: 185).isActive = true
 
-        trafficTotalValueLabel.font = .systemFont(ofSize: 26, weight: .bold)
+        trafficTotalValueLabel.font = .systemFont(ofSize: 32, weight: .bold)
         trafficTotalValueLabel.textColor = MD3.onSurface
         trafficTotalValueLabel.translatesAutoresizingMaskIntoConstraints = false
 
@@ -306,7 +308,7 @@ extension MainWindowController {
         trendStatsCol.alignment = .leading
         trendStatsCol.spacing = 10
         trendStatsCol.translatesAutoresizingMaskIntoConstraints = false
-        trendStatsCol.widthAnchor.constraint(equalToConstant: 115).isActive = true
+        trendStatsCol.widthAnchor.constraint(equalToConstant: 125).isActive = true
 
         trafficTrendChartView.translatesAutoresizingMaskIntoConstraints = false
         trafficTrendChartView.heightAnchor.constraint(greaterThanOrEqualToConstant: 115).isActive = true
@@ -545,47 +547,49 @@ extension MainWindowController {
 
         // Card 8: 流量去向
         trafficDonutChartView.translatesAutoresizingMaskIntoConstraints = false
-        trafficDonutChartView.widthAnchor.constraint(equalToConstant: 104).isActive = true
-        trafficDonutChartView.heightAnchor.constraint(equalToConstant: 104).isActive = true
+        trafficDonutChartView.widthAnchor.constraint(equalToConstant: 88).isActive = true
+        trafficDonutChartView.heightAnchor.constraint(equalToConstant: 88).isActive = true
+        trafficDonutChartView.setContentHuggingPriority(.required, for: .horizontal)
+        trafficDonutChartView.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         func makeLegendTabularRow(color: NSColor, name: String, amountLabel: NSTextField, ratioLabel: NSTextField) -> (row: NSStackView, dot: NSView, nameLabel: NSTextField, ratioLabel: NSTextField) {
             let dot = NSView()
             dot.wantsLayer = true
             dot.layer?.backgroundColor = color.cgColor
-            dot.layer?.cornerRadius = 4
+            dot.layer?.cornerRadius = 3
             dot.translatesAutoresizingMaskIntoConstraints = false
-            dot.widthAnchor.constraint(equalToConstant: 8).isActive = true
-            dot.heightAnchor.constraint(equalToConstant: 8).isActive = true
+            dot.widthAnchor.constraint(equalToConstant: 6).isActive = true
+            dot.heightAnchor.constraint(equalToConstant: 6).isActive = true
 
             let nameLabel = NSTextField(labelWithString: name)
-            nameLabel.font = .systemFont(ofSize: 12, weight: .medium)
+            nameLabel.font = .systemFont(ofSize: 11, weight: .medium)
             nameLabel.textColor = MD3.onSurface
             nameLabel.translatesAutoresizingMaskIntoConstraints = false
 
             let nameStack = NSStackView(views: [dot, nameLabel])
             nameStack.orientation = .horizontal
             nameStack.alignment = .centerY
-            nameStack.spacing = 6
+            nameStack.spacing = 5
             nameStack.translatesAutoresizingMaskIntoConstraints = false
-            nameStack.widthAnchor.constraint(equalToConstant: 42).isActive = true
+            nameStack.widthAnchor.constraint(equalToConstant: 34).isActive = true
 
-            amountLabel.font = .systemFont(ofSize: 12, weight: .bold)
+            amountLabel.font = .systemFont(ofSize: 11, weight: .bold)
             amountLabel.textColor = MD3.onSurface
             amountLabel.alignment = .right
             amountLabel.lineBreakMode = .byClipping
             amountLabel.translatesAutoresizingMaskIntoConstraints = false
-            amountLabel.widthAnchor.constraint(equalToConstant: 68).isActive = true
+            amountLabel.widthAnchor.constraint(equalToConstant: 58).isActive = true
 
-            ratioLabel.font = .systemFont(ofSize: 12)
+            ratioLabel.font = .systemFont(ofSize: 11)
             ratioLabel.textColor = MD3.onSurfaceVariant
             ratioLabel.alignment = .right
             ratioLabel.translatesAutoresizingMaskIntoConstraints = false
-            ratioLabel.widthAnchor.constraint(equalToConstant: 34).isActive = true
+            ratioLabel.widthAnchor.constraint(equalToConstant: 28).isActive = true
 
             let row = NSStackView(views: [nameStack, amountLabel, ratioLabel])
             row.orientation = .horizontal
             row.alignment = .centerY
-            row.spacing = 8
+            row.spacing = 6
             row.distribution = .fill
             return (row, dot, nameLabel, ratioLabel)
         }
@@ -597,12 +601,21 @@ extension MainWindowController {
         let legendStack = NSStackView(views: [proxyLegend.row, directLegend.row, otherLegend.row])
         legendStack.orientation = .vertical
         legendStack.alignment = .leading
-        legendStack.spacing = 12
+        legendStack.spacing = 10
+        legendStack.translatesAutoresizingMaskIntoConstraints = false
+        legendStack.setContentHuggingPriority(.required, for: .horizontal)
+        legendStack.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        let donutContentStack = NSStackView(views: [trafficDonutChartView, legendStack])
+        let donutSpacer = NSView()
+        donutSpacer.translatesAutoresizingMaskIntoConstraints = false
+        donutSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        donutSpacer.widthAnchor.constraint(greaterThanOrEqualToConstant: 8).isActive = true
+
+        let donutContentStack = NSStackView(views: [trafficDonutChartView, donutSpacer, legendStack])
         donutContentStack.orientation = .horizontal
         donutContentStack.alignment = .centerY
-        donutContentStack.spacing = 10
+        donutContentStack.spacing = 0
+        donutContentStack.distribution = .fill
         donutContentStack.translatesAutoresizingMaskIntoConstraints = false
 
         let trafficDestinationCard = homeCard(
@@ -619,11 +632,13 @@ extension MainWindowController {
         recentStatusPill.isBezeled = false
         recentStatusPill.alignment = .center
         recentStatusPill.wantsLayer = true
-        recentStatusPill.layer?.cornerRadius = 12
+        recentStatusPill.layer?.cornerRadius = 10
         recentStatusPill.layer?.masksToBounds = true
+        recentStatusPill.horizontalPadding = 12
         recentStatusPill.translatesAutoresizingMaskIntoConstraints = false
-        recentStatusPill.heightAnchor.constraint(equalToConstant: 24).isActive = true
-        recentStatusPill.widthAnchor.constraint(greaterThanOrEqualToConstant: 78).isActive = true
+        recentStatusPill.heightAnchor.constraint(equalToConstant: 20).isActive = true
+        recentStatusPill.setContentHuggingPriority(.required, for: .horizontal)
+        recentStatusPill.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         recentStatusStack.orientation = .vertical
         recentStatusStack.alignment = .leading
@@ -983,12 +998,29 @@ extension MainWindowController {
     }
 
     func refreshExternalIP(force: Bool = false) {
-        externalIPLabel.stringValue = "查询中…"
-        Task {
+        if force || externalIPLabel.stringValue.isEmpty || externalIPLabel.stringValue == "未获取到公网 IP" {
+            externalIPLabel.stringValue = "查询中…"
+        }
+        Task { [weak self] in
             let ip = await ExternalIPService.shared.getExternalIP(force: force)
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                self.externalIPLabel.stringValue = ip ?? "未获取到公网 IP"
+                if let ip {
+                    self.externalIPLabel.stringValue = ip
+                } else {
+                    self.externalIPLabel.stringValue = "未获取到公网 IP"
+                    if !force {
+                        Task { [weak self] in
+                            try? await Task.sleep(nanoseconds: 3_000_000_000)
+                            await MainActor.run { [weak self] in
+                                guard let self else { return }
+                                if self.externalIPLabel.stringValue == "未获取到公网 IP" {
+                                    self.refreshExternalIP(force: true)
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -1162,6 +1194,7 @@ extension MainWindowController {
                 if !activeNodeInfo.name.isEmpty && self.lastRecordedActiveNode != activeNodeInfo.name {
                     self.lastRecordedActiveNode = activeNodeInfo.name
                     RecentStatusTracker.shared.record("已连接到 \(activeNodeInfo.name)", level: .success)
+                    self.refreshExternalIP(force: true)
                 }
                 let activeDelay = self.nodes.first(where: { $0.tag == activeNodeInfo.name })?.delay ?? "—"
                 self.currentNodeDelayLabel.stringValue = activeDelay == "未测试" ? "—" : activeDelay
