@@ -35,8 +35,9 @@ final class MemoryRingView: NSView, MD3Themeable {
 
         // Progress arc
         let clamped = min(max(ratio, 0.0), 1.0)
+        let arcRatio = clamped > 0 ? max(clamped, 0.04) : 0.0
         let startAngle: CGFloat = -.pi / 2
-        let endAngle = startAngle + CGFloat(clamped) * 2 * .pi
+        let endAngle = startAngle + CGFloat(arcRatio) * 2 * .pi
 
         ctx.setLineCap(.round)
         ctx.setStrokeColor(MD3.primary.cgColor)
@@ -44,7 +45,13 @@ final class MemoryRingView: NSView, MD3Themeable {
         ctx.strokePath()
 
         // Percentage text
-        let pctText = "\(Int(clamped * 100))%"
+        let pctVal = clamped * 100
+        let pctText: String
+        if pctVal < 1.0 {
+            pctText = "< 1%"
+        } else {
+            pctText = "\(Int(round(pctVal)))%"
+        }
         let textAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 11, weight: .bold),
             .foregroundColor: MD3.onSurface

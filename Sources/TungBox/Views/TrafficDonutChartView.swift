@@ -19,7 +19,7 @@ final class TrafficDonutChartView: NSView, MD3Themeable {
     }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: 88, height: 88)
+        NSSize(width: 98, height: 98)
     }
 
     func themeChanged() {
@@ -31,7 +31,7 @@ final class TrafficDonutChartView: NSView, MD3Themeable {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
 
         let center = CGPoint(x: bounds.midX, y: bounds.midY)
-        let strokeWidth: CGFloat = 13
+        let strokeWidth: CGFloat = 10.5
         let radius = min(bounds.width, bounds.height) / 2 - strokeWidth / 2 - 2
         guard radius > 10 else { return }
 
@@ -66,17 +66,26 @@ final class TrafficDonutChartView: NSView, MD3Themeable {
         drawArc(angle: directAngle, color: directColor)
         drawArc(angle: otherAngle, color: otherColor)
 
-        // Center Text
-        let titleAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 13, weight: .bold),
+        // Center Text with auto-scaling to guarantee it never touches the donut ring
+        let innerRadius = radius - strokeWidth / 2
+        let maxAllowedWidth = max((innerRadius - 4) * 2, 40.0)
+
+        var fontSize: CGFloat = 13.0
+        var titleAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: fontSize, weight: .bold),
             .foregroundColor: MD3.onSurface
         ]
+        var titleSize = (centerTotalText as NSString).size(withAttributes: titleAttrs)
+        while titleSize.width > maxAllowedWidth && fontSize > 8.5 {
+            fontSize -= 0.5
+            titleAttrs[.font] = NSFont.systemFont(ofSize: fontSize, weight: .bold)
+            titleSize = (centerTotalText as NSString).size(withAttributes: titleAttrs)
+        }
+
         let subAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 10, weight: .regular),
             .foregroundColor: MD3.onSurfaceVariant
         ]
-
-        let titleSize = (centerTotalText as NSString).size(withAttributes: titleAttrs)
         let subSize = (centerSubText as NSString).size(withAttributes: subAttrs)
         let totalH = titleSize.height + subSize.height + 2
 

@@ -547,8 +547,8 @@ extension MainWindowController {
 
         // Card 8: 流量去向
         trafficDonutChartView.translatesAutoresizingMaskIntoConstraints = false
-        trafficDonutChartView.widthAnchor.constraint(equalToConstant: 88).isActive = true
-        trafficDonutChartView.heightAnchor.constraint(equalToConstant: 88).isActive = true
+        trafficDonutChartView.widthAnchor.constraint(equalToConstant: 98).isActive = true
+        trafficDonutChartView.heightAnchor.constraint(equalToConstant: 98).isActive = true
         trafficDonutChartView.setContentHuggingPriority(.required, for: .horizontal)
         trafficDonutChartView.setContentCompressionResistancePriority(.required, for: .horizontal)
 
@@ -563,7 +563,7 @@ extension MainWindowController {
 
             let nameLabel = NSTextField(labelWithString: name)
             nameLabel.font = .systemFont(ofSize: 11, weight: .medium)
-            nameLabel.textColor = MD3.onSurface
+            nameLabel.textColor = MD3.onSurfaceVariant
             nameLabel.translatesAutoresizingMaskIntoConstraints = false
 
             let nameStack = NSStackView(views: [dot, nameLabel])
@@ -777,14 +777,14 @@ extension MainWindowController {
                 ? MD3.surfaceContainer.mixed(with: MD3.surface, ratio: 0.25)
                 : MD3.surfaceContainerHighest.mixed(with: MD3.surface, ratio: 0.35)).cgColor
             uploadSubcard?.layer?.backgroundColor = speedBg
-            uploadTag?.textColor = MD3.onSurface
+            uploadTag?.textColor = MD3.onSurfaceVariant
             uploadIconContainer?.layer?.backgroundColor = MD3.primary.withAlphaComponent(0.18).cgColor
             uploadIcon?.contentTintColor = MD3.primary
             self.uploadValueLabel.textColor = MD3.primary
             self.uploadWaveChartView.lineColor = MD3.primary
 
             downloadSubcard?.layer?.backgroundColor = speedBg
-            downloadTag?.textColor = MD3.onSurface
+            downloadTag?.textColor = MD3.onSurfaceVariant
             downloadIconContainer?.layer?.backgroundColor = MD3.downloadColor.withAlphaComponent(0.18).cgColor
             downloadIcon?.contentTintColor = MD3.downloadColor
             self.downloadValueLabel.textColor = MD3.downloadColor
@@ -803,17 +803,17 @@ extension MainWindowController {
             self.memoryValueLabel.textColor = MD3.onSurface
 
             proxyLegendDot?.layer?.backgroundColor = MD3.primary.cgColor
-            proxyLegendName?.textColor = MD3.onSurface
+            proxyLegendName?.textColor = MD3.onSurfaceVariant
             self.donutProxyAmountLabel.textColor = MD3.onSurface
             self.donutProxyRatioLabel.textColor = MD3.onSurfaceVariant
 
             directLegendDot?.layer?.backgroundColor = MD3.downloadColor.cgColor
-            directLegendName?.textColor = MD3.onSurface
+            directLegendName?.textColor = MD3.onSurfaceVariant
             self.donutDirectAmountLabel.textColor = MD3.onSurface
             self.donutDirectRatioLabel.textColor = MD3.onSurfaceVariant
 
             otherLegendDot?.layer?.backgroundColor = MD3.outlineVariant.cgColor
-            otherLegendName?.textColor = MD3.onSurface
+            otherLegendName?.textColor = MD3.onSurfaceVariant
             self.donutOtherAmountLabel.textColor = MD3.onSurface
             self.donutOtherRatioLabel.textColor = MD3.onSurfaceVariant
 
@@ -1041,8 +1041,8 @@ extension MainWindowController {
             row.spacing = 8
 
             let timeLabel = NSTextField(labelWithString: RecentStatusTracker.timeString(from: item.timestamp))
-            timeLabel.font = .systemFont(ofSize: 10, weight: .regular)
-            timeLabel.textColor = MD3.isDark ? MD3.onSurfaceVariant.withAlphaComponent(0.65) : MD3.onSurfaceVariant
+            timeLabel.font = .systemFont(ofSize: 11, weight: .regular)
+            timeLabel.textColor = MD3.isDark ? MD3.onSurfaceVariant.withAlphaComponent(0.7) : MD3.onSurfaceVariant
 
             let dot = NSView()
             dot.wantsLayer = true
@@ -1060,7 +1060,7 @@ extension MainWindowController {
             dot.heightAnchor.constraint(equalToConstant: 6).isActive = true
 
             let msgLabel = NSTextField(labelWithString: item.message)
-            msgLabel.font = .systemFont(ofSize: 11, weight: .medium)
+            msgLabel.font = .systemFont(ofSize: 13, weight: .regular)
             msgLabel.textColor = MD3.onSurface
             msgLabel.lineBreakMode = .byTruncatingTail
             msgLabel.maximumNumberOfLines = 1

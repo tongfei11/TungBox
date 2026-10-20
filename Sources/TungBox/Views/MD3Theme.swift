@@ -180,7 +180,7 @@ enum MD3 {
         isDark ? currentScheme.darkBackground.mixed(with: .white, ratio: 0.06) : NSColor.white
     }
     static var onSurface: NSColor {
-        isDark ? NSColor(calibratedRed: 0.89, green: 0.89, blue: 0.92, alpha: 1) : NSColor(calibratedRed: 0.10, green: 0.11, blue: 0.14, alpha: 1)
+        isDark ? NSColor(calibratedRed: 0.89, green: 0.89, blue: 0.92, alpha: 1) : NSColor(calibratedRed: 0.18, green: 0.20, blue: 0.24, alpha: 1)
     }
     static var surfaceContainer: NSColor {
         isDark ? currentScheme.darkBackground.mixed(with: .white, ratio: 0.12) : currentScheme.lightBackground.mixed(with: currentScheme.lightPrimary, ratio: 0.04)
@@ -195,7 +195,7 @@ enum MD3 {
         isDark ? currentScheme.darkBackground.mixed(with: .white, ratio: 0.22) : currentScheme.lightBackground.mixed(with: currentScheme.lightPrimary, ratio: 0.12)
     }
     static var onSurfaceVariant: NSColor {
-        isDark ? NSColor(calibratedRed: 0.75, green: 0.76, blue: 0.80, alpha: 1) : NSColor(calibratedRed: 0.27, green: 0.28, blue: 0.33, alpha: 1)
+        isDark ? NSColor(calibratedRed: 0.75, green: 0.76, blue: 0.80, alpha: 1) : NSColor(calibratedRed: 0.40, green: 0.43, blue: 0.48, alpha: 1)
     }
     static var outline: NSColor {
         isDark ? NSColor(calibratedRed: 0.54, green: 0.55, blue: 0.59, alpha: 1) : NSColor(calibratedRed: 0.45, green: 0.46, blue: 0.51, alpha: 1)
