@@ -206,10 +206,14 @@ enum DNSConfig {
                     .filter { !$0.isEmpty }
                 guard parts.count >= 2 else { continue }
                 let ip = parts[0]
+                guard isValidIPAddress(ip) else { continue }
                 for host in parts.dropFirst() {
+                    let cleanHost = host.trimmingCharacters(in: .whitespaces).lowercased()
                     // 跳过 localhost 这种系统已有的，避免污染
-                    if host == "localhost" || host == "broadcasthost" { continue }
-                    result[host, default: []].append(ip)
+                    if cleanHost.isEmpty || cleanHost == "localhost" || cleanHost == "broadcasthost" { continue }
+                    if !result[cleanHost, default: []].contains(ip) {
+                        result[cleanHost, default: []].append(ip)
+                    }
                 }
             }
         }
@@ -219,16 +223,34 @@ enum DNSConfig {
             if line.isEmpty || line.hasPrefix("#") { continue }
             let parts = line.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
             guard parts.count == 2 else { continue }
-            let domain = parts[0].trimmingCharacters(in: .whitespaces)
+            let domain = parts[0].trimmingCharacters(in: .whitespaces).lowercased()
             let ips = parts[1]
                 .split(whereSeparator: { $0 == ";" || $0 == "," })
                 .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty }
+                .filter { isValidIPAddress($0) }
             guard !domain.isEmpty, !ips.isEmpty else { continue }
             // 自定义优先覆盖系统 hosts
             result[domain] = ips
         }
         return result
+    }
+
+    static func isValidIPAddress(_ str: String) -> Bool {
+        var sin = sockaddr_in()
+        var sin6 = sockaddr_in6()
+        return str.withCString { cstr in
+            inet_pton(AF_INET, cstr, &sin.sin_addr) == 1 || inet_pton(AF_INET6, cstr, &sin6.sin6_addr) == 1
+        }
+    }
+
+    /// 获取系统 /etc/hosts 的指纹（修改时间 + 文件大小），用于轻量检测外部文件变更
+    static func systemHostsFingerprint() -> String? {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: "/etc/hosts"),
+              let modDate = attrs[.modificationDate] as? Date,
+              let size = attrs[.size] as? NSNumber else {
+            return nil
+        }
+        return "\(modDate.timeIntervalSince1970)_\(size.intValue)"
     }
 
     // MARK: - sing-box dns 字典生成
@@ -263,11 +285,15 @@ enum DNSConfig {
         // 未匹配的域名落到后面的规则，所以不会"吃掉"全部流量。
         let hostsMap = collectHostsEntries()
         if !hostsMap.isEmpty {
-            servers.append([
+            var hostsServer: [String: Any] = [
                 "type": "hosts",
                 "tag": "dns-hosts",
                 "predefined": hostsMap
-            ])
+            ]
+            if readSystemHosts {
+                hostsServer["path"] = ["/etc/hosts"]
+            }
+            servers.append(hostsServer)
             rules.append([
                 "domain": Array(hostsMap.keys).sorted(),
                 "server": "dns-hosts"

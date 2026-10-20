@@ -1071,13 +1071,10 @@ extension MainWindowController {
             indicator.addSubview(bottomLine)
             indicator.addSubview(dot)
 
-            let halfSpacing: CGFloat = 5.5
+            indicator.widthAnchor.constraint(equalToConstant: 10).isActive = true
+            indicator.heightAnchor.constraint(equalToConstant: 16).isActive = true
 
             NSLayoutConstraint.activate([
-                indicator.widthAnchor.constraint(equalToConstant: 10),
-                indicator.topAnchor.constraint(equalTo: row.topAnchor),
-                indicator.bottomAnchor.constraint(equalTo: row.bottomAnchor),
-
                 dot.centerXAnchor.constraint(equalTo: indicator.centerXAnchor),
                 dot.centerYAnchor.constraint(equalTo: indicator.centerYAnchor),
                 dot.widthAnchor.constraint(equalToConstant: 7),
@@ -1085,13 +1082,13 @@ extension MainWindowController {
 
                 topLine.centerXAnchor.constraint(equalTo: indicator.centerXAnchor),
                 topLine.widthAnchor.constraint(equalToConstant: 1.5),
-                topLine.topAnchor.constraint(equalTo: indicator.topAnchor, constant: -halfSpacing),
                 topLine.bottomAnchor.constraint(equalTo: dot.centerYAnchor),
+                topLine.topAnchor.constraint(equalTo: dot.centerYAnchor, constant: -13.5),
 
                 bottomLine.centerXAnchor.constraint(equalTo: indicator.centerXAnchor),
                 bottomLine.widthAnchor.constraint(equalToConstant: 1.5),
                 bottomLine.topAnchor.constraint(equalTo: dot.centerYAnchor),
-                bottomLine.bottomAnchor.constraint(equalTo: indicator.bottomAnchor, constant: halfSpacing)
+                bottomLine.bottomAnchor.constraint(equalTo: dot.centerYAnchor, constant: 13.5)
             ])
 
             let timeLabel = NSTextField(labelWithString: RecentStatusTracker.timeString(from: item.timestamp))

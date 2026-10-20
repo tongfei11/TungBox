@@ -297,6 +297,7 @@ extension MainWindowController {
                 guard var config = parseConfigObject(from: editor.string) else {
                     throw NSError.user("当前配置不是有效 JSON")
                 }
+                config["dns"] = DNSConfig.buildSingBoxDNS()
                 config = setTunEnabled(false, in: config)   // user proxy is never TUN
                 config = ensureModeSupport(in: config, mode: selectedMode())
                 editor.string = try renderConfig(config)

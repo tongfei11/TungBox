@@ -291,12 +291,6 @@ extension MainWindowController {
         }
     }
 
-    private func canonicalJSON(_ obj: [String: Any]) -> String {
-        guard let data = try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys]),
-              let s = String(data: data, encoding: .utf8) else { return "" }
-        return s
-    }
-
     // MARK: - hint
 
     private func tunHintLabel(_ text: String) -> NSTextField {

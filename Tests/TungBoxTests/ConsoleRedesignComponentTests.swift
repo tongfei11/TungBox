@@ -293,5 +293,80 @@ final class ConsoleRedesignComponentTests: XCTestCase {
         XCTAssertEqual(tracker.items.count, countAfterFirst + 1)
         XCTAssertEqual(tracker.items.first?.message, "不同事件")
     }
+
+    func testHostsParsingAndValidation() {
+        XCTAssertTrue(DNSConfig.isValidIPAddress("127.0.0.1"))
+        XCTAssertTrue(DNSConfig.isValidIPAddress("192.168.1.1"))
+        XCTAssertTrue(DNSConfig.isValidIPAddress("::1"))
+        XCTAssertTrue(DNSConfig.isValidIPAddress("240e:ff:e020:99b::1"))
+        XCTAssertFalse(DNSConfig.isValidIPAddress("not.an.ip"))
+        XCTAssertFalse(DNSConfig.isValidIPAddress("999.999.999.999"))
+        XCTAssertFalse(DNSConfig.isValidIPAddress(""))
+
+        DNSConfig.customHosts = "test.domain.com=10.0.0.1;10.0.0.2\ninvalid.com=bad_ip\n"
+        let map = DNSConfig.collectHostsEntries()
+        XCTAssertEqual(map["test.domain.com"], ["10.0.0.1", "10.0.0.2"])
+        XCTAssertNil(map["invalid.com"])
+        DNSConfig.customHosts = ""
+    }
+
+    func testSystemHostsFingerprint() {
+        let fingerprint = DNSConfig.systemHostsFingerprint()
+        XCTAssertNotNil(fingerprint)
+        XCTAssertFalse(fingerprint?.isEmpty ?? true)
+    }
+
+    @MainActor
+    func testTimelineIndicatorAutoLayoutSafety() {
+        let indicator = NSView()
+        indicator.translatesAutoresizingMaskIntoConstraints = false
+
+        let dot = NSView()
+        dot.translatesAutoresizingMaskIntoConstraints = false
+        let topLine = NSView()
+        topLine.translatesAutoresizingMaskIntoConstraints = false
+        let bottomLine = NSView()
+        bottomLine.translatesAutoresizingMaskIntoConstraints = false
+
+        indicator.addSubview(topLine)
+        indicator.addSubview(bottomLine)
+        indicator.addSubview(dot)
+
+        indicator.widthAnchor.constraint(equalToConstant: 10).isActive = true
+        indicator.heightAnchor.constraint(equalToConstant: 16).isActive = true
+
+        NSLayoutConstraint.activate([
+            dot.centerXAnchor.constraint(equalTo: indicator.centerXAnchor),
+            dot.centerYAnchor.constraint(equalTo: indicator.centerYAnchor),
+            dot.widthAnchor.constraint(equalToConstant: 7),
+            dot.heightAnchor.constraint(equalToConstant: 7),
+
+            topLine.centerXAnchor.constraint(equalTo: indicator.centerXAnchor),
+            topLine.widthAnchor.constraint(equalToConstant: 1.5),
+            topLine.bottomAnchor.constraint(equalTo: dot.centerYAnchor),
+            topLine.topAnchor.constraint(equalTo: dot.centerYAnchor, constant: -13.5),
+
+            bottomLine.centerXAnchor.constraint(equalTo: indicator.centerXAnchor),
+            bottomLine.widthAnchor.constraint(equalToConstant: 1.5),
+            bottomLine.topAnchor.constraint(equalTo: dot.centerYAnchor),
+            bottomLine.bottomAnchor.constraint(equalTo: dot.centerYAnchor, constant: 13.5)
+        ])
+
+        let row = NSStackView()
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.addArrangedSubview(indicator)
+        row.addArrangedSubview(NSTextField(labelWithString: "12:00"))
+
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 40))
+        host.addSubview(row)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            row.topAnchor.constraint(equalTo: host.topAnchor)
+        ])
+        host.layoutSubtreeIfNeeded()
+        XCTAssertEqual(indicator.frame.size.width, 10)
+    }
 }
 

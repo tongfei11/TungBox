@@ -82,12 +82,20 @@ enum ProxyModeConfig {
         var route = config["route"] as? [String: Any] ?? [:]
         var rules = route["rules"] as? [[String: Any]] ?? []
         rules.removeAll { isManagedRuntimeRule($0) }
-        rules = [
+        let hostsDomains = Array(DNSConfig.collectHostsEntries().keys).sorted()
+        var prefixRules: [[String: Any]] = [
             ["action": "sniff"],
-            ["protocol": "dns", "action": "hijack-dns"],
-            ["clash_mode": "direct", "outbound": "direct"],
-            ["clash_mode": "global", "outbound": globalTag]
-        ] + rules
+            ["protocol": "dns", "action": "hijack-dns"]
+        ]
+        if !hostsDomains.isEmpty {
+            prefixRules.append([
+                "domain": hostsDomains,
+                "action": "resolve"
+            ])
+        }
+        prefixRules.append(["clash_mode": "direct", "outbound": "direct"])
+        prefixRules.append(["clash_mode": "global", "outbound": globalTag])
+        rules = prefixRules + rules
         route["rules"] = rules
         // sing-box 1.12+: outbound dials that chain to domain-based routing require a
         // default domain resolver pointing at a *defined* DNS server. A nil value — or
@@ -114,6 +122,9 @@ enum ProxyModeConfig {
             if action == "sniff" { return true }
             if action == "hijack-dns",
                (rule["protocol"] as? String)?.lowercased() == "dns" {
+                return true
+            }
+            if action == "resolve", rule["domain"] != nil {
                 return true
             }
         }

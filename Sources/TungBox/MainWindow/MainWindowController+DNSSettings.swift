@@ -217,7 +217,9 @@ extension MainWindowController: NSTextViewDelegate, NSTextFieldDelegate {
         let on = sender.state == .on
         guard on != DNSConfig.readSystemHosts else { return }
         DNSConfig.readSystemHosts = on
-        scheduleDNSApply()
+        lastKnownSystemHostsFingerprint = nil
+        syncHostsToRunningConfig(reason: on ? "启用系统 hosts" : "停用系统 hosts")
+        showToast(on ? "已启用系统 hosts 并生效" : "已停用系统 hosts", style: .info)
     }
 
     @objc func dnsSettingsResetClicked() {
@@ -320,15 +322,26 @@ extension MainWindowController: NSTextViewDelegate, NSTextFieldDelegate {
         }
         appendLog("[DNS] 已更新当前配置 dns 段\n")
         if wasRunning {
-            appendLog("[DNS] 代理运行中，正在重启服务以应用新 DNS 设置\n")
-            showToast("DNS 已更新，正在重启代理", style: .info)
-            reconcileRuntime(reason: "DNS 设置变更", forceRestart: true)
+            if isTunEnabled {
+                do {
+                    let prepared = try preparedTunConfigText(from: editor.string)
+                    try TunServiceManager.writeRequestConfig(prepared, store: store)
+                    appendLog("[DNS] TUN 运行中，已写入新配置触发热重载\n")
+                    showToast("DNS 已更新，TUN 服务已重载", style: .info)
+                } catch {
+                    appendLog("[DNS] 热更新 TUN 配置失败：\(error.localizedDescription)\n")
+                }
+            } else {
+                appendLog("[DNS] 代理运行中，正在重启服务以应用新 DNS 设置\n")
+                showToast("DNS 已更新，正在重启代理", style: .info)
+                reconcileRuntime(reason: "DNS 设置变更", forceRestart: true)
+            }
         } else {
             showToast("DNS 设置已保存", style: .success)
         }
     }
 
-    private func canonicalJSON(_ obj: [String: Any]) -> String {
+    func canonicalJSON(_ obj: [String: Any]) -> String {
         guard let data = try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys]),
               let s = String(data: data, encoding: .utf8) else { return "" }
         return s

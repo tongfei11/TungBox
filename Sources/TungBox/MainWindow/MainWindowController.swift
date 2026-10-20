@@ -23,6 +23,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var ruleSetWatchTimer: Timer?
     var ruleSetFileSignature: [String: Data]?
     var ruleSetWatchSubscriptionID: UUID?
+    var systemHostsWatchTimer: Timer?
+    var lastKnownSystemHostsFingerprint: String?
+    var isSyncingHosts = false
 
     /// Rule-set files for the current subscription that failed to load/validate.
     var invalidRuleSets: [InvalidRuleSet] = []
@@ -410,6 +413,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         checkSingBoxInstall(showAlert: true)
         refreshSubscriptionBadge()
         registerSystemWakeObserver()
+        startSystemHostsWatching()
     }
 
     func scheduleStatusRefreshFromOutput() {
@@ -870,5 +874,85 @@ extension MainWindowController {
         NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
         NSApp.activate(ignoringOtherApps: true)
         appendLog("[窗口] 已从状态栏恢复控制台。\n")
+    }
+
+    func startSystemHostsWatching() {
+        guard systemHostsWatchTimer == nil else { return }
+        lastKnownSystemHostsFingerprint = DNSConfig.systemHostsFingerprint()
+        systemHostsWatchTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.checkSystemHostsChanges()
+            }
+        }
+    }
+
+    func stopSystemHostsWatching() {
+        systemHostsWatchTimer?.invalidate()
+        systemHostsWatchTimer = nil
+    }
+
+    func checkSystemHostsChanges() {
+        guard DNSConfig.readSystemHosts, !isSyncingHosts else { return }
+        guard let current = DNSConfig.systemHostsFingerprint() else { return }
+        if lastKnownSystemHostsFingerprint == nil {
+            lastKnownSystemHostsFingerprint = current
+            return
+        }
+        if current != lastKnownSystemHostsFingerprint {
+            lastKnownSystemHostsFingerprint = current
+            syncHostsToRunningConfig(reason: "检测到系统 /etc/hosts 文件变更")
+        }
+    }
+
+    func syncHostsToRunningConfig(reason: String) {
+        guard !isSyncingHosts else { return }
+        isSyncingHosts = true
+        defer { isSyncingHosts = false }
+
+        var targetIndex = selectedIndex
+        if targetIndex == nil && !profiles.isEmpty {
+            targetIndex = 0
+            selectProfile(at: 0)
+        }
+        guard let index = targetIndex, profiles.indices.contains(index) else { return }
+
+        let url = store.configURL(for: profiles[index])
+        guard var config = parseConfigObject(from: editor.string) ?? (try? String(contentsOf: url, encoding: .utf8)).flatMap({ parseConfigObject(from: $0) }) else {
+            return
+        }
+
+        let newDNS = DNSConfig.buildSingBoxDNS()
+        let oldDNS = config["dns"] as? [String: Any] ?? [:]
+        if canonicalJSON(newDNS) == canonicalJSON(oldDNS) {
+            return
+        }
+
+        config["dns"] = newDNS
+        config = ensureModeSupport(in: config, mode: selectedMode())
+
+        do {
+            let rendered = try renderConfig(config)
+            editor.string = rendered
+            _ = try saveCurrent()
+        } catch {
+            appendLog("[Hosts] 更新配置失败：\(error.localizedDescription)\n")
+            return
+        }
+
+        appendLog("[Hosts] \(reason)，已更新当前配置中的 hosts 条目\n")
+
+        if isTunEnabled {
+            do {
+                let prepared = try preparedTunConfigText(from: editor.string)
+                try TunServiceManager.writeRequestConfig(prepared, store: store)
+                appendLog("[Hosts] TUN 运行中，已写入新配置触发守护进程热重载\n")
+                RecentStatusTracker.shared.record("系统 hosts 已自动刷新", level: .info)
+            } catch {
+                appendLog("[Hosts] 热更新 TUN 配置失败：\(error.localizedDescription)\n")
+            }
+        } else if isSystemProxyEnabled && runner.isRunning {
+            reconcileRuntime(reason: reason, forceRestart: true)
+            RecentStatusTracker.shared.record("系统 hosts 已自动刷新", level: .info)
+        }
     }
 }
