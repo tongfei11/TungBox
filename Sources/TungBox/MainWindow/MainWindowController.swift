@@ -99,7 +99,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     let memoryRingView = MemoryRingView()
     let equalizerBarsView = EqualizerBarsView()
     let recentStatusStack = NSStackView()
-    let recentStatusPill = CenteredPillLabel(labelWithString: "● 运行正常")
+    let recentStatusPill = MD3StatusBadgeView()
 
     let table = NSTableView()
     let subscriptionTable = NSTableView()

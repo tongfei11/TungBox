@@ -32,6 +32,10 @@ final class MD3Button: NSButton, MD3Themeable {
         }
     }
 
+    var customFontSize: CGFloat? {
+        didSet { updateColors() }
+    }
+
     private let contentStack = NSStackView()
     private let iconView = NSImageView()
     private let labelField = NSTextField(labelWithString: "")
@@ -271,10 +275,12 @@ final class MD3Button: NSButton, MD3Themeable {
 
         labelField.textColor = colors.textCol
         let font: NSFont
-        if style == .nav {
+        if let custom = customFontSize {
+            font = NSFont.systemFont(ofSize: custom, weight: self.state == .on ? .semibold : .medium)
+        } else if style == .nav {
             font = NSFont.systemFont(ofSize: 14, weight: self.state == .on ? .bold : .medium)
         } else if style == .segment {
-            font = NSFont.systemFont(ofSize: 11.5, weight: .medium)
+            font = NSFont.systemFont(ofSize: 10.0, weight: .medium)
         } else {
             font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         }

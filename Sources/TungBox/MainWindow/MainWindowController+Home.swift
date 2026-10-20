@@ -22,7 +22,7 @@ extension MainWindowController {
         title.translatesAutoresizingMaskIntoConstraints = false
 
         let subtitle = NSTextField(labelWithString: "服务状态、出站模式和网络运行统计")
-        subtitle.font = .systemFont(ofSize: 12)
+        subtitle.font = .systemFont(ofSize: 13, weight: .regular)
         subtitle.textColor = MD3.onSurfaceVariant
         subtitle.translatesAutoresizingMaskIntoConstraints = false
 
@@ -219,12 +219,12 @@ extension MainWindowController {
         currentNodeAutoBadge.isBezeled = false
         currentNodeAutoBadge.alignment = .center
         currentNodeAutoBadge.wantsLayer = true
-        currentNodeAutoBadge.layer?.cornerRadius = 10
+        currentNodeAutoBadge.layer?.cornerRadius = 11
         currentNodeAutoBadge.layer?.masksToBounds = true
         currentNodeAutoBadge.horizontalPadding = 8
         currentNodeAutoBadge.translatesAutoresizingMaskIntoConstraints = false
         currentNodeAutoBadge.isHidden = true
-        currentNodeAutoBadge.heightAnchor.constraint(equalToConstant: 20).isActive = true
+        currentNodeAutoBadge.heightAnchor.constraint(equalToConstant: 22).isActive = true
         currentNodeAutoBadge.setContentHuggingPriority(.required, for: .horizontal)
         currentNodeAutoBadge.setContentCompressionResistancePriority(.required, for: .horizontal)
 
@@ -268,7 +268,7 @@ extension MainWindowController {
         trafficTotalValueLabel.translatesAutoresizingMaskIntoConstraints = false
 
         let trafficTotalDescLabel = NSTextField(labelWithString: "总流量")
-        trafficTotalDescLabel.font = .systemFont(ofSize: 11)
+        trafficTotalDescLabel.font = .systemFont(ofSize: 13, weight: .regular)
         trafficTotalDescLabel.textColor = MD3.onSurfaceVariant
         trafficTotalDescLabel.translatesAutoresizingMaskIntoConstraints = false
 
@@ -287,10 +287,10 @@ extension MainWindowController {
             dot.heightAnchor.constraint(equalToConstant: 6).isActive = true
 
             let tLabel = NSTextField(labelWithString: title)
-            tLabel.font = .systemFont(ofSize: 11)
+            tLabel.font = .systemFont(ofSize: 13, weight: .regular)
             tLabel.textColor = MD3.onSurfaceVariant
 
-            valueLabel.font = .systemFont(ofSize: 12, weight: .bold)
+            valueLabel.font = .systemFont(ofSize: 13, weight: .bold)
             valueLabel.textColor = MD3.onSurface
 
             let row = NSStackView(views: [dot, tLabel, valueLabel])
@@ -330,7 +330,7 @@ extension MainWindowController {
 
         // Card 6: 实时速度
         let speedSublabel = NSTextField(labelWithString: "当前网络传输速度")
-        speedSublabel.font = .systemFont(ofSize: 11)
+        speedSublabel.font = .systemFont(ofSize: 13, weight: .regular)
         speedSublabel.textColor = MD3.isDark ? MD3.onSurfaceVariant.withAlphaComponent(0.7) : MD3.onSurfaceVariant
 
         func makeSpeedSubcard(
@@ -373,7 +373,7 @@ extension MainWindowController {
             ])
 
             let tagLabel = NSTextField(labelWithString: tagText)
-            tagLabel.font = .systemFont(ofSize: 12, weight: .medium)
+            tagLabel.font = .systemFont(ofSize: 13, weight: .regular)
             tagLabel.textColor = MD3.onSurface
 
             let tagHeader = NSStackView(views: [iconContainer, tagLabel])
@@ -440,7 +440,7 @@ extension MainWindowController {
         connectionsValueLabel.font = .systemFont(ofSize: 32, weight: .bold)
         connectionsValueLabel.textColor = MD3.onSurface
         let connUnit = NSTextField(labelWithString: "个活动连接")
-        connUnit.font = .systemFont(ofSize: 11)
+        connUnit.font = .systemFont(ofSize: 13, weight: .regular)
         connUnit.textColor = MD3.onSurfaceVariant
         let connTextCol = NSStackView(views: [connectionsValueLabel, connUnit])
         connTextCol.orientation = .vertical
@@ -495,7 +495,7 @@ extension MainWindowController {
         }
 
         let memTitle = NSTextField(labelWithString: "内存占用")
-        memTitle.font = .systemFont(ofSize: 11, weight: .regular)
+        memTitle.font = .systemFont(ofSize: 13, weight: .regular)
         memTitle.textColor = MD3.onSurfaceVariant
 
         memoryValueLabel.font = .systemFont(ofSize: 15, weight: .bold)
@@ -562,7 +562,7 @@ extension MainWindowController {
             dot.heightAnchor.constraint(equalToConstant: 6).isActive = true
 
             let nameLabel = NSTextField(labelWithString: name)
-            nameLabel.font = .systemFont(ofSize: 11, weight: .medium)
+            nameLabel.font = .systemFont(ofSize: 13, weight: .regular)
             nameLabel.textColor = MD3.onSurfaceVariant
             nameLabel.translatesAutoresizingMaskIntoConstraints = false
 
@@ -571,20 +571,20 @@ extension MainWindowController {
             nameStack.alignment = .centerY
             nameStack.spacing = 5
             nameStack.translatesAutoresizingMaskIntoConstraints = false
-            nameStack.widthAnchor.constraint(equalToConstant: 34).isActive = true
+            nameStack.widthAnchor.constraint(equalToConstant: 38).isActive = true
 
             amountLabel.font = .systemFont(ofSize: 11, weight: .bold)
             amountLabel.textColor = MD3.onSurface
             amountLabel.alignment = .right
             amountLabel.lineBreakMode = .byClipping
             amountLabel.translatesAutoresizingMaskIntoConstraints = false
-            amountLabel.widthAnchor.constraint(equalToConstant: 58).isActive = true
+            amountLabel.widthAnchor.constraint(equalToConstant: 62).isActive = true
 
-            ratioLabel.font = .systemFont(ofSize: 11)
+            ratioLabel.font = .systemFont(ofSize: 13, weight: .regular)
             ratioLabel.textColor = MD3.onSurfaceVariant
             ratioLabel.alignment = .right
             ratioLabel.translatesAutoresizingMaskIntoConstraints = false
-            ratioLabel.widthAnchor.constraint(equalToConstant: 28).isActive = true
+            ratioLabel.widthAnchor.constraint(equalToConstant: 34).isActive = true
 
             let row = NSStackView(views: [nameStack, amountLabel, ratioLabel])
             row.orientation = .horizontal
@@ -625,24 +625,13 @@ extension MainWindowController {
         )
 
         // Card 9: 最近运行状态
-        recentStatusPill.font = .systemFont(ofSize: 11, weight: .semibold)
-        recentStatusPill.textColor = MD3.onSuccessContainer
-        recentStatusPill.backgroundColor = MD3.successContainer
-        recentStatusPill.drawsBackground = true
-        recentStatusPill.isBezeled = false
-        recentStatusPill.alignment = .center
-        recentStatusPill.wantsLayer = true
-        recentStatusPill.layer?.cornerRadius = 10
-        recentStatusPill.layer?.masksToBounds = true
-        recentStatusPill.horizontalPadding = 12
         recentStatusPill.translatesAutoresizingMaskIntoConstraints = false
-        recentStatusPill.heightAnchor.constraint(equalToConstant: 20).isActive = true
         recentStatusPill.setContentHuggingPriority(.required, for: .horizontal)
         recentStatusPill.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         recentStatusStack.orientation = .vertical
         recentStatusStack.alignment = .leading
-        recentStatusStack.spacing = 10
+        recentStatusStack.spacing = 11
         recentStatusStack.translatesAutoresizingMaskIntoConstraints = false
 
         RecentStatusTracker.shared.onItemsUpdated = { [weak self] items in
@@ -652,7 +641,7 @@ extension MainWindowController {
 
         let recentStatusCard = homeCard(
             title: "最近运行状态",
-            iconName: "clock.arrow.circlepath",
+            iconName: "list.bullet.rectangle",
             titleAccessoryView: recentStatusPill,
             views: [recentStatusStack]
         )
@@ -817,13 +806,7 @@ extension MainWindowController {
             self.donutOtherAmountLabel.textColor = MD3.onSurface
             self.donutOtherRatioLabel.textColor = MD3.onSurfaceVariant
 
-            if self.isProxyRuntimeRunning() {
-                self.recentStatusPill.textColor = MD3.onSuccessContainer
-                self.recentStatusPill.backgroundColor = MD3.successContainer
-            } else {
-                self.recentStatusPill.textColor = MD3.onSurfaceVariant
-                self.recentStatusPill.backgroundColor = MD3.surfaceContainer
-            }
+            self.recentStatusPill.themeChanged()
 
             self.refreshRecentStatusTimeline(items: RecentStatusTracker.shared.items)
         }
@@ -1034,38 +1017,98 @@ extension MainWindowController {
             recentStatusStack.removeArrangedSubview($0)
             $0.removeFromSuperview()
         }
-        for item in items.prefix(4) {
+        let displayItems = Array(items.prefix(5))
+        for (index, item) in displayItems.enumerated() {
             let row = NSStackView()
             row.orientation = .horizontal
             row.alignment = .centerY
-            row.spacing = 8
+            row.spacing = 10
+            row.translatesAutoresizingMaskIntoConstraints = false
 
-            let timeLabel = NSTextField(labelWithString: RecentStatusTracker.timeString(from: item.timestamp))
-            timeLabel.font = .systemFont(ofSize: 11, weight: .regular)
-            timeLabel.textColor = MD3.isDark ? MD3.onSurfaceVariant.withAlphaComponent(0.7) : MD3.onSurfaceVariant
+            let isFirst = index == 0
+            let isLast = index == displayItems.count - 1
+
+            let dotColor: NSColor
+            let lineColor: NSColor
+            switch item.level {
+            case .success:
+                dotColor = MD3.isDark ? MD3.success : NSColor(calibratedRed: 0.04, green: 0.78, blue: 0.68, alpha: 1.0)
+                lineColor = MD3.isDark ? MD3.success.withAlphaComponent(0.35) : NSColor(calibratedRed: 0.73, green: 0.96, blue: 0.93, alpha: 1.0)
+            case .info:
+                dotColor = MD3.isDark ? MD3.primary : NSColor(calibratedRed: 0.04, green: 0.78, blue: 0.68, alpha: 1.0)
+                lineColor = MD3.isDark ? MD3.primary.withAlphaComponent(0.35) : NSColor(calibratedRed: 0.73, green: 0.96, blue: 0.93, alpha: 1.0)
+            case .warning:
+                dotColor = MD3.warning
+                lineColor = MD3.warning.withAlphaComponent(0.35)
+            case .neutral:
+                dotColor = MD3.isDark ? NSColor(white: 0.5, alpha: 1.0) : NSColor(calibratedRed: 0.71, green: 0.75, blue: 0.81, alpha: 1.0)
+                lineColor = MD3.isDark ? NSColor(white: 0.25, alpha: 0.6) : NSColor(calibratedRed: 0.92, green: 0.94, blue: 0.97, alpha: 1.0)
+            }
+
+            let indicator = NSView()
+            indicator.wantsLayer = true
+            indicator.translatesAutoresizingMaskIntoConstraints = false
 
             let dot = NSView()
             dot.wantsLayer = true
-            dot.layer?.cornerRadius = 3
-            let dotColor: NSColor
-            switch item.level {
-            case .success: dotColor = MD3.success
-            case .info: dotColor = MD3.primary
-            case .warning: dotColor = MD3.warning
-            case .neutral: dotColor = MD3.outlineVariant
-            }
+            dot.layer?.cornerRadius = 3.5
             dot.layer?.backgroundColor = dotColor.cgColor
             dot.translatesAutoresizingMaskIntoConstraints = false
-            dot.widthAnchor.constraint(equalToConstant: 6).isActive = true
-            dot.heightAnchor.constraint(equalToConstant: 6).isActive = true
+
+            let topLine = NSView()
+            topLine.wantsLayer = true
+            topLine.layer?.backgroundColor = lineColor.cgColor
+            topLine.translatesAutoresizingMaskIntoConstraints = false
+            topLine.isHidden = isFirst
+
+            let bottomLine = NSView()
+            bottomLine.wantsLayer = true
+            bottomLine.layer?.backgroundColor = lineColor.cgColor
+            bottomLine.translatesAutoresizingMaskIntoConstraints = false
+            bottomLine.isHidden = isLast
+
+            indicator.addSubview(topLine)
+            indicator.addSubview(bottomLine)
+            indicator.addSubview(dot)
+
+            let halfSpacing: CGFloat = 5.5
+
+            NSLayoutConstraint.activate([
+                indicator.widthAnchor.constraint(equalToConstant: 10),
+                indicator.topAnchor.constraint(equalTo: row.topAnchor),
+                indicator.bottomAnchor.constraint(equalTo: row.bottomAnchor),
+
+                dot.centerXAnchor.constraint(equalTo: indicator.centerXAnchor),
+                dot.centerYAnchor.constraint(equalTo: indicator.centerYAnchor),
+                dot.widthAnchor.constraint(equalToConstant: 7),
+                dot.heightAnchor.constraint(equalToConstant: 7),
+
+                topLine.centerXAnchor.constraint(equalTo: indicator.centerXAnchor),
+                topLine.widthAnchor.constraint(equalToConstant: 1.5),
+                topLine.topAnchor.constraint(equalTo: indicator.topAnchor, constant: -halfSpacing),
+                topLine.bottomAnchor.constraint(equalTo: dot.centerYAnchor),
+
+                bottomLine.centerXAnchor.constraint(equalTo: indicator.centerXAnchor),
+                bottomLine.widthAnchor.constraint(equalToConstant: 1.5),
+                bottomLine.topAnchor.constraint(equalTo: dot.centerYAnchor),
+                bottomLine.bottomAnchor.constraint(equalTo: indicator.bottomAnchor, constant: halfSpacing)
+            ])
+
+            let timeLabel = NSTextField(labelWithString: RecentStatusTracker.timeString(from: item.timestamp))
+            timeLabel.font = .systemFont(ofSize: 13, weight: .regular)
+            timeLabel.textColor = MD3.isDark ? MD3.onSurfaceVariant.withAlphaComponent(0.7) : MD3.onSurfaceVariant
+            timeLabel.setContentHuggingPriority(.required, for: .horizontal)
+            timeLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
             let msgLabel = NSTextField(labelWithString: item.message)
             msgLabel.font = .systemFont(ofSize: 13, weight: .regular)
             msgLabel.textColor = MD3.onSurface
             msgLabel.lineBreakMode = .byTruncatingTail
             msgLabel.maximumNumberOfLines = 1
+            msgLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            msgLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-            row.addArrangedSubview(dot)
+            row.addArrangedSubview(indicator)
             row.addArrangedSubview(timeLabel)
             row.addArrangedSubview(msgLabel)
 
@@ -1245,15 +1288,7 @@ extension MainWindowController {
                     self.donutOtherRatioLabel.stringValue = "\(Int(oRatio * 100))%"
                 }
 
-                if self.isProxyRuntimeRunning() {
-                    self.recentStatusPill.stringValue = "● 运行正常"
-                    self.recentStatusPill.textColor = MD3.onSuccessContainer
-                    self.recentStatusPill.backgroundColor = MD3.successContainer
-                } else {
-                    self.recentStatusPill.stringValue = "● 服务未启动"
-                    self.recentStatusPill.textColor = MD3.onSurfaceVariant
-                    self.recentStatusPill.backgroundColor = MD3.surfaceContainer
-                }
+                self.recentStatusPill.stringValue = self.isProxyRuntimeRunning() ? "运行正常" : "服务未启动"
 
                 if apiConnections == nil {
                     self.uploadValueLabel.stringValue = "—"

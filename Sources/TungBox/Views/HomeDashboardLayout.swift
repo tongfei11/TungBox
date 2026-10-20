@@ -198,7 +198,7 @@ enum HomeDashboardLayout {
         var subLabelField: NSTextField?
         if let sub = subtitle {
             let subLabel = NSTextField(labelWithString: sub)
-            subLabel.font = .systemFont(ofSize: 11)
+            subLabel.font = .systemFont(ofSize: 13, weight: .regular)
             subLabel.textColor = MD3.isDark ? MD3.onSurfaceVariant.withAlphaComponent(0.75) : MD3.onSurfaceVariant
             subLabel.translatesAutoresizingMaskIntoConstraints = false
             titleStack.addArrangedSubview(subLabel)

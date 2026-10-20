@@ -348,6 +348,111 @@ final class CenteredPillLabel: NSTextField {
     }
 }
 
+/// Status badge with a circular indicator and centered label (capsule matching design).
+final class MD3StatusBadgeView: NSView, MD3Themeable {
+    private let dotView = NSView()
+    private let textLabel = NSTextField(labelWithString: "运行正常")
+    private let stack = NSStackView()
+
+    var stringValue: String = "运行正常" {
+        didSet {
+            let clean = stringValue.replacingOccurrences(of: "●", with: "").trimmingCharacters(in: .whitespaces)
+            textLabel.stringValue = clean
+            updateColors()
+            invalidateIntrinsicContentSize()
+        }
+    }
+
+    var textColor: NSColor = MD3.onSuccessContainer {
+        didSet {
+            textLabel.textColor = textColor
+        }
+    }
+
+    var backgroundColor: NSColor = MD3.successContainer {
+        didSet {
+            layer?.backgroundColor = backgroundColor.cgColor
+        }
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setup()
+    }
+
+    private func setup() {
+        wantsLayer = true
+        layer?.cornerRadius = 12
+        layer?.masksToBounds = true
+
+        dotView.wantsLayer = true
+        dotView.layer?.cornerRadius = 3
+        dotView.translatesAutoresizingMaskIntoConstraints = false
+        dotView.widthAnchor.constraint(equalToConstant: 6).isActive = true
+        dotView.heightAnchor.constraint(equalToConstant: 6).isActive = true
+
+        textLabel.font = .systemFont(ofSize: 11.5, weight: .semibold)
+        textLabel.isEditable = false
+        textLabel.isSelectable = false
+        textLabel.drawsBackground = false
+        textLabel.isBezeled = false
+        textLabel.lineBreakMode = .byClipping
+        textLabel.setContentHuggingPriority(.required, for: .horizontal)
+        textLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        textLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 6
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.addArrangedSubview(dotView)
+        stack.addArrangedSubview(textLabel)
+        addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            heightAnchor.constraint(equalToConstant: 24)
+        ])
+
+        updateColors()
+    }
+
+    override func layout() {
+        super.layout()
+        layer?.cornerRadius = bounds.height / 2
+    }
+
+    func updateColors() {
+        let isRunning = stringValue.contains("运行正常")
+        if isRunning {
+            layer?.backgroundColor = MD3.successContainer.cgColor
+            let dotColor = MD3.isDark ? MD3.success : NSColor(calibratedRed: 0.02, green: 0.50, blue: 0.21, alpha: 1.0)
+            dotView.layer?.backgroundColor = dotColor.cgColor
+            textLabel.textColor = MD3.onSuccessContainer
+        } else {
+            layer?.backgroundColor = MD3.surfaceContainer.cgColor
+            dotView.layer?.backgroundColor = MD3.outlineVariant.cgColor
+            textLabel.textColor = MD3.onSurfaceVariant
+        }
+    }
+
+    func themeChanged() {
+        updateColors()
+    }
+
+    override var intrinsicContentSize: NSSize {
+        let textSize = (textLabel.stringValue as NSString).size(withAttributes: [.font: textLabel.font ?? .systemFont(ofSize: 11.5)])
+        return NSSize(width: ceil(textSize.width) + 6 + 6 + 20, height: 24)
+    }
+}
+
 final class MD3AppVersionFooter: NSControl, MD3Themeable {
     private let stackView = NSStackView()
     private let versionLabel = NSTextField(labelWithString: "")

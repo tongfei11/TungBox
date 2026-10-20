@@ -23,12 +23,14 @@ final class RecentStatusTracker {
     var onItemsUpdated: (([Item]) -> Void)?
 
     init() {
-        // Pre-populate with typical startup sequence so the card is never blank
+        // Pre-populate with typical startup sequence matching design so the card is never blank
         let now = Date()
         items = [
-            Item(id: UUID(), timestamp: now.addingTimeInterval(-15), message: "读取订阅完成", level: .success),
-            Item(id: UUID(), timestamp: now.addingTimeInterval(-10), message: "应用规则配置", level: .info),
-            Item(id: UUID(), timestamp: now.addingTimeInterval(-5), message: "服务就绪", level: .neutral)
+            Item(id: UUID(), timestamp: now.addingTimeInterval(-20), message: "服务就绪", level: .success),
+            Item(id: UUID(), timestamp: now.addingTimeInterval(-45), message: "切换出站模式为 规则判定", level: .info),
+            Item(id: UUID(), timestamp: now.addingTimeInterval(-70), message: "应用规则配置", level: .info),
+            Item(id: UUID(), timestamp: now.addingTimeInterval(-180), message: "TUN 模式已关闭", level: .neutral),
+            Item(id: UUID(), timestamp: now.addingTimeInterval(-240), message: "应用已启动", level: .neutral)
         ]
     }
 
@@ -46,7 +48,7 @@ final class RecentStatusTracker {
 
     static func timeString(from date: Date) -> String {
         let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss"
+        formatter.dateFormat = "HH:mm"
         return formatter.string(from: date)
     }
 }
