@@ -20,12 +20,14 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var pendingRuleProjection: (UUID, [[String: Any]])?
     var ruleSetApplyStatus = "已保存，待应用"
     var isApplyingRuleSets = false
+    let ruleConfigValidator = RuleConfigValidator()
     var ruleSetWatchTimer: Timer?
     var ruleSetFileSignature: [String: Data]?
     var ruleSetWatchSubscriptionID: UUID?
     var systemHostsWatchTimer: Timer?
     var lastKnownSystemHostsFingerprint: String?
     var isSyncingHosts = false
+    var pendingDNSApplyReason: String?
 
     /// Rule-set files for the current subscription that failed to load/validate.
     var invalidRuleSets: [InvalidRuleSet] = []
@@ -894,65 +896,59 @@ extension MainWindowController {
     func checkSystemHostsChanges() {
         guard DNSConfig.readSystemHosts, !isSyncingHosts else { return }
         guard let current = DNSConfig.systemHostsFingerprint() else { return }
-        if lastKnownSystemHostsFingerprint == nil {
-            lastKnownSystemHostsFingerprint = current
-            return
-        }
         if current != lastKnownSystemHostsFingerprint {
-            lastKnownSystemHostsFingerprint = current
             syncHostsToRunningConfig(reason: "检测到系统 /etc/hosts 文件变更")
         }
     }
 
     func syncHostsToRunningConfig(reason: String) {
-        guard !isSyncingHosts else { return }
+        Task { @MainActor [weak self] in await self?.applyDNSSettings(reason: reason) }
+    }
+
+    private func applyDNSSettings(reason: String) async {
+        guard !runtimeCoordinator.state.isTerminating else { return }
+        if isSyncingHosts { pendingDNSApplyReason = reason; return }
+        // Retry on the next turn rather than racing a rule transaction.
+        if isApplyingRuleSets || runtimeCoordinator.state.isTransitioning {
+            dnsApplyWorkItem?.cancel()
+            let work = DispatchWorkItem { [weak self] in self?.syncHostsToRunningConfig(reason: reason) }
+            dnsApplyWorkItem = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+            return
+        }
         isSyncingHosts = true
-        defer { isSyncingHosts = false }
-
-        var targetIndex = selectedIndex
-        if targetIndex == nil && !profiles.isEmpty {
-            targetIndex = 0
-            selectProfile(at: 0)
-        }
-        guard let index = targetIndex, profiles.indices.contains(index) else { return }
-
-        let url = store.configURL(for: profiles[index])
-        guard var config = parseConfigObject(from: editor.string) ?? (try? String(contentsOf: url, encoding: .utf8)).flatMap({ parseConfigObject(from: $0) }) else {
-            return
-        }
-
-        let newDNS = DNSConfig.buildSingBoxDNS()
-        let oldDNS = config["dns"] as? [String: Any] ?? [:]
-        if canonicalJSON(newDNS) == canonicalJSON(oldDNS) {
-            return
-        }
-
-        config["dns"] = newDNS
-        config = ensureModeSupport(in: config, mode: selectedMode())
-
-        do {
-            let rendered = try renderConfig(config)
-            editor.string = rendered
-            _ = try saveCurrent()
-        } catch {
-            appendLog("[Hosts] 更新配置失败：\(error.localizedDescription)\n")
-            return
-        }
-
-        appendLog("[Hosts] \(reason)，已更新当前配置中的 hosts 条目\n")
-
-        if isTunEnabled {
-            do {
-                let prepared = try preparedTunConfigText(from: editor.string)
-                try TunServiceManager.writeRequestConfig(prepared, store: store)
-                appendLog("[Hosts] TUN 运行中，已写入新配置触发守护进程热重载\n")
-                RecentStatusTracker.shared.record("系统 hosts 已自动刷新", level: .info)
-            } catch {
-                appendLog("[Hosts] 热更新 TUN 配置失败：\(error.localizedDescription)\n")
+        defer {
+            isSyncingHosts = false
+            if let pending = pendingDNSApplyReason {
+                pendingDNSApplyReason = nil
+                syncHostsToRunningConfig(reason: pending)
             }
-        } else if isSystemProxyEnabled && runner.isRunning {
-            reconcileRuntime(reason: reason, forceRestart: true)
-            RecentStatusTracker.shared.record("系统 hosts 已自动刷新", level: .info)
+        }
+        guard let index = selectedIndex, profiles.indices.contains(index),
+              let config = parseConfigObject(from: editor.string) else {
+            appendLog("[DNS] 设置已保存，启动配置时应用\n")
+            return
+        }
+        let previous = editor.string
+        let hostsFingerprint = DNSConfig.systemHostsFingerprint()
+        let url = store.configURL(for: profiles[index])
+        // An external hosts update must not silently save in-progress JSON edits.
+        if reason == "检测到系统 /etc/hosts 文件变更",
+           (try? Data(contentsOf: url)) != Data(previous.utf8) { return }
+        let updated = ensureModeSupport(in: DNSConfig.applying(to: config), mode: selectedMode())
+        guard canonicalJSON(updated) != canonicalJSON(config) else {
+            lastKnownSystemHostsFingerprint = hostsFingerprint
+            return
+        }
+        do {
+            let candidate = try renderConfig(updated)
+            try await commitRuleConfig(candidate, previous: previous)
+            lastKnownSystemHostsFingerprint = hostsFingerprint
+            appendLog("[DNS] \(reason)：\(ruleSetApplyStatus)\n")
+            showToast(ruleSetApplyStatus, style: .info)
+        } catch {
+            appendLog("[DNS] 更新失败：\(error.localizedDescription)\n")
+            showToast("DNS 更新失败：\(error.localizedDescription)", style: .warning)
         }
     }
 }

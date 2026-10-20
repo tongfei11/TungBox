@@ -98,7 +98,7 @@ extension MainWindowController {
         guard var config = parseConfigObject(from: configText) else {
             throw NSError.user("当前配置不是有效 JSON")
         }
-        config["dns"] = DNSConfig.buildSingBoxDNS()
+        config = DNSConfig.applying(to: config)
         config = ConfigCompatibilityChecker.autoFix(config: config).config
         config = RuleSetRuntime.localizeBuiltInRuleSets(
             in: config,

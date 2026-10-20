@@ -219,7 +219,6 @@ extension MainWindowController: NSTextViewDelegate, NSTextFieldDelegate {
         DNSConfig.readSystemHosts = on
         lastKnownSystemHostsFingerprint = nil
         syncHostsToRunningConfig(reason: on ? "启用系统 hosts" : "停用系统 hosts")
-        showToast(on ? "已启用系统 hosts 并生效" : "已停用系统 hosts", style: .info)
     }
 
     @objc func dnsSettingsResetClicked() {
@@ -297,48 +296,7 @@ extension MainWindowController: NSTextViewDelegate, NSTextFieldDelegate {
     }
 
     private func applyDNSConfigToActiveProfile() {
-        let wasRunning = isProxyRuntimeRunning()
-        guard let _ = selectedIndex,
-              var config = parseConfigObject(from: editor.string) else {
-            appendLog("[DNS] 已保存（无活动配置可热更新，下次刷新订阅时生效）\n")
-            return
-        }
-
-        let newDNS = DNSConfig.buildSingBoxDNS()
-        // 比较新旧 dns 段，相等就什么都不做：避免无意义的写盘 / 重启 / 弹 toast
-        let oldDNS = config["dns"] as? [String: Any] ?? [:]
-        if canonicalJSON(newDNS) == canonicalJSON(oldDNS) {
-            return
-        }
-
-        config["dns"] = newDNS
-        do {
-            editor.string = try renderConfig(config)
-            _ = try saveCurrent()
-        } catch {
-            appendLog("[DNS] 写回当前配置失败：\(error.localizedDescription)\n")
-            showToast("DNS 写回失败：\(error.localizedDescription)", style: .warning)
-            return
-        }
-        appendLog("[DNS] 已更新当前配置 dns 段\n")
-        if wasRunning {
-            if isTunEnabled {
-                do {
-                    let prepared = try preparedTunConfigText(from: editor.string)
-                    try TunServiceManager.writeRequestConfig(prepared, store: store)
-                    appendLog("[DNS] TUN 运行中，已写入新配置触发热重载\n")
-                    showToast("DNS 已更新，TUN 服务已重载", style: .info)
-                } catch {
-                    appendLog("[DNS] 热更新 TUN 配置失败：\(error.localizedDescription)\n")
-                }
-            } else {
-                appendLog("[DNS] 代理运行中，正在重启服务以应用新 DNS 设置\n")
-                showToast("DNS 已更新，正在重启代理", style: .info)
-                reconcileRuntime(reason: "DNS 设置变更", forceRestart: true)
-            }
-        } else {
-            showToast("DNS 设置已保存", style: .success)
-        }
+        syncHostsToRunningConfig(reason: "DNS 设置变更")
     }
 
     func canonicalJSON(_ obj: [String: Any]) -> String {

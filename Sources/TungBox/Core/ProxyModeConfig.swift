@@ -81,18 +81,21 @@ enum ProxyModeConfig {
             : proxyTag
         var route = config["route"] as? [String: Any] ?? [:]
         var rules = route["rules"] as? [[String: Any]] ?? []
-        rules.removeAll { isManagedRuntimeRule($0) }
-        let hostsDomains = Array(DNSConfig.collectHostsEntries().keys).sorted()
+        let dns = config["dns"] as? [String: Any] ?? [:]
+        let servers = dns["servers"] as? [[String: Any]] ?? []
+        let hosts = servers.first { ($0["tag"] as? String) == "dns-hosts" }?["predefined"] as? [String: Any] ?? [:]
+        let hostsDomains = hosts.keys.sorted()
+        let generatedHostsRules = hostsOverrideRules(in: config)
+        let generatedHostsObjects = generatedHostsRules.map { NSDictionary(dictionary: $0) }
+        rules.removeAll { rule in
+            isManagedRuntimeRule(rule, hostsDomains: hostsDomains)
+                || generatedHostsObjects.contains { $0.isEqual(to: rule) }
+        }
         var prefixRules: [[String: Any]] = [
             ["action": "sniff"],
             ["protocol": "dns", "action": "hijack-dns"]
         ]
-        if !hostsDomains.isEmpty {
-            prefixRules.append([
-                "domain": hostsDomains,
-                "action": "resolve"
-            ])
-        }
+        prefixRules += generatedHostsRules
         prefixRules.append(["clash_mode": "direct", "outbound": "direct"])
         prefixRules.append(["clash_mode": "global", "outbound": globalTag])
         rules = prefixRules + rules
@@ -117,15 +120,83 @@ enum ProxyModeConfig {
         return config
     }
 
-    private static func isManagedRuntimeRule(_ rule: [String: Any]) -> Bool {
+    static func hostsOverrideRules(in config: [String: Any]) -> [[String: Any]] {
+        let dns = config["dns"] as? [String: Any] ?? [:]
+        let servers = dns["servers"] as? [[String: Any]] ?? []
+        let hosts = servers.first { ($0["tag"] as? String) == "dns-hosts" }?["predefined"] as? [String: [String]] ?? [:]
+        let strategy = dns["strategy"] as? String ?? ""
+        var rules: [[String: Any]] = []
+        for domain in hosts.keys.sorted() {
+            guard let address = preferredHostsAddress(hosts[domain] ?? [], strategy: strategy) else { continue }
+            // IP destinations already carry a sniffed/reverse-mapped Domain.
+            // FQDN destinations must retain their name for subsequent route rules.
+            for version in [4, 6] {
+                rules.append(["domain": [domain], "ip_version": version,
+                              "action": "route-options", "override_address": address])
+            }
+        }
+        if !hosts.isEmpty {
+            rules.append(["domain": hosts.keys.sorted(), "action": "resolve", "server": "dns-hosts"])
+        }
+        return rules
+    }
+
+    static func preferredHostsAddress(_ addresses: [String], strategy: String) -> String? {
+        let valid = addresses.filter { DNSConfig.isValidIPAddress($0) }
+        let v4 = valid.first { !$0.contains(":") }
+        let v6 = valid.first { $0.contains(":") }
+        switch strategy {
+        case "ipv4_only": return v4
+        case "ipv6_only": return v6
+        case "prefer_ipv4": return v4 ?? v6
+        case "prefer_ipv6": return v6 ?? v4
+        default: return valid.first
+        }
+    }
+
+    /// Remove only rules matching the old hosts snapshot before replacing DNS.
+    static func removingHostsRules(in config: [String: Any]) -> [String: Any] {
+        var result = config
+        var route = config["route"] as? [String: Any] ?? [:]
+        let domains = hostsDomains(in: config)
+        let generatedHostsObjects = hostsOverrideRules(in: config).map { NSDictionary(dictionary: $0) }
+        var rules = route["rules"] as? [[String: Any]] ?? []
+        rules.removeAll { rule in
+            if generatedHostsObjects.contains(where: { $0.isEqual(to: rule) }) { return true }
+            guard rule["action"] as? String == "resolve" else { return false }
+            if Set(rule.keys) == Set(["action", "domain", "server"]), rule["server"] as? String == "dns-hosts" { return true }
+            return !domains.isEmpty && Set(rule.keys) == Set(["action", "domain"])
+                && (rule["domain"] as? [String])?.sorted() == domains
+        }
+        route["rules"] = rules
+        result["route"] = route
+        return result
+    }
+
+    private static func hostsDomains(in config: [String: Any]) -> [String] {
+        let dns = config["dns"] as? [String: Any] ?? [:]
+        let servers = dns["servers"] as? [[String: Any]] ?? []
+        let hosts = servers.first { ($0["tag"] as? String) == "dns-hosts" }?["predefined"] as? [String: Any] ?? [:]
+        return hosts.keys.sorted()
+    }
+
+    private static func isManagedRuntimeRule(_ rule: [String: Any], hostsDomains: [String]) -> Bool {
         if let action = (rule["action"] as? String)?.lowercased() {
             if action == "sniff" { return true }
             if action == "hijack-dns",
                (rule["protocol"] as? String)?.lowercased() == "dns" {
                 return true
             }
-            if action == "resolve", rule["domain"] != nil {
-                return true
+            if action == "resolve", rule["domain"] is [String] {
+                let keys = Set(rule.keys)
+                if keys == Set(["action", "domain", "server"]), rule["server"] as? String == "dns-hosts" {
+                    return true
+                }
+                // Migrate only the exact legacy generated rule for this snapshot.
+                if keys == Set(["action", "domain"]), !hostsDomains.isEmpty,
+                   (rule["domain"] as? [String])?.sorted() == hostsDomains {
+                    return true
+                }
             }
         }
         guard let clashMode = (rule["clash_mode"] as? String)?.lowercased() else { return false }

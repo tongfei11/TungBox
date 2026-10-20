@@ -118,7 +118,7 @@ final class Runner: @unchecked Sendable {
         }
         let actualConfig = try preprocessConfig(at: config)
         defer { removeGeneratedRuntimeConfig(actualConfig, original: config) }
-        let result = runAndWait(binary, ["check", "-c", actualConfig.path])
+        let result = runAndWait(binary, ["check", "-c", actualConfig.path], timeoutSeconds: 15)
         if result.status != 0 {
             throw NSError.user(result.output.isEmpty ? "配置检查失败" : result.output)
         }

@@ -54,6 +54,7 @@ extension MainWindowController {
                 tunCaptureIntentID = UUID()
                 subscriptionTimer?.invalidate()
                 ruleSetWatchTimer?.invalidate()
+                stopSystemHostsWatching()
                 stopStatsTimer()
                 stopConnectionsRefreshTimer()
                 stopTunRequestHeartbeat()
@@ -297,7 +298,7 @@ extension MainWindowController {
                 guard var config = parseConfigObject(from: editor.string) else {
                     throw NSError.user("当前配置不是有效 JSON")
                 }
-                config["dns"] = DNSConfig.buildSingBoxDNS()
+                config = DNSConfig.applying(to: config)
                 config = setTunEnabled(false, in: config)   // user proxy is never TUN
                 config = ensureModeSupport(in: config, mode: selectedMode())
                 editor.string = try renderConfig(config)
@@ -695,8 +696,8 @@ extension MainWindowController {
     /// API. sing-box's cache_file remembers the previously selected outbound and
     /// restores it on (re)start, which otherwise overrides the user's last explicit
     /// choice when sing-box is restarted (e.g. switching capture mode into TUN).
-    func reconcileSelectorSelectionsToConfigAsync() async {
-        guard let config = parseConfigObject(from: editor.string),
+    func reconcileSelectorSelectionsToConfigAsync(configText: String? = nil) async {
+        guard let config = parseConfigObject(from: configText ?? editor.string),
               let outbounds = config["outbounds"] as? [[String: Any]] else { return }
         var targets: [(group: String, node: String)] = []
         for outbound in outbounds {

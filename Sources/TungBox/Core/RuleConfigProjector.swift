@@ -3,6 +3,24 @@ import Foundation
 /// Rebuilds route rules from an independent subscription baseline and explicit
 /// user-rule snapshots. No window, storage, Core process or runtime side effects.
 enum RuleConfigProjector {
+    /// Undo only this mutation; keep later edits and never resurrect deleted subscriptions.
+    static func restoringMutation(current: [CustomRule], previous: [CustomRule], attempted: [CustomRule],
+                                  subscriptionExists: Bool) -> [CustomRule] {
+        guard subscriptionExists else { return current }
+        var result = current
+        let ids = Set(previous.map(\.id)).union(attempted.map(\.id))
+        for id in ids {
+            let before = previous.first { $0.id == id }
+            let after = attempted.first { $0.id == id }
+            guard before != after, result.first(where: { $0.id == id }) == after else { continue }
+            if let before {
+                if let index = result.firstIndex(where: { $0.id == id }) { result[index] = before }
+                else { result.insert(before, at: min(previous.firstIndex(where: { $0.id == id }) ?? result.count, result.count)) }
+            } else { result.removeAll { $0.id == id } }
+        }
+        return result
+    }
+
     struct Projection {
         let config: [String: Any]
         let routeRules: [[String: Any]]

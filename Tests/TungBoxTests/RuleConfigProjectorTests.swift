@@ -6,6 +6,35 @@ final class RuleConfigProjectorTests: XCTestCase {
     private let subscriptionID = UUID(uuidString: "10000000-0000-0000-0000-000000000001")!
     private let otherID = UUID(uuidString: "20000000-0000-0000-0000-000000000001")!
 
+    func testRollbackUsesIdentityWhenAnotherRuleDisappears() {
+        let removed = rule("removed.invalid")
+        let original = rule("original.invalid")
+        var changed = original
+        changed.enabled = false
+        let restored = RuleConfigProjector.restoringMutation(current: [changed], previous: [removed, original],
+            attempted: [removed, changed], subscriptionExists: true)
+        XCTAssertEqual(restored, [original])
+    }
+
+    func testRollbackKeepsNewerEditAndDoesNotResurrectDeletedSubscription() {
+        let original = rule("original.invalid")
+        var changed = original
+        changed.enabled = false
+        var newer = changed
+        newer.note = "newer edit"
+        XCTAssertEqual(RuleConfigProjector.restoringMutation(current: [newer], previous: [original],
+            attempted: [changed], subscriptionExists: true), [newer])
+        XCTAssertEqual(RuleConfigProjector.restoringMutation(current: [], previous: [original],
+            attempted: [], subscriptionExists: false), [])
+    }
+
+    func testFailedDeleteRestoresOnlyDeletedRule() {
+        let original = rule("original.invalid")
+        let unrelated = rule("other.invalid", subscription: otherID)
+        XCTAssertEqual(RuleConfigProjector.restoringMutation(current: [unrelated], previous: [original],
+            attempted: [], subscriptionExists: true), [original, unrelated])
+    }
+
     func testProjectionKeepsStableCustomOrderThenSetOrderThenSubscriptionBase() throws {
         let a = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
         let b = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!

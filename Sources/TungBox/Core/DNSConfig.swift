@@ -193,9 +193,14 @@ enum DNSConfig {
     /// - /etc/hosts 格式：`ip host1 host2 ...`
     /// - 自定义格式：`domain=ip[;ip2,ip3]`（每行一条）
     static func collectHostsEntries() -> [String: [String]] {
-        var result: [String: [String]] = [:]
+        let systemText = readSystemHosts ? (try? String(contentsOfFile: "/etc/hosts", encoding: .utf8)) : nil
+        return parseHostsEntries(systemHosts: systemText, customHosts: customHosts)
+    }
 
-        if readSystemHosts, let content = try? String(contentsOfFile: "/etc/hosts", encoding: .utf8) {
+    /// Parse a single snapshot; custom entries take precedence over system entries.
+    static func parseHostsEntries(systemHosts: String?, customHosts: String) -> [String: [String]] {
+        var result: [String: [String]] = [:]
+        if let content = systemHosts {
             for rawLine in content.components(separatedBy: .newlines) {
                 let line = rawLine.trimmingCharacters(in: .whitespaces)
                 if line.isEmpty || line.hasPrefix("#") { continue }
@@ -256,7 +261,17 @@ enum DNSConfig {
     // MARK: - sing-box dns 字典生成
 
     /// 拼出 sing-box 配置里的 `dns` 块。被 SubscriptionImporter.basicDNS() 调用。
-    static func buildSingBoxDNS() -> [String: Any] {
+    static func applying(to config: [String: Any]) -> [String: Any] {
+        replacingDNS(in: config, with: buildSingBoxDNS())
+    }
+
+    static func replacingDNS(in config: [String: Any], with dns: [String: Any]) -> [String: Any] {
+        var result = ProxyModeConfig.removingHostsRules(in: config)
+        result["dns"] = dns
+        return result
+    }
+
+    static func buildSingBoxDNS(hostsEntries: [String: [String]]? = nil) -> [String: Any] {
         var servers: [[String: Any]] = []
 
         if let localDict = parseServerURL(localServer, tag: "dns-local", detour: nil) {
@@ -283,16 +298,16 @@ enum DNSConfig {
 
         // Hosts 优先级最高：放在所有规则前面，仅对配置的域名生效（精确匹配）。
         // 未匹配的域名落到后面的规则，所以不会"吃掉"全部流量。
-        let hostsMap = collectHostsEntries()
+        let hostsMap = hostsEntries ?? collectHostsEntries()
         if !hostsMap.isEmpty {
             var hostsServer: [String: Any] = [
                 "type": "hosts",
                 "tag": "dns-hosts",
                 "predefined": hostsMap
             ]
-            if readSystemHosts {
-                hostsServer["path"] = ["/etc/hosts"]
-            }
+            // An empty path list makes sing-box read /etc/hosts implicitly.
+            // Use macOS's empty file so only our merged snapshot supplies answers.
+            hostsServer["path"] = ["/dev/null"]
             servers.append(hostsServer)
             rules.append([
                 "domain": Array(hostsMap.keys).sorted(),

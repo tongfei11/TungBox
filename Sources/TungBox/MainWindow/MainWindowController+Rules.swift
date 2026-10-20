@@ -258,6 +258,12 @@ extension MainWindowController {
     }
 
     @objc func deleteCustomRuleClicked() {
+        Task { @MainActor [weak self] in await self?.deleteSelectedCustomRule() }
+    }
+
+    private func deleteSelectedCustomRule() async {
+        guard beginRuleChange() else { return }
+        defer { isApplyingRuleSets = false }
         do {
             let rows = filteredRuleRows()
             let row = rulesTable.selectedRow
@@ -274,17 +280,13 @@ extension MainWindowController {
             let previousRules = customRules
             let previousConfig = editor.string
             customRules.removeAll { $0.id == ruleID }
+            let attemptedRules = customRules
             store.saveCustomRules(customRules)
-            editor.string = try renderConfig(try applyCustomRules(to: previousConfig, subscriptionID: subscription.id))
-            let url = try saveCurrent()
+            let candidate = try renderConfig(try applyCustomRules(to: previousConfig, subscriptionID: subscription.id))
             do {
-                _ = try runner.check(config: url)
-                try applyRuleSetRuntime(editor.string, previous: Data(previousConfig.utf8), configURL: url)
+                try await commitRuleConfig(candidate, previous: previousConfig)
             } catch {
-                customRules = previousRules
-                store.saveCustomRules(customRules)
-                editor.string = previousConfig
-                _ = try? saveCurrent()
+                restoreCustomRuleMutation(previous: previousRules, attempted: attemptedRules, subscriptionID: subscription.id)
                 throw error
             }
             appendLog("[规则] 已删除选中的自定义规则\n")
@@ -324,14 +326,23 @@ extension MainWindowController {
 
     func setCustomRuleEnabled(at idx: Int, to enabled: Bool) {
         guard customRules.indices.contains(idx) else { return }
+        let id = customRules[idx].id
+        Task { @MainActor [weak self] in await self?.applyCustomRuleEnabled(id: id, to: enabled) }
+    }
+
+    private func applyCustomRuleEnabled(id: UUID, to enabled: Bool) async {
+        guard let idx = customRules.firstIndex(where: { $0.id == id }), beginRuleChange() else { return }
+        defer { isApplyingRuleSets = false }
+        guard customRules[idx].enabled != enabled else { return }
         if enabled, let error = RuleRouting.enableError(for: customRules[idx], config: parseConfigObject(from: editor.string)) {
             showError(NSError.user("启用失败：\(error)"))
             refreshRulesFromEditor()
             return
         }
-        let previousEnabled = customRules[idx].enabled
+        let previousRules = customRules
         let previousConfig = editor.string
         customRules[idx].enabled = enabled
+        let attemptedRules = customRules
         store.saveCustomRules(customRules)
         appendLog("[规则] \(customRules[idx].type) \(customRules[idx].value) 已\(customRules[idx].enabled ? "启用" : "禁用")\n")
 
@@ -339,16 +350,11 @@ extension MainWindowController {
         if let sub = currentSubscription() {
             do {
                 try ensureRuleBase(for: sub)
-                editor.string = try renderConfig(try applyCustomRules(to: editor.string, subscriptionID: sub.id))
-                let url = try saveCurrent()
-                _ = try runner.check(config: url)
-                try applyRuleSetRuntime(editor.string, previous: Data(previousConfig.utf8), configURL: url)
+                let candidate = try renderConfig(try applyCustomRules(to: previousConfig, subscriptionID: sub.id))
+                try await commitRuleConfig(candidate, previous: previousConfig)
             } catch {
                 // Rollback
-                customRules[idx].enabled = previousEnabled
-                store.saveCustomRules(customRules)
-                editor.string = previousConfig
-                _ = try? saveCurrent()
+                restoreCustomRuleMutation(previous: previousRules, attempted: attemptedRules, subscriptionID: sub.id)
                 showError(error)
             }
         }

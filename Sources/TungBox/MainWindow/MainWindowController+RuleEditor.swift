@@ -347,8 +347,10 @@ extension MainWindowController {
         customRuleTypeChanged()   // sync label / placeholder / app-picker to current type
 
         dialog.onConfirm = { [weak self, weak dialog] in
-            self?.addCustomRuleFromDialog()
-            dialog?.dismiss()
+            guard let self else { return }
+            Task { @MainActor in
+                if await self.saveCustomRuleFromDialog() { dialog?.dismiss() }
+            }
         }
 
         dialog.onCancel = { [weak dialog] in
@@ -356,7 +358,9 @@ extension MainWindowController {
         }
     }
 
-    private func addCustomRuleFromDialog() {
+    private func saveCustomRuleFromDialog() async -> Bool {
+        guard beginRuleChange() else { return false }
+        defer { isApplyingRuleSets = false }
         do {
             let value = customRuleValueField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             let type = selectedRuleType
@@ -377,16 +381,14 @@ extension MainWindowController {
                 customRules[idx].value = value
                 customRules[idx].strategy = strategy
                 customRules[idx].note = note
+                let attemptedRules = customRules
                 store.saveCustomRules(customRules)
-                editor.string = try renderConfig(try applyCustomRules(to: previous, subscriptionID: subscription.id))
-                let url = try saveCurrent()
+                let candidate = try renderConfig(try applyCustomRules(to: previous, subscriptionID: subscription.id))
                 do {
-                    _ = try runner.check(config: url)
-                    try applyRuleSetRuntime(editor.string, previous: Data(previous.utf8), configURL: url)
+                    try await commitRuleConfig(candidate, previous: previous)
                 }
                 catch {
-                    customRules = previousRules; store.saveCustomRules(customRules)
-                    editor.string = previous; _ = try? saveCurrent()
+                    restoreCustomRuleMutation(previous: previousRules, attempted: attemptedRules, subscriptionID: subscription.id)
                     throw error
                 }
                 editingRuleID = nil
@@ -396,16 +398,14 @@ extension MainWindowController {
                 // Add new rule
                 let newRule = CustomRule(id: UUID(), subscriptionID: subscription.id, type: type, value: value, strategy: strategy, note: note, enabled: true, createdAt: Date())
                 customRules.append(newRule)
+                let attemptedRules = customRules
                 store.saveCustomRules(customRules)
-                editor.string = try renderConfig(try applyCustomRules(to: previous, subscriptionID: subscription.id))
-                let url = try saveCurrent()
+                let candidate = try renderConfig(try applyCustomRules(to: previous, subscriptionID: subscription.id))
                 do {
-                    _ = try runner.check(config: url)
-                    try applyRuleSetRuntime(editor.string, previous: Data(previous.utf8), configURL: url)
+                    try await commitRuleConfig(candidate, previous: previous)
                 }
                 catch {
-                    customRules.removeAll { $0.id == newRule.id }; store.saveCustomRules(customRules)
-                    editor.string = previous; _ = try? saveCurrent()
+                    restoreCustomRuleMutation(previous: previousRules, attempted: attemptedRules, subscriptionID: subscription.id)
                     throw error
                 }
                 appendLog("[规则] 已添加 \(type) \(value) -> \(strategy)\(note.isEmpty ? "" : "，备注：\(note)")\n")
@@ -415,8 +415,11 @@ extension MainWindowController {
             customRuleValueField.stringValue = ""
             customRuleNoteField.stringValue = ""
             refreshRulesFromEditor()
+            return true
         } catch {
             showError(error)
+            refreshRulesFromEditor()
+            return false
         }
     }
 
