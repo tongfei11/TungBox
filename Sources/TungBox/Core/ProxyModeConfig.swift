@@ -137,6 +137,9 @@ enum ProxyModeConfig {
         }
         if !hosts.isEmpty {
             rules.append(["domain": hosts.keys.sorted(), "action": "resolve", "server": "dns-hosts"])
+            // Hosts mappings are explicit local overrides: select direct before
+            // global mode and subscription/custom domain proxy rules can match.
+            rules.append(["domain": hosts.keys.sorted(), "action": "route", "outbound": "direct"])
         }
         return rules
     }

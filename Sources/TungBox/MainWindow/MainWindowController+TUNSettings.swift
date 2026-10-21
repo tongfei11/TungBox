@@ -178,14 +178,14 @@ extension MainWindowController {
         scheduleTUNApply()
     }
 
-    @objc func tunStrictRouteToggled(_ sender: NSButton) {
+    @objc func tunStrictRouteToggled(_ sender: MD3Checkbox) {
         let on = sender.state == .on
         guard on != TUNConfig.strictRoute else { return }
         TUNConfig.strictRoute = on
         scheduleTUNApply()
     }
 
-    @objc func tunEINToggled(_ sender: NSButton) {
+    @objc func tunEINToggled(_ sender: MD3Checkbox) {
         let on = sender.state == .on
         guard on != TUNConfig.endpointIndependentNAT else { return }
         TUNConfig.endpointIndependentNAT = on

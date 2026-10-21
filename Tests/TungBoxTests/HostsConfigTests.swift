@@ -55,6 +55,28 @@ final class HostsConfigTests: XCTestCase {
         XCTAssertTrue(NSDictionary(dictionary: rules.last!).isEqual(to: route))
     }
 
+    func testSystemHostsMappingWinsOverEnabledOrDisabledDomainProxyRuleInEveryMode() throws {
+        let entries = DNSConfig.parseHostsEntries(systemHosts: "124.113.85.3 ops-test.zdxlz.com", customHosts: "")
+        let proxyRule: [String: Any] = ["domain_suffix": "zdxlz.com", "action": "route", "outbound": "proxy"]
+        for mode in ["Rule", "Global", "Direct"] {
+            for domainRules in [[proxyRule], []] {
+                var source = config(entries, rules: domainRules)
+                source["outbounds"] = [["type": "direct", "tag": "direct"], ["type": "direct", "tag": "proxy"]]
+                let result = ProxyModeConfig.ensureModeSupport(in: source, mode: mode, fallbackProxyTag: "proxy")
+                let rules = try XCTUnwrap((result["route"] as? [String: Any])?["rules"] as? [[String: Any]])
+                XCTAssertEqual(rules[2]["override_address"] as? String, "124.113.85.3")
+                let firstTerminal = try XCTUnwrap(rules.first { $0["outbound"] != nil })
+                XCTAssertEqual(firstTerminal["domain"] as? [String], ["ops-test.zdxlz.com"])
+                XCTAssertEqual(firstTerminal["outbound"] as? String, "direct")
+                let rebuilt = ProxyModeConfig.ensureModeSupport(in: result, mode: mode, fallbackProxyTag: "proxy")
+                XCTAssertTrue(NSDictionary(dictionary: result).isEqual(to: rebuilt))
+                let disabled = ProxyModeConfig.ensureModeSupport(in: DNSConfig.replacingDNS(in: result, with: ["servers": []]), mode: mode, fallbackProxyTag: "proxy")
+                let remaining = (disabled["route"] as? [String: Any])?["rules"] as? [[String: Any]] ?? []
+                XCTAssertFalse(remaining.contains { $0["domain"] as? [String] == ["ops-test.zdxlz.com"] })
+            }
+        }
+    }
+
     func testReplacingHostsRemovesOldOverridesAndMigratesLegacyRule() throws {
         let old = config(["old.test": ["127.0.0.1"]], rules: [["action": "resolve", "domain": ["old.test"]], ["action": "resolve", "domain": ["user.test"]]])
         let newDNS: [String: Any] = ["servers": [["tag": "dns-hosts", "predefined": ["new.test": ["127.0.0.2"]]]]]

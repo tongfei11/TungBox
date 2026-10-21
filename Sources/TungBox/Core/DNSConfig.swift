@@ -154,19 +154,17 @@ enum DNSConfig {
     }
 
     static var readSystemHosts: Bool {
-        get {
-            if let v = UserDefaults.standard.object(forKey: kReadSystemHosts) as? Bool {
-                return v
-            }
-            return defaultReadSystemHosts
-        }
-        set {
-            if newValue == defaultReadSystemHosts {
-                UserDefaults.standard.removeObject(forKey: kReadSystemHosts)
-            } else {
-                UserDefaults.standard.set(newValue, forKey: kReadSystemHosts)
-            }
-        }
+        get { readSystemHosts(from: .standard) }
+        set { setReadSystemHosts(newValue, defaults: .standard) }
+    }
+
+    static func readSystemHosts(from defaults: UserDefaults) -> Bool {
+        (defaults.object(forKey: kReadSystemHosts) as? Bool) ?? defaultReadSystemHosts
+    }
+
+    static func setReadSystemHosts(_ enabled: Bool, defaults: UserDefaults) {
+        if enabled == defaultReadSystemHosts { defaults.removeObject(forKey: kReadSystemHosts) }
+        else { defaults.set(enabled, forKey: kReadSystemHosts) }
     }
 
     static var customHosts: String {

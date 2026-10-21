@@ -344,7 +344,7 @@ extension MainWindowController {
         customRules[idx].enabled = enabled
         let attemptedRules = customRules
         store.saveCustomRules(customRules)
-        appendLog("[规则] \(customRules[idx].type) \(customRules[idx].value) 已\(customRules[idx].enabled ? "启用" : "禁用")\n")
+        appendLog("[规则] 正在\(enabled ? "启用" : "停用") \(customRules[idx].type) \(customRules[idx].value)\n")
 
         // Regenerate config to apply the toggle
         if let sub = currentSubscription() {
@@ -352,10 +352,12 @@ extension MainWindowController {
                 try ensureRuleBase(for: sub)
                 let candidate = try renderConfig(try applyCustomRules(to: previousConfig, subscriptionID: sub.id))
                 try await commitRuleConfig(candidate, previous: previousConfig)
+                showToast("规则已\(enabled ? "启用" : "停用")：\(ruleSetApplyStatus)",
+                          style: ruleSetApplyStatus.hasPrefix("已生效") ? .success : .info)
             } catch {
                 // Rollback
                 restoreCustomRuleMutation(previous: previousRules, attempted: attemptedRules, subscriptionID: sub.id)
-                showError(error)
+                showToast("规则更新失败：\(error.localizedDescription)", style: .error)
             }
         }
         refreshRulesFromEditor()

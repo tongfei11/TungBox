@@ -101,7 +101,7 @@ extension MainWindowController: NSTextViewDelegate, NSTextFieldDelegate {
         dnsReadSystemHostsCheckbox.state = DNSConfig.readSystemHosts ? .on : .off
         let systemHostsRow = settingsToggleRow(
             title: "读取系统 /etc/hosts",
-            hint: "TUN 接管 53 端口后系统 /etc/hosts 默认不生效；启用后由 sing-box 一并读取。与上方「自定义 hosts」相互独立，可单独使用；同名域名以自定义为准。",
+            hint: "启用后读取系统 /etc/hosts；命中后直连映射 IP，不受域名代理规则影响。与上方「自定义 hosts」可单独使用；同名域名以自定义为准。",
             checkbox: dnsReadSystemHostsCheckbox
         )
 
@@ -193,7 +193,7 @@ extension MainWindowController: NSTextViewDelegate, NSTextFieldDelegate {
         scheduleDNSApply()
     }
 
-    @objc func dnsFakeIPToggled(_ sender: NSButton) {
+    @objc func dnsFakeIPToggled(_ sender: MD3Checkbox) {
         let on = sender.state == .on
         guard on != DNSConfig.fakeIPEnabled else { return }
         DNSConfig.fakeIPEnabled = on
@@ -213,7 +213,7 @@ extension MainWindowController: NSTextViewDelegate, NSTextFieldDelegate {
         scheduleDNSApply()
     }
 
-    @objc func dnsReadSystemHostsToggled(_ sender: NSButton) {
+    @objc func dnsReadSystemHostsToggled(_ sender: MD3Checkbox) {
         let on = sender.state == .on
         guard on != DNSConfig.readSystemHosts else { return }
         DNSConfig.readSystemHosts = on

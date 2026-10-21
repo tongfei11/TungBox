@@ -68,6 +68,7 @@ extension MainWindowController {
         }
         isApplyingRuleSets = true
         ruleSetApplyStatus = "正在校验，尚未生效"
+        showToast("正在更新规则", style: .info)
         return true
     }
 
@@ -304,6 +305,7 @@ extension MainWindowController {
             if candidate != editor.string {
                 do {
                     try await commitRuleConfig(candidate, previous: editor.string)
+                    showToast("规则已刷新：\(ruleSetApplyStatus)", style: ruleSetApplyStatus.hasPrefix("已生效") ? .success : .info)
                 } catch {
                     pendingRuleProjection = nil
                     throw error
@@ -316,6 +318,7 @@ extension MainWindowController {
             ruleSetFileSignature = try? ruleSetFiles(for: sub.id)
             ruleSetApplyStatus = "未应用：\(error.localizedDescription)"
             appendLog("[规则集] \(ruleSetApplyStatus)\n")
+            showToast("规则刷新失败：\(error.localizedDescription)", style: .error)
             refreshRulesFromEditor()
         }
     }
