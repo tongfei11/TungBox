@@ -39,6 +39,7 @@ actor ExternalIPService {
         config.timeoutIntervalForRequest = 3.0
         config.timeoutIntervalForResource = 5.0
         let session = URLSession(configuration: config)
+        defer { session.finishTasksAndInvalidate() }
 
         for endpoint in endpoints {
             guard let url = URL(string: endpoint) else { continue }

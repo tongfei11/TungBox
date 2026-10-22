@@ -266,10 +266,9 @@ extension MainWindowController {
                 }
             }
             do {
-                async let connsTask = ClashAPI.connectionsFromAll(extraPorts: extraPorts)
-                async let totalsTask = ClashAPI.trafficTotals(ports: allPorts)
-                let list = try await connsTask
-                let totals = (try? await totalsTask) ?? [:]
+                let snapshot = try await ClashAPI.connectionSnapshot(ports: allPorts)
+                let list = snapshot.connections
+                let totals = snapshot.totals
                 await MainActor.run {
                     applyConnections(list, detail: "实时刷新")
                     if !totals.isEmpty { accumulateTrafficFromTotals(totals) }

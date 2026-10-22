@@ -211,6 +211,7 @@ enum CoreUpdater {
         config.timeoutIntervalForRequest = 15
         config.timeoutIntervalForResource = 30
         let session = URLSession(configuration: config)
+        defer { session.finishTasksAndInvalidate() }
 
         let (_, response) = try await session.data(for: request)
         if let http = response as? HTTPURLResponse, !(200..<400).contains(http.statusCode) {

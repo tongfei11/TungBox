@@ -500,6 +500,7 @@ extension MainWindowController {
 
         memoryValueLabel.font = .systemFont(ofSize: 15, weight: .bold)
         memoryValueLabel.textColor = MD3.onSurface
+        memoryValueLabel.toolTip = "TungBox 主进程的物理内存足迹（含压缩内存），不含 sing-box 内核。"
 
         let memInfoCol = NSStackView(views: [memTitle, memoryValueLabel])
         memInfoCol.orientation = .vertical
@@ -1144,8 +1145,9 @@ extension MainWindowController {
                     self?.isUpdatingRunningStats = false
                 }
             }
-            let apiConnections = try? await ClashAPI.connectionsFromAll(extraPorts: extraPorts)
-            let totals = (try? await ClashAPI.trafficTotals(ports: allPorts)) ?? [:]
+            let snapshot = try? await ClashAPI.connectionSnapshot(ports: allPorts)
+            let apiConnections = snapshot?.connections
+            let totals = snapshot?.totals ?? [:]
             var proxiesByPort: [Int: [String: Any]] = [:]
             for port in selectorAPIPorts {
                 if let proxies = try? await ClashAPI.proxies(port: port) {

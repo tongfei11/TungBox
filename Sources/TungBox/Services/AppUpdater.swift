@@ -77,6 +77,7 @@ enum AppUpdater {
         config.timeoutIntervalForResource = 30
         config.connectionProxyDictionary = StartupNetworkPolicy.postConnectionProxyDictionary(proxyPort: proxyPort)
         let session = URLSession(configuration: config)
+        defer { session.finishTasksAndInvalidate() }
 
         let (_, response) = try await session.data(for: request)
         if let http = response as? HTTPURLResponse, !(200..<400).contains(http.statusCode) {
@@ -112,6 +113,7 @@ enum AppUpdater {
         config.timeoutIntervalForResource = 30
         config.connectionProxyDictionary = StartupNetworkPolicy.postConnectionProxyDictionary(proxyPort: proxyPort)
         let session = URLSession(configuration: config)
+        defer { session.finishTasksAndInvalidate() }
 
         let (data, response) = try await session.data(for: request)
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {

@@ -77,39 +77,42 @@ enum ClashAPI {
         return "/\(kind)/\(escapedTag)/delay?url=\(escapedURL)&timeout=\(kind == "group" ? 30000 : 5000)"
     }
 
-    static func connections() async throws -> [ConnectionInfo] {
-        try await parseConnections(from: requestJSON(path: "/connections"))
+    struct ConnectionSnapshot {
+        var connections: [ConnectionInfo] = []
+        var totals: [Int: (upload: Int64, download: Int64)] = [:]
     }
 
-    /// 同时拉用户代理(9090) 和 TUN 守护进程(9091) 的 connections，合并返回。
-    /// 解耦架构后两个 sing-box 进程各自维护连接表，流量统计必须把两边都算上，
-    /// 否则 TUN-only 模式（用户代理不跑）下流量永远为 0。
-    /// 用 ConnectionInfo.id 前缀加上端口区分，防止两个进程内部 id 碰撞。
-    static func connectionsFromAll(extraPorts: [Int]) async throws -> [ConnectionInfo] {
-        var results: [ConnectionInfo] = []
-        // 主端口（9090）
-        do {
-            let primary = try await connections()
-            results.append(contentsOf: primary)
-        } catch {
-            // 主端口拉不到不算致命，可能用户代理未启动。继续拉次端口。
-        }
-        for port in extraPorts {
+    /// Read each Core's connection list and lifetime traffic totals from the same
+    /// response. Polling these separately doubles the full JSON allocation.
+    static func connectionSnapshot(ports: [Int], session: URLSession = .shared) async throws -> ConnectionSnapshot {
+        var snapshot = ConnectionSnapshot()
+        var visited = Set<Int>()
+        var lastError: Error = NSError.user("无法读取连接统计")
+        for port in ports where visited.insert(port).inserted {
+            try Task.checkCancellation()
             do {
-                let raw = try await requestJSON(path: "/connections", port: port)
-                let extra = try await parseConnections(from: raw)
-                // 加端口前缀防止两个进程的 id 碰撞
-                let prefixed = extra.map { conn -> ConnectionInfo in
-                    var c = conn
-                    c.id = "p\(port):\(conn.id)"
-                    return c
+                guard let object = try await requestJSON(path: "/connections", port: port, session: session) as? [String: Any] else {
+                    throw NSError.user("连接统计接口响应无效")
                 }
-                results.append(contentsOf: prefixed)
+                let connections = try await parseConnections(from: object)
+                snapshot.connections.append(contentsOf: connections.map { conn in
+                    var connection = conn
+                    if port != 9090 { connection.id = "p\(port):\(conn.id)" }
+                    return connection
+                })
+                // Lifetime totals include UDP, IPv6 and already closed connections.
+                snapshot.totals[port] = (
+                    (object["uploadTotal"] as? NSNumber)?.int64Value ?? 0,
+                    (object["downloadTotal"] as? NSNumber)?.int64Value ?? 0
+                )
             } catch {
-                continue
+                try Task.checkCancellation()
+                // A stopped user Core must not discard a running TUN Core.
+                lastError = error
             }
         }
-        return results
+        guard !snapshot.totals.isEmpty else { throw lastError }
+        return snapshot
     }
 
     private static func parseConnections(from raw: Any) async throws -> [ConnectionInfo] {
@@ -178,32 +181,6 @@ enum ClashAPI {
     static func traffic() async throws -> (up: Int, down: Int) {
         guard let object = try await requestJSON(path: "/traffic") as? [String: Any] else { return (0, 0) }
         return ((object["up"] as? Int) ?? 0, (object["down"] as? Int) ?? 0)
-    }
-
-    /// 拉 `/connections` 顶层的 `uploadTotal` / `downloadTotal` —— 这是 sing-box
-    /// 进程级累计字节数（从启动起算），**包含 TCP + UDP + IPv6 + 已关闭的短连接**。
-    /// per-connection 的 upload/download 在连接关闭后会从列表移除，按 id 算 delta
-    /// 会丢掉短连接的字节（典型例子：YouTube 的 QUIC 短流，几秒钟传完就关）。
-    /// 用 totals 算 delta 可避免这种漏算。
-    /// 同时支持多端口（用户代理 + TUN 守护进程），返回 [port: (upload, download)]。
-    static func trafficTotals(ports: [Int]) async throws -> [Int: (upload: Int64, download: Int64)] {
-        var out: [Int: (upload: Int64, download: Int64)] = [:]
-        for port in ports {
-            guard let obj = try? await requestJSON(path: "/connections", port: port) as? [String: Any] else { continue }
-            // 不同版本 sing-box 字段类型可能是 Int 或 NSNumber，统一转 Int64
-            let up: Int64
-            let down: Int64
-            if let v = obj["uploadTotal"] as? Int64 { up = v }
-            else if let v = obj["uploadTotal"] as? Int { up = Int64(v) }
-            else if let v = obj["uploadTotal"] as? NSNumber { up = v.int64Value }
-            else { up = 0 }
-            if let v = obj["downloadTotal"] as? Int64 { down = v }
-            else if let v = obj["downloadTotal"] as? Int { down = Int64(v) }
-            else if let v = obj["downloadTotal"] as? NSNumber { down = v.int64Value }
-            else { down = 0 }
-            out[port] = (up, down)
-        }
-        return out
     }
 
     @discardableResult
