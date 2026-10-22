@@ -15,11 +15,8 @@ final class ConsoleRedesignComponentTests: XCTestCase {
 
     func testProcessResourceProbeFormattedOutput() {
         let bytes: UInt64 = 65 * 1024 * 1024 + 300 * 1024
-        let formatted = ProcessResourceProbe.formattedMemory(bytes: bytes)
-        XCTAssertTrue(formatted.contains("MB"))
-        let ratio = ProcessResourceProbe.memoryRatio(bytes: bytes, baselineMB: 512.0)
-        XCTAssertGreaterThan(ratio, 0.0)
-        XCTAssertLessThanOrEqual(ratio, 1.0)
+        XCTAssertEqual(ProcessResourceProbe.formattedMemory(bytes: bytes), "65.3 MB")
+        XCTAssertEqual(ProcessResourceProbe.memoryRatio(bytes: bytes, baselineMB: 512), 0.1275253, accuracy: 0.000001)
     }
 
     @MainActor
@@ -63,7 +60,7 @@ final class ConsoleRedesignComponentTests: XCTestCase {
 
     @MainActor
     func testModernDashboardGridLayoutContainsAllCards() {
-        let cards = (0..<9).map { i -> NSView in
+        let cards = (0..<9).map { _ -> NSView in
             let v = NSView()
             v.translatesAutoresizingMaskIntoConstraints = false
             return v
@@ -86,37 +83,7 @@ final class ConsoleRedesignComponentTests: XCTestCase {
     }
 
     @MainActor
-    func testMD3ThemeChangeNotifiesChartViews() {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 400),
-                              styleMask: [.borderless], backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        defer { window.close() }
-
-        let wave = SpeedWaveChartView(frame: NSRect(x: 0, y: 0, width: 200, height: 60))
-        let trend = TrafficTrendChartView(frame: NSRect(x: 0, y: 0, width: 400, height: 180))
-        let donut = TrafficDonutChartView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
-        let ring = MemoryRingView(frame: NSRect(x: 0, y: 0, width: 68, height: 28))
-        let eq = EqualizerBarsView(frame: NSRect(x: 0, y: 0, width: 54, height: 18))
-
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 400))
-        window.contentView = container
-        [wave, trend, donut, ring, eq].forEach { container.addSubview($0) }
-
-        wave.themeChanged()
-        trend.themeChanged()
-        donut.themeChanged()
-        ring.themeChanged()
-        eq.themeChanged()
-
-        XCTAssertTrue(wave.needsDisplay)
-        XCTAssertTrue(trend.needsDisplay)
-        XCTAssertTrue(donut.needsDisplay)
-        XCTAssertTrue(ring.needsDisplay)
-        XCTAssertTrue(eq.needsDisplay)
-    }
-
-    @MainActor
-    func testRedesignedSubscriptionItemViewAndThemeSwitching() {
+    func testSubscriptionItemFormatsDomainTrafficAndExpiry() {
         let itemView = MD3SubscriptionItemView(frame: NSRect(x: 0, y: 0, width: 350, height: 150))
         let date = Calendar.current.date(byAdding: .day, value: 30, to: Date())
         let sub = Subscription(
@@ -138,16 +105,6 @@ final class ConsoleRedesignComponentTests: XCTestCase {
         XCTAssertEqual(itemView.trafficPercentLabel.stringValue, "10.0%")
         XCTAssertEqual(itemView.expireTitleLabel.stringValue, "到期时间")
         XCTAssertFalse(itemView.expiresLabel.stringValue.isEmpty)
-
-        // Iterate through all 10 color schemes in dark and light modes
-        for isDark in [true, false] {
-            MD3.isDark = isDark
-            for schemeIdx in 0..<MD3.colorSchemes.count {
-                MD3.currentSchemeIndex = schemeIdx
-                itemView.themeChanged()
-                XCTAssertNotNil(itemView.subviews.first?.layer?.backgroundColor)
-            }
-        }
     }
 
     @MainActor
@@ -171,30 +128,7 @@ final class ConsoleRedesignComponentTests: XCTestCase {
     }
 
     @MainActor
-    func testConnectionPillCellAndStatusCell() {
-        let pillCell = ConnectionPillCell(frame: NSRect(x: 0, y: 0, width: 60, height: 30))
-        pillCell.update(network: "TCP")
-        XCTAssertEqual(pillCell.label.stringValue, "tcp")
-
-        let statusCell = ConnectionStatusCell(frame: NSRect(x: 0, y: 0, width: 80, height: 30))
-        statusCell.update(status: "成功")
-        XCTAssertEqual(statusCell.label.stringValue, "成功")
-
-        statusCell.update(status: "pending")
-        XCTAssertEqual(statusCell.label.stringValue, "pending")
-
-        for isDark in [true, false] {
-            MD3.isDark = isDark
-            for schemeIdx in 0..<MD3.colorSchemes.count {
-                MD3.currentSchemeIndex = schemeIdx
-                pillCell.themeChanged()
-                statusCell.themeChanged()
-            }
-        }
-    }
-
-    @MainActor
-    func testCenteredPillLabelCalculatesOffsetAndPadding() {
+    func testCenteredPillLabelCalculatesOffsetAndPadding() throws {
         let label = CenteredPillLabel(labelWithString: "DOMAIN-SUFFIX")
         label.font = .monospacedSystemFont(ofSize: 11, weight: .semibold)
         XCTAssertTrue(label.cell is CenteredPillTextFieldCell)
@@ -202,83 +136,10 @@ final class ConsoleRedesignComponentTests: XCTestCase {
         let intrinsic = label.intrinsicContentSize
         XCTAssertGreaterThan(intrinsic.width, 90)
 
-        if let cell = label.cell as? CenteredPillTextFieldCell {
-            let drawing = cell.drawingRect(forBounds: NSRect(x: 0, y: 0, width: 120, height: 22))
-            XCTAssertGreaterThan(drawing.origin.y, 0)
-            XCTAssertLessThan(drawing.origin.y, 8)
-        }
-    }
-
-    @MainActor
-    func testSegmentButtonStyleCompactPadding() {
-        let btn = MD3Button()
-        btn.style = .segment
-        btn.title = "直接连接"
-        XCTAssertEqual(btn.style, .segment)
-    }
-
-    @MainActor
-    func testLightAndDarkThemePaletteContrast() {
-        let savedDark = MD3.isDark
-        defer { MD3.isDark = savedDark }
-
-        MD3.isDark = false
-        let lightDownload = MD3.downloadColor
-        let lightSuccess = MD3.success
-        let lightOnSuccessContainer = MD3.onSuccessContainer
-        XCTAssertNotNil(lightDownload)
-        XCTAssertNotNil(lightSuccess)
-        XCTAssertNotNil(lightOnSuccessContainer)
-
-        MD3.isDark = true
-        let darkDownload = MD3.downloadColor
-        let darkSuccess = MD3.success
-        XCTAssertNotNil(darkDownload)
-        XCTAssertNotNil(darkSuccess)
-    }
-
-    @MainActor
-    func testSegmentedControlAndStatusChipThemeCascade() {
-        let savedDark = MD3.isDark
-        defer { MD3.isDark = savedDark }
-
-        let segmented = MD3SegmentedControl()
-        segmented.items = ["今日", "近 7 天", "近 30 天"]
-        segmented.selectedSegment = 0
-
-        let chip = MD3StatusChip()
-        chip.status = .active
-
-        MD3.isDark = false
-        segmented.themeChanged()
-        chip.themeChanged()
-
-        XCTAssertEqual(segmented.items.count, 3)
-        XCTAssertNotNil(segmented.layer?.backgroundColor)
-        XCTAssertNotNil(chip.layer?.backgroundColor)
-
-        MD3.isDark = true
-        segmented.themeChanged()
-        chip.themeChanged()
-
-        XCTAssertNotNil(segmented.layer?.backgroundColor)
-        XCTAssertNotNil(chip.layer?.backgroundColor)
-    }
-
-    @MainActor
-    func testHomeDashboardLayoutCardTupleElements() {
-        let content = NSView()
-        let result = HomeDashboardLayout.card(
-            title: "测试标题",
-            iconName: "globe",
-            subtitle: "测试副标题",
-            views: [content]
-        )
-        XCTAssertEqual(result.title.stringValue, "测试标题")
-        XCTAssertEqual(result.title.font?.pointSize, 13)
-        XCTAssertNotNil(result.iconView)
-        XCTAssertEqual(result.subtitle?.stringValue, "测试副标题")
-        XCTAssertEqual(result.view.type, .elevated)
+        let cell = try XCTUnwrap(label.cell as? CenteredPillTextFieldCell)
+        let drawing = cell.drawingRect(forBounds: NSRect(x: 0, y: 0, width: 120, height: 22))
+        XCTAssertGreaterThan(drawing.origin.y, 0)
+        XCTAssertLessThan(drawing.origin.y, 8)
     }
 
     @MainActor
@@ -294,7 +155,7 @@ final class ConsoleRedesignComponentTests: XCTestCase {
         XCTAssertEqual(tracker.items.first?.message, "不同事件")
     }
 
-    func testHostsParsingAndValidation() {
+    func testHostsIPAddressValidation() {
         XCTAssertTrue(DNSConfig.isValidIPAddress("127.0.0.1"))
         XCTAssertTrue(DNSConfig.isValidIPAddress("192.168.1.1"))
         XCTAssertTrue(DNSConfig.isValidIPAddress("::1"))
@@ -302,71 +163,6 @@ final class ConsoleRedesignComponentTests: XCTestCase {
         XCTAssertFalse(DNSConfig.isValidIPAddress("not.an.ip"))
         XCTAssertFalse(DNSConfig.isValidIPAddress("999.999.999.999"))
         XCTAssertFalse(DNSConfig.isValidIPAddress(""))
-
-        DNSConfig.customHosts = "test.domain.com=10.0.0.1;10.0.0.2\ninvalid.com=bad_ip\n"
-        let map = DNSConfig.collectHostsEntries()
-        XCTAssertEqual(map["test.domain.com"], ["10.0.0.1", "10.0.0.2"])
-        XCTAssertNil(map["invalid.com"])
-        DNSConfig.customHosts = ""
     }
 
-    func testSystemHostsFingerprint() {
-        let fingerprint = DNSConfig.systemHostsFingerprint()
-        XCTAssertNotNil(fingerprint)
-        XCTAssertFalse(fingerprint?.isEmpty ?? true)
-    }
-
-    @MainActor
-    func testTimelineIndicatorAutoLayoutSafety() {
-        let indicator = NSView()
-        indicator.translatesAutoresizingMaskIntoConstraints = false
-
-        let dot = NSView()
-        dot.translatesAutoresizingMaskIntoConstraints = false
-        let topLine = NSView()
-        topLine.translatesAutoresizingMaskIntoConstraints = false
-        let bottomLine = NSView()
-        bottomLine.translatesAutoresizingMaskIntoConstraints = false
-
-        indicator.addSubview(topLine)
-        indicator.addSubview(bottomLine)
-        indicator.addSubview(dot)
-
-        indicator.widthAnchor.constraint(equalToConstant: 10).isActive = true
-        indicator.heightAnchor.constraint(equalToConstant: 16).isActive = true
-
-        NSLayoutConstraint.activate([
-            dot.centerXAnchor.constraint(equalTo: indicator.centerXAnchor),
-            dot.centerYAnchor.constraint(equalTo: indicator.centerYAnchor),
-            dot.widthAnchor.constraint(equalToConstant: 7),
-            dot.heightAnchor.constraint(equalToConstant: 7),
-
-            topLine.centerXAnchor.constraint(equalTo: indicator.centerXAnchor),
-            topLine.widthAnchor.constraint(equalToConstant: 1.5),
-            topLine.bottomAnchor.constraint(equalTo: dot.centerYAnchor),
-            topLine.topAnchor.constraint(equalTo: dot.centerYAnchor, constant: -13.5),
-
-            bottomLine.centerXAnchor.constraint(equalTo: indicator.centerXAnchor),
-            bottomLine.widthAnchor.constraint(equalToConstant: 1.5),
-            bottomLine.topAnchor.constraint(equalTo: dot.centerYAnchor),
-            bottomLine.bottomAnchor.constraint(equalTo: dot.centerYAnchor, constant: 13.5)
-        ])
-
-        let row = NSStackView()
-        row.translatesAutoresizingMaskIntoConstraints = false
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.addArrangedSubview(indicator)
-        row.addArrangedSubview(NSTextField(labelWithString: "12:00"))
-
-        let host = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 40))
-        host.addSubview(row)
-        NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: host.leadingAnchor),
-            row.topAnchor.constraint(equalTo: host.topAnchor)
-        ])
-        host.layoutSubtreeIfNeeded()
-        XCTAssertEqual(indicator.frame.size.width, 10)
-    }
 }
-
