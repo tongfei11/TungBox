@@ -316,7 +316,11 @@ final class EqualizerBarsView: NSView, MD3Themeable {
     private let barCount = 16
     private var currentHeights: [CGFloat] = [0.25, 0.45, 0.8, 0.35, 0.9, 0.65, 0.55, 0.85, 0.5, 0.3, 0.7, 0.4, 0.9, 0.6, 0.75, 0.35]
     private var targetHeights: [CGFloat] = [0.25, 0.45, 0.8, 0.35, 0.9, 0.65, 0.55, 0.85, 0.5, 0.3, 0.7, 0.4, 0.9, 0.6, 0.75, 0.35]
-    private weak var animTimer: Timer?
+    var isAnimationEnabled = false {
+        didSet { updateAnimationState() }
+    }
+    private(set) var animationTimer: Timer?
+    private var notificationTokens: [NSObjectProtocol] = []
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -330,27 +334,104 @@ final class EqualizerBarsView: NSView, MD3Themeable {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if window != nil {
-            startAnimation()
-        } else {
-            stopAnimation()
-        }
+        refreshVisibilityObservers()
+        updateAnimationState()
     }
 
-    private func startAnimation() {
-        stopAnimation()
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        updateAnimationState()
+    }
+
+    override func viewDidHide() {
+        super.viewDidHide()
+        updateAnimationState()
+    }
+
+    override func viewDidUnhide() {
+        super.viewDidUnhide()
+        updateAnimationState()
+    }
+
+    isolated deinit {
+        animationTimer?.invalidate()
+        notificationTokens.forEach(NotificationCenter.default.removeObserver)
+    }
+
+    static func shouldRunAnimation(
+        isAnimationEnabled: Bool,
+        hasWindow: Bool,
+        windowIsVisible: Bool,
+        windowIsMiniaturized: Bool,
+        windowHasVisibleOcclusion: Bool,
+        viewHasHiddenAncestor: Bool
+    ) -> Bool {
+        isAnimationEnabled
+            && hasWindow
+            && windowIsVisible
+            && !windowIsMiniaturized
+            && windowHasVisibleOcclusion
+            && !viewHasHiddenAncestor
+    }
+
+    private func updateAnimationState() {
+        let window = self.window
+        let shouldRun = Self.shouldRunAnimation(
+            isAnimationEnabled: isAnimationEnabled,
+            hasWindow: window != nil,
+            windowIsVisible: window?.isVisible == true && NSApp?.isHidden != true,
+            windowIsMiniaturized: window?.isMiniaturized ?? true,
+            windowHasVisibleOcclusion: window?.occlusionState.contains(.visible) ?? false,
+            viewHasHiddenAncestor: isHiddenOrHasHiddenAncestor
+        )
+        reconcileAnimationTimer(shouldRun: shouldRun)
+    }
+
+    func reconcileAnimationTimer(shouldRun: Bool) {
+        guard shouldRun else {
+            animationTimer?.invalidate()
+            animationTimer = nil
+            return
+        }
+
+        guard animationTimer == nil else { return }
         let timer = Timer(timeInterval: 0.08, repeats: true) { [weak self] _ in
-            DispatchQueue.main.async {
-                self?.tick()
+            // Installed only on RunLoop.main: do not enqueue another callback
+            // or transfer a non-Sendable Timer across isolation boundaries.
+            MainActor.assumeIsolated {
+                guard let self, self.animationTimer?.isValid == true else { return }
+                self.tick()
             }
         }
         RunLoop.main.add(timer, forMode: .common)
-        animTimer = timer
+        animationTimer = timer
     }
 
-    private func stopAnimation() {
-        animTimer?.invalidate()
-        animTimer = nil
+    private func refreshVisibilityObservers() {
+        notificationTokens.forEach(NotificationCenter.default.removeObserver)
+        notificationTokens.removeAll()
+
+        if let window {
+            let center = NotificationCenter.default
+            let windowNotifications: [Notification.Name] = [
+                NSWindow.didBecomeKeyNotification,
+                NSWindow.didResignKeyNotification,
+                NSWindow.didMiniaturizeNotification,
+                NSWindow.didDeminiaturizeNotification,
+                NSWindow.didChangeOcclusionStateNotification,
+                NSWindow.willCloseNotification
+            ]
+            for name in windowNotifications {
+                notificationTokens.append(center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.updateAnimationState() }
+                })
+            }
+            for name in [NSApplication.didHideNotification, NSApplication.didUnhideNotification] {
+                notificationTokens.append(center.addObserver(forName: name, object: NSApp, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.updateAnimationState() }
+                })
+            }
+        }
     }
 
     private func tick() {

@@ -982,29 +982,29 @@ extension MainWindowController {
     }
 
     func refreshExternalIP(force: Bool = false) {
+        guard !runtimeCoordinator.state.isTerminating else { return }
+        guard force || externalIPRefreshTask == nil else { return }
+        externalIPRefreshTask?.cancel()
+        let id = UUID()
+        externalIPRefreshID = id
         if force || externalIPLabel.stringValue.isEmpty || externalIPLabel.stringValue == "未获取到公网 IP" {
             externalIPLabel.stringValue = "查询中…"
         }
-        Task { [weak self] in
-            let ip = await ExternalIPService.shared.getExternalIP(force: force)
-            await MainActor.run { [weak self] in
-                guard let self else { return }
-                if let ip {
-                    self.externalIPLabel.stringValue = ip
-                } else {
-                    self.externalIPLabel.stringValue = "未获取到公网 IP"
-                    if !force {
-                        Task { [weak self] in
-                            try? await Task.sleep(nanoseconds: 3_000_000_000)
-                            await MainActor.run { [weak self] in
-                                guard let self else { return }
-                                if self.externalIPLabel.stringValue == "未获取到公网 IP" {
-                                    self.refreshExternalIP(force: true)
-                                }
-                            }
-                        }
-                    }
-                }
+        externalIPRefreshTask = Task { [weak self] in
+            defer {
+                if let self, self.externalIPRefreshID == id { self.externalIPRefreshTask = nil }
+            }
+            do {
+                // Collapse the Core/TUN/node callbacks of one route change into
+                // one request, while a newer route immediately cancels this one.
+                if force { try await Task.sleep(for: .milliseconds(300)) }
+                try Task.checkCancellation()
+                let ip = await ExternalIPService.shared.getExternalIP(force: force)
+                try Task.checkCancellation()
+                guard let self, self.externalIPRefreshID == id else { return }
+                self.externalIPLabel.stringValue = ip ?? "未获取到公网 IP"
+            } catch {
+                // A cancelled route's result must never update the current label.
             }
         }
     }

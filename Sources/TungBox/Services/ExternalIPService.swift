@@ -6,27 +6,65 @@ actor ExternalIPService {
 
     private(set) var cachedIP: String?
     private var lastFetchTime: Date?
+    private var lastFailureTime: Date?
     private var inFlightTask: Task<String?, Never>?
-    private let cacheDuration: TimeInterval = 300 // 5 minutes
+    private var requestID: UUID?
+    private let cacheDuration: TimeInterval = 300
+    private let failureRetryInterval: TimeInterval = 30
+    private let fetch: @Sendable () async -> String?
+    private let now: @Sendable () -> Date
 
-    func getExternalIP(force: Bool = false) async -> String? {
-        if !force, let cached = cachedIP, let last = lastFetchTime, Date().timeIntervalSince(last) < cacheDuration {
-            return cached
-        }
-        if !force, let inFlight = inFlightTask {
-            return await inFlight.value
-        }
-
-        let task = Task<String?, Never> {
-            await self.performFetch()
-        }
-        inFlightTask = task
-        let result = await task.value
-        inFlightTask = nil
-        return result
+    init(fetch: @escaping @Sendable () async -> String? = ExternalIPService.fetchIP,
+         now: @escaping @Sendable () -> Date = { Date() }) {
+        self.fetch = fetch
+        self.now = now
     }
 
-    private func performFetch() async -> String? {
+    func getExternalIP(force: Bool = false) async -> String? {
+        if !force {
+            if let task = inFlightTask {
+                let id = requestID
+                let result = await task.value
+                guard !Task.isCancelled, !task.isCancelled, requestID == id else { return nil }
+                return result ?? cachedIP
+            }
+            if let cachedIP, let lastFetchTime, now().timeIntervalSince(lastFetchTime) < cacheDuration {
+                return cachedIP
+            }
+            // Runtime/log refreshes must not retry a failing endpoint chain every few seconds.
+            if let lastFailureTime, now().timeIntervalSince(lastFailureTime) < failureRetryInterval {
+                return cachedIP
+            }
+        }
+
+        // A forced refresh follows a new route: cancel the old transport and
+        // prevent its late response from replacing the new route's address.
+        inFlightTask?.cancel()
+        let id = UUID()
+        let fetch = fetch
+        let task = Task { await fetch() }
+        requestID = id
+        inFlightTask = task
+        let result = await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
+        guard requestID == id else { return nil }
+        inFlightTask = nil
+        guard !Task.isCancelled, !task.isCancelled else { return nil }
+
+        if let result {
+            cachedIP = result
+            lastFetchTime = now()
+            lastFailureTime = nil
+        } else {
+            lastFailureTime = now()
+        }
+        return result ?? cachedIP
+    }
+
+    private static func fetchIP() async -> String? {
         let endpoints = [
             "https://api.ipify.org",
             "https://api.ip.sb/ip",
@@ -34,38 +72,38 @@ actor ExternalIPService {
             "https://icanhazip.com",
             "https://ifconfig.me/ip"
         ]
-
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 3.0
         config.timeoutIntervalForResource = 5.0
         let session = URLSession(configuration: config)
         defer { session.finishTasksAndInvalidate() }
 
-        for endpoint in endpoints {
-            guard let url = URL(string: endpoint) else { continue }
-            do {
-                var request = URLRequest(url: url)
-                request.httpMethod = "GET"
-                request.setValue("curl/7.64.1", forHTTPHeaderField: "User-Agent")
-                let (data, response) = try await session.data(for: request)
-                if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
-                    let ip = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-                    if isValidIP(ip) {
-                        cachedIP = ip
-                        lastFetchTime = Date()
-                        return ip
+        return await withTaskCancellationHandler {
+            for endpoint in endpoints {
+                guard !Task.isCancelled else { return nil }
+                guard let url = URL(string: endpoint) else { continue }
+                do {
+                    var request = URLRequest(url: url)
+                    request.httpMethod = "GET"
+                    request.setValue("curl/7.64.1", forHTTPHeaderField: "User-Agent")
+                    let (data, response) = try await session.data(for: request)
+                    guard !Task.isCancelled else { return nil }
+                    if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
+                        let ip = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+                        if isValidIP(ip) { return ip }
                     }
+                } catch {
+                    if Task.isCancelled { return nil }
                 }
-            } catch {
-                continue
             }
+            return nil
+        } onCancel: {
+            session.invalidateAndCancel()
         }
-        return cachedIP
     }
 
-    private func isValidIP(_ str: String) -> Bool {
+    private static func isValidIP(_ str: String) -> Bool {
         guard !str.isEmpty, str.count <= 45 else { return false }
-        // Simple check for either IPv4 (contains .) or IPv6 (contains :)
         return str.contains(".") || str.contains(":")
     }
 }

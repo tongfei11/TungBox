@@ -84,6 +84,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     let homeProfileSelectorPopup = MD3PopUpButton()
     let externalIPLabel = NSTextField(labelWithString: "检测中…")
     let externalIPRefreshButton = NSButton()
+    var externalIPRefreshTask: Task<Void, Never>?
+    var externalIPRefreshID = UUID()
     let trafficTrendChartView = TrafficTrendChartView()
     let trafficTotalValueLabel = NSTextField(labelWithString: "0 B")
     let trafficUploadStatLabel = NSTextField(labelWithString: "2.1 GB")
@@ -618,7 +620,15 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             refreshLogDisplay()
         }
         window?.contentView?.refreshSubviews()
+        updateBackgroundAnimationState()
     }
+
+    func updateBackgroundAnimationState() {
+        let isHomePage = (pages.selectedTabViewItem?.identifier as? String) == "dashboard"
+        equalizerBarsView.isAnimationEnabled = isHomePage
+            && !runtimeCoordinator.state.isTerminating && isProxyRuntimeRunning()
+    }
+
     func isConnectionsPageSelected() -> Bool {
         guard let item = pages.selectedTabViewItem else { return false }
         return pages.indexOfTabViewItem(item) == 4
@@ -699,6 +709,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             stopStatsTimer()
             refreshTrayIcon()
         }
+        updateBackgroundAnimationState()
     }
 
     func startStatsTimer() {
@@ -863,6 +874,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
 extension MainWindowController {
     func windowWillClose(_ notification: Notification) {
+        equalizerBarsView.isAnimationEnabled = false
         NSApp.setActivationPolicy(.accessory)
         appendLog("[窗口] 控制台已关闭，TungBox 保留在状态栏后台运行。\n")
     }
@@ -872,6 +884,7 @@ extension MainWindowController {
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         window?.orderFrontRegardless()
+        updateBackgroundAnimationState()
         refreshConnectionsTable()
         NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
         NSApp.activate(ignoringOtherApps: true)

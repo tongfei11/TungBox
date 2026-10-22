@@ -57,6 +57,10 @@ extension MainWindowController {
                 stopSystemHostsWatching()
                 stopStatsTimer()
                 stopConnectionsRefreshTimer()
+                externalIPRefreshTask?.cancel()
+                externalIPRefreshTask = nil
+                externalIPRefreshID = UUID()
+                equalizerBarsView.isAnimationEnabled = false
                 stopTunRequestHeartbeat()
                 // Keep saved preferences for the next launch; only the current
                 // in-memory intent is off so late callbacks cannot restore TUN.
