@@ -163,6 +163,10 @@ extension MainWindowController {
 
     func setTunServiceControlsBusy(_ busy: Bool, progressText: String?) {
         tunServiceOperationInProgress = busy
+        if busy {
+            // A pre-install check must not overwrite the freshly installed service.
+            tunServicePresentation.beginOperation()
+        }
         tunServiceToggleButton.isEnabled = !busy
         tunServiceReinstallButton.isEnabled = !busy
         tunServiceReloadButton.isEnabled = !busy
@@ -399,6 +403,8 @@ extension MainWindowController {
     }
 
     func refreshTunServiceStatus() {
+        guard !tunServiceOperationInProgress else { return }
+        let requestID = tunServicePresentation.beginCheck()
         tunServiceStatusLabel.stringValue = "TUN 服务状态：正在检查..."
         let store = store
         DispatchQueue.global(qos: .utility).async { [weak self] in
@@ -411,9 +417,45 @@ extension MainWindowController {
             }
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
+                guard !self.tunServiceOperationInProgress,
+                      self.tunServicePresentation.accept(status, requestID: requestID) else { return }
                 self.applyTunServiceStatus(status, recentLogText: recentLog)
+                self.refreshHomeFeatureStatus()
+                self.presentTunServiceUpdatePrompt()
             }
         }
+    }
+
+    func presentTunServiceUpdatePrompt(force: Bool = false) {
+        guard window?.isVisible == true, !tunServiceOperationInProgress,
+              !runtimeCoordinator.state.isTerminating,
+              tunServicePresentation.status?.needsUpdate == true else { return }
+        guard tunServiceUpdateDialog?.superview == nil else { return }
+        // Wait for another dialog to close instead of covering it with this one.
+        if window?.contentView?.subviews.contains(where: { $0 is MD3Dialog }) == true {
+            guard tunServiceUpdatePromptRetry == nil else { return }
+            let retry = DispatchWorkItem { [weak self] in
+                self?.tunServiceUpdatePromptRetry = nil
+                self?.presentTunServiceUpdatePrompt(force: force)
+            }
+            tunServiceUpdatePromptRetry = retry
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: retry)
+            return
+        }
+        guard tunServicePresentation.claimUpdatePrompt(canPresent: true, force: force) else { return }
+        let dialog = showMD3Dialog(
+            title: "TUN 服务需要更新",
+            message: "已安装的 TUN 服务与当前应用版本不兼容，需要更新后才能正常使用 TUN。更新会请求管理员授权，期间 TUN 连接会短暂中断。",
+            customView: nil,
+            confirmTitle: "立即更新",
+            cancelTitle: "稍后"
+        )
+        tunServiceUpdateDialog = dialog
+        dialog.onConfirm = { [weak self, weak dialog] in
+            dialog?.dismiss()
+            self?.reinstallTunServiceClicked()
+        }
+        dialog.onCancel = { [weak dialog] in dialog?.dismiss() }
     }
 
     func applyTunServiceStatus(_ status: TunServiceStatus, recentLogText: String) {

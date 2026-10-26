@@ -839,9 +839,7 @@ extension MainWindowController {
         subscriptionAutoStatusLabel.stringValue = "订阅自动刷新：\(intervalText)；上次刷新 \(latestSubscription)"
         coreStatusLabel.stringValue = "sing-box Core：\(detectedCoreVersion)"
         logStatusLabel.stringValue = "日志：\(logs.string.components(separatedBy: .newlines).filter { !$0.isEmpty }.count) 行"
-        tunRuntimeStatusLabel.stringValue = isTunEnabled
-            ? (TunServiceManager.hasInstalledServiceFiles ? "TUN 服务：已安装，随代理开启" : "TUN 服务：不可用，请重新安装")
-            : "TUN 权限：未启用"
+        tunRuntimeStatusLabel.stringValue = tunServicePresentation.homeStatusText(tunEnabled: isTunEnabled)
     }
 
     func detailsTextConfig(_ label: NSTextField) {
@@ -1365,6 +1363,8 @@ extension MainWindowController {
         let intent = tunCaptureIntentID
         if tunEnabled {
             let storeCopy = store
+            let serviceCheckID = tunServicePresentation.beginCheck()
+            let serviceOperationID = tunServicePresentation.operationID
             beginFeatureTransition(tun: .starting)
             syncProxyPreferenceControls()
             Task.detached { [weak self] in
@@ -1375,9 +1375,24 @@ extension MainWindowController {
                 await MainActor.run { [weak self] in
                     guard let self else { return }
                     guard self.tunCaptureIntentID == intent, !self.isTunEnabled else { return }
+                    // Background refreshes may supersede presentation snapshots,
+                    // but only a service mutation invalidates the user's toggle.
+                    guard !self.tunServiceOperationInProgress,
+                          self.tunServicePresentation.operationID == serviceOperationID else {
+                        self.tunTransition = .none
+                        self.syncProxyPreferenceControls()
+                        return
+                    }
+                    let acceptedStatus = self.tunServicePresentation.accept(status, requestID: serviceCheckID)
+                    if acceptedStatus { self.refreshHomeFeatureStatus() }
                     guard status.isUsable else {
                         self.clearFeatureTransitions()
                         self.syncProxyPreferenceControls()
+                        if status.needsUpdate {
+                            guard acceptedStatus else { return }
+                            self.presentTunServiceUpdatePrompt(force: true)
+                            return
+                        }
                         self.showToast("请先安装 TUN 服务")
                         self.showError(NSError.user("TUN 服务不可用：\(status.displayText)。请到 设置 > TUN 设置处理。"))
                         return

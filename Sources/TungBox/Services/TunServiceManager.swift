@@ -5,6 +5,7 @@ enum TunServiceStatus {
     case notInstalled
     case installedRunning
     case installedIdle
+    case updateRequired
     case abnormal(String)
 
     var displayText: String {
@@ -15,6 +16,8 @@ enum TunServiceStatus {
             return "已安装并运行"
         case .installedIdle:
             return "已安装，等待随代理开启"
+        case .updateRequired:
+            return "服务需要更新，请重新安装 TUN 服务"
         case .abnormal(let message):
             return "异常：\(message)"
         }
@@ -44,7 +47,13 @@ enum TunServiceStatus {
     }
 
     var shouldReinstall: Bool {
+        if needsUpdate { return true }
         if case .abnormal = self { return true }
+        return false
+    }
+
+    var needsUpdate: Bool {
+        if case .updateRequired = self { return true }
         return false
     }
 }
@@ -106,7 +115,7 @@ enum TunServiceManager {
             return .abnormal("Core 路径错误")
         }
         guard installedServiceDefinitionIsCurrent() else {
-                return .abnormal("服务需要更新，请重新安装 TUN 服务")
+            return .updateRequired
         }
         guard launchDaemonIsLoaded() else {
             return .abnormal("服务未加载，请重新安装 TUN 服务")

@@ -223,6 +223,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     let tunServiceReinstallButton = MD3Button()
     let tunServiceReloadButton = MD3Button()
     var tunServiceOperationInProgress = false
+    var tunServicePresentation = TunServicePresentationState()
+    var tunServiceUpdatePromptRetry: DispatchWorkItem?
+    weak var tunServiceUpdateDialog: MD3Dialog?
     let activeNodeLabel = NSTextField(labelWithString: "")
     let connectionsValueLabel = NSTextField(labelWithString: "0")
     let connectionsDetailLabel = NSTextField(labelWithString: "服务未运行")
@@ -886,6 +889,7 @@ extension MainWindowController {
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         window?.orderFrontRegardless()
+        refreshTunServiceStatus()
         updateBackgroundAnimationState()
         refreshConnectionsTable()
         NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
