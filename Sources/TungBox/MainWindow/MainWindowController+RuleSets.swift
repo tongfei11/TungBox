@@ -186,6 +186,7 @@ extension MainWindowController {
             return
         }
         let storeCopy = store
+        let profileID = selectedIndex.map { profiles[$0].id }
         let runnerRef = runner
         let wantTun = isTunEnabled
         let wantProxy = isSystemProxyEnabled && runner.isRunning
@@ -255,7 +256,7 @@ extension MainWindowController {
             return
         }
         if wantProxy {
-            await reconcileSelectorSelectionsToConfigAsync(configText: text)
+            await reconcileSelectorSelectionsToConfigAsync(configText: text, profileID: profileID)
             guard coordinator.isCurrent(request) else { return }
             let mode = parseConfigObject(from: text).map { ProxyModeConfig.readMode(from: $0) } ?? "Rule"
             applyRuntimeMode(mode, refreshNodeDelays: false, onlyIfNeeded: true)

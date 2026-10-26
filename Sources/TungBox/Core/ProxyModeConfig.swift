@@ -281,6 +281,13 @@ enum ProxyModeConfig {
         guard !existingDefaults.isEmpty else { return newConfigText }
 
         var changed = false
+        // Importers may omit the app-managed Global selector. Recreate its
+        // current members before carrying over the previous explicit choice.
+        if existingDefaults[TungBoxConfig.tagGlobal] != nil {
+            let supported = ensureGlobalSelector(in: newOutbounds)
+            changed = !NSArray(array: supported).isEqual(to: newOutbounds)
+            newOutbounds = supported
+        }
         for i in newOutbounds.indices {
             if (newOutbounds[i]["type"] as? String)?.lowercased() == "selector",
                let tag = newOutbounds[i]["tag"] as? String,

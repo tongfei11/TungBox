@@ -31,8 +31,14 @@ enum ClashAPI {
     }
 
     static func selectProxy(group: String, node: String, port: Int? = nil, session: URLSession = .shared) async throws {
-        let escaped = group.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? group
-        _ = try await requestJSON(path: "/proxies/\(escaped)", method: "PUT", body: ["name": node], port: port, session: session)
+        let unreserved = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+        let escaped = group.addingPercentEncoding(withAllowedCharacters: unreserved) ?? group
+        let path = "/proxies/\(escaped)"
+        _ = try await requestJSON(path: path, method: "PUT", body: ["name": node], port: port, session: session)
+        guard let info = try await requestJSON(path: path, port: port, session: session) as? [String: Any],
+              let actualNode = info["now"] as? String, actualNode == node else {
+            throw NSError.user("Core 未应用请求的节点选择：\(group) → \(node)")
+        }
     }
 
     /// Selector changes affect only new connections in sing-box. Close the old

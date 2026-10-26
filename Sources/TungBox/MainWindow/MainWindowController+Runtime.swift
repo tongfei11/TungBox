@@ -11,6 +11,7 @@ extension MainWindowController {
         let services = runtimeServices(for: request)
         let storeCopy = store
         let coordinator = runtimeCoordinator
+        let profileID = selectedIndex.map { profiles[$0].id }
         let success = await coordinator.reloadTun(source: configText, services: .init(
             discover: services.discoverTunNetwork, prepare: services.prepareTunConfig,
             write: { prepared in
@@ -23,7 +24,7 @@ extension MainWindowController {
         )) { self.handleRuntimeLifecycleEvent($0) }
         if success {
             coordinator.schedule(after: 3) { [weak self] in
-                guard let self, self.isTunEnabled else { return }
+                guard let self, self.isTunEnabled, self.selectedIndex.map({ self.profiles[$0].id }) == profileID else { return }
                 self.reconcileSelectorSelectionsToConfig()
             }
         }
@@ -95,6 +96,7 @@ extension MainWindowController {
         let storeCopy = store
         let runnerRef = runner
         let input = request.input
+        let profileID = selectedIndex.map { profiles[$0].id }
         let log: @Sendable (String) -> Void = { [weak self] text in
             Task { @MainActor [weak self] in self?.appendLog(text) }
         }
@@ -134,7 +136,7 @@ extension MainWindowController {
                 }
             },
             restoreSelectors: { [self] in
-                await self.reconcileSelectorSelectionsToConfigAsync()
+                await self.reconcileSelectorSelectionsToConfigAsync(profileID: profileID)
             },
             currentSwitches: { [self] in .init(systemProxyEnabled: isSystemProxyEnabled, tunEnabled: isTunEnabled) }
         )
@@ -700,25 +702,26 @@ extension MainWindowController {
     /// API. sing-box's cache_file remembers the previously selected outbound and
     /// restores it on (re)start, which otherwise overrides the user's last explicit
     /// choice when sing-box is restarted (e.g. switching capture mode into TUN).
-    func reconcileSelectorSelectionsToConfigAsync(configText: String? = nil) async {
-        guard let config = parseConfigObject(from: configText ?? editor.string),
-              let outbounds = config["outbounds"] as? [[String: Any]] else { return }
-        var targets: [(group: String, node: String)] = []
-        for outbound in outbounds {
-            guard (outbound["type"] as? String)?.lowercased() == "selector",
-                  let tag = outbound["tag"] as? String,
-                  let def = (outbound["default"] as? String), !def.isEmpty else { continue }
-            targets.append((tag, def))
-        }
-        guard !targets.isEmpty else { return }
-        let apiPorts = activeSelectorAPIPorts()
+    func reconcileSelectorSelectionsToConfigAsync(configText: String? = nil, profileID: UUID? = nil) async {
+        guard let currentProfileID = selectedIndex.map({ profiles[$0].id }),
+              profileID == nil || profileID == currentProfileID else { return }
         let selectionID = selectorSelectionID
         let transitionID = runtimeTransitionID
-        for target in targets {
-            for apiPort in apiPorts {
-                guard selectionID == selectorSelectionID, transitionID == runtimeTransitionID else { return }
-                try? await ClashAPI.selectProxy(group: target.group, node: target.node, port: apiPort)
-            }
+        let targets = selectorCoordinator.selections(in: configText ?? editor.string, profile: currentProfileID)
+        guard !targets.isEmpty else { return }
+        let current: @MainActor @Sendable () -> Bool = { [self] in
+            selectionID == selectorSelectionID && transitionID == runtimeTransitionID
+                && selectedIndex.map { profiles[$0].id } == currentProfileID && !runtimeCoordinator.state.isTerminating
+        }
+        do {
+            _ = try await selectorCoordinator.apply(selections: targets, ports: activeSelectorAPIPorts(),
+                isCurrent: current, write: { [self] selection, port in
+                    try await ClashAPI.selectProxy(group: selection.group, node: selection.node, port: port)
+                    appendLog("[节点选择 \(Date.now.ISO8601Format())] 来源=配置恢复 模式=\(selectedMode().value) 端口=\(port) 分组=\(selection.group) 已确认=\(selection.node)\n")
+                })
+        } catch {
+            guard current() else { return }
+            appendLog("[节点选择 \(Date.now.ISO8601Format())] 配置恢复未确认：\(error.localizedDescription)\n")
         }
     }
 

@@ -254,6 +254,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             nodeDelayTestState.clearResultProtection()
         }
     }
+    var lastObservedSelectorChoices: [Int: [String: String]] = [:]
+    let selectorCoordinator = SelectorSelectionCoordinator()
     var selectorSelectionID = UUID()
     var selectorSelectionTask: Task<Void, Never>?
     var tunCaptureIntentID = UUID()

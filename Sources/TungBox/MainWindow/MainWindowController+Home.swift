@@ -1137,6 +1137,7 @@ extension MainWindowController {
         let selectorAPIPorts = activeSelectorAPIPorts()
         let statsTransitionID = runtimeTransitionID
         let statsSelectionID = selectorSelectionID
+        let selectorObservation = selectorCoordinator.observationToken
         let prevTotals = prevTrafficTotals
         let elapsedSinceLast = max(Date().timeIntervalSince(connectionRefreshTime), 0.5)
         Task { [self] in
@@ -1175,7 +1176,8 @@ extension MainWindowController {
             
             await MainActor.run { [weak self] in
                 guard let self = self else { return }
-                guard self.isProxyRuntimeRunning(), self.runtimeTransitionID == statsTransitionID, self.selectorSelectionID == statsSelectionID else { return }
+                guard self.isProxyRuntimeRunning(), self.runtimeTransitionID == statsTransitionID, self.selectorSelectionID == statsSelectionID,
+                      self.selectorCoordinator.acceptsObservation(selectorObservation) else { return }
 
                 if let apiConnections {
                     self.applyConnections(apiConnections, detail: "实时刷新")
@@ -1204,6 +1206,7 @@ extension MainWindowController {
                 self.lastProxiesObj = proxiesObj
                 for port in selectorAPIPorts {
                     guard let portProxies = proxiesByPort[port] else { continue }
+                    self.recordSelectorObservation(portProxies, port: port, source: "状态刷新")
                     let active = self.resolveActiveOutbound(proxiesObj: portProxies)
                     let transition = Self.automaticSelectionTransition(
                         previous: self.lastAutomaticNodeByAPIPort[port],
