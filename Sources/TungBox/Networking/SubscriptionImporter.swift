@@ -175,7 +175,7 @@ enum SubscriptionImporter {
         for msg in fixLog {
             SubscriptionImporter.compatibilityFixLog.append("[兼容性] [AUTO-FIX] \(msg)")
         }
-        config = fixed
+        config = FakeIPCacheConfig.applying(to: fixed)
 
         return try renderJSON(config)
     }
@@ -264,7 +264,7 @@ enum SubscriptionImporter {
             "experimental": ["cache_file": ["enabled": true], "clash_api": ["external_controller": TungBoxConfig.clashAPIListen, "default_mode": "Rule"]],
             "inbounds": [["type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": TungBoxConfig.mixedPort]]
         ]
-        return (config, [:])
+        return (FakeIPCacheConfig.applying(to: config), [:])
     }
 
     private static func basicDNS() -> [String: Any] {

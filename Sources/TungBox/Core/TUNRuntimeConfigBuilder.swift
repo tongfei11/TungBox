@@ -39,7 +39,7 @@ struct TUNRuntimeConfigBuilder {
 
     /// 分阶段返回诊断，保留调用层在接口探测、DNS 查询及最终校验前的日志顺序。
     func prepare(_ source: [String: Any]) -> Transformation {
-        var config = source
+        var config = FakeIPRoutingConfig.migratingLegacyIPv6Pool(in: source)
         var diagnostics: [String] = []
         var outbounds = config["outbounds"] as? [[String: Any]] ?? []
         if !outbounds.contains(where: { ($0["tag"] as? String) == "direct" }) {
@@ -396,7 +396,7 @@ struct TUNRuntimeConfigBuilder {
         fallbackProxyTag: String,
         cachePath: String
     ) -> [String: Any] {
-        var config = config
+        var config = enabled ? FakeIPRoutingConfig.migratingLegacyIPv6Pool(in: config) : config
         var inbounds = config["inbounds"] as? [[String: Any]] ?? []
         inbounds.removeAll { ($0["type"] as? String)?.lowercased() == "tun" }
         if enabled {
@@ -404,10 +404,14 @@ struct TUNRuntimeConfigBuilder {
             log["level"] = "warn"
             config["log"] = log
 
+            var addresses = ["\(device.ipv4Address)/30"]
+            if FakeIPRoutingConfig.hasIPv6Pool(in: config) {
+                addresses.append(FakeIPRoutingConfig.interfaceIPv6Prefix)
+            }
             let base: [String: Any] = [
                 "type": "tun",
                 "tag": "tun-in",
-                "address": ["\(device.ipv4Address)/30"],
+                "address": addresses,
                 "interface_name": device.interfaceName,
                 "auto_route": true
             ]
@@ -455,7 +459,7 @@ struct TUNRuntimeConfigBuilder {
             cacheFile["path"] = cachePath
             experimental["cache_file"] = cacheFile
             config["experimental"] = experimental
-            return config
+            return FakeIPCacheConfig.applying(to: config)
         }
 
         if cacheFile["path"] as? String == cachePath {

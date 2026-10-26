@@ -260,7 +260,7 @@ enum DNSConfig {
 
     /// 拼出 sing-box 配置里的 `dns` 块。被 SubscriptionImporter.basicDNS() 调用。
     static func applying(to config: [String: Any]) -> [String: Any] {
-        replacingDNS(in: config, with: buildSingBoxDNS())
+        FakeIPCacheConfig.applying(to: replacingDNS(in: config, with: buildSingBoxDNS()))
     }
 
     static func replacingDNS(in config: [String: Any], with dns: [String: Any]) -> [String: Any] {
@@ -318,7 +318,7 @@ enum DNSConfig {
                 "type": "fakeip",
                 "tag": "dns-fakeip",
                 "inet4_range": fakeIPRange,
-                "inet6_range": "fc00::/18"
+                "inet6_range": FakeIPRoutingConfig.ipv6Pool
             ])
 
             // 国内域名 + 私有 → 国内 DNS（真实解析）
@@ -364,10 +364,10 @@ enum DNSConfig {
             dns["fakeip"] = [
                 "enabled": true,
                 "inet4_range": fakeIPRange,
-                "inet6_range": "fc00::/18"
+                "inet6_range": FakeIPRoutingConfig.ipv6Pool
             ]
-            // Fake-IP 拿到的是合成 IP，必须缓存到磁盘才能跨重启复用。否则关掉 sing-box
-            // 再开，浏览器里旧连接拿到的 198.18.x.x 地址全成野指针。
+            // DNS cache isolation is separate from Fake-IP persistence. The latter
+            // is enabled by FakeIPCacheConfig in every generated runtime config.
             dns["independent_cache"] = true
         }
 

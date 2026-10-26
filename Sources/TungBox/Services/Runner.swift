@@ -535,6 +535,11 @@ final class Runner: @unchecked Sendable {
         json = fixedJson
 
         var changed = !fixes.isEmpty
+        let cachedJson = FakeIPCacheConfig.applying(to: FakeIPRoutingConfig.migratingLegacyIPv6Pool(in: json))
+        if !NSDictionary(dictionary: cachedJson).isEqual(to: json) {
+            json = cachedJson
+            changed = true
+        }
         let localizedRuleSets = RuleSetRuntime.localizeBuiltInRuleSets(
             in: json,
             ruleSetDirectory: store.ruleSetsURL
