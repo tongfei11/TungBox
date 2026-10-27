@@ -83,6 +83,30 @@ final class TrafficDestinationTests: XCTestCase {
         XCTAssertEqual(TrafficHistoryRetention.retained(retained, now: now, calendar: calendar), retained)
     }
 
+    func testLegacyHistoryResetsOnceAndNewTrafficSurvivesReload() throws {
+        let suite = "TrafficHistoryMigrationTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let now = Date()
+        let today = TrafficHistoryRetention.dayKey(for: now)
+        let yesterday = TrafficHistoryRetention.dayKey(for: now.addingTimeInterval(-86400))
+        // 0288 mixed newly classified bytes into pre-existing unclassified totals.
+        defaults.set([today: ["upload": 500_000, "download": 911_000_000, "proxy": 300_000, "direct": 25_000],
+                      yesterday: ["upload": 1_000, "download": 2_000]], forKey: TrafficHistoryRetention.historyKey)
+        defaults.set("preserved", forKey: "unrelated_preference")
+
+        XCTAssertTrue(TrafficHistoryRetention.load(defaults: defaults, now: now).isEmpty)
+        XCTAssertNil(defaults.object(forKey: TrafficHistoryRetention.historyKey))
+        XCTAssertEqual(defaults.integer(forKey: TrafficHistoryRetention.versionKey), TrafficHistoryRetention.currentVersion)
+        XCTAssertEqual(defaults.string(forKey: "unrelated_preference"), "preserved")
+
+        let newHistory = [today: ["upload": 100, "download": 900, "proxy": 700, "direct": 200]]
+        defaults.set(newHistory, forKey: TrafficHistoryRetention.historyKey)
+        let reloaded = try XCTUnwrap(UserDefaults(suiteName: suite))
+        XCTAssertEqual(TrafficHistoryRetention.load(defaults: reloaded, now: now), newHistory)
+        XCTAssertEqual(TrafficHistoryRetention.load(defaults: defaults, now: now), newHistory)
+    }
+
     @MainActor
     func testTotalTrafficFitsSummaryWidthWithoutChangingDetailPrecision() {
         let bytes = Int(760.4 * 1024 * 1024)

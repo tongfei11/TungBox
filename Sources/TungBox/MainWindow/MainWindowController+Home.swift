@@ -601,7 +601,7 @@ extension MainWindowController {
         let proxyLegend = makeLegendTabularRow(color: MD3.primary, name: "代理", amountLabel: donutProxyAmountLabel, ratioLabel: donutProxyRatioLabel)
         let directLegend = makeLegendTabularRow(color: MD3.downloadColor, name: "直连", amountLabel: donutDirectAmountLabel, ratioLabel: donutDirectRatioLabel)
         let otherLegend = makeLegendTabularRow(color: MD3.outlineVariant, name: "其他", amountLabel: donutOtherAmountLabel, ratioLabel: donutOtherRatioLabel)
-        otherLegend.nameLabel.toolTip = "包含无法确定去向的历史流量。"
+        otherLegend.nameLabel.toolTip = "暂时无法确定去向的流量，不等同于直连流量。"
 
         let legendStack = NSStackView(views: [proxyLegend.row, directLegend.row, otherLegend.row])
         legendStack.orientation = .vertical
@@ -882,12 +882,7 @@ extension MainWindowController {
     }
 
     func readTrafficHistory() -> [String: [String: Int]] {
-        let history = UserDefaults.standard.dictionary(forKey: "tungbox_traffic_history") as? [String: [String: Int]] ?? [:]
-        let retained = TrafficHistoryRetention.retained(history)
-        if retained != history {
-            UserDefaults.standard.set(retained, forKey: "tungbox_traffic_history")
-        }
-        return retained
+        TrafficHistoryRetention.load()
     }
 
     func recordTraffic(upload: Int, download: Int, proxy: Int, direct: Int) {
@@ -899,7 +894,7 @@ extension MainWindowController {
         todayTraffic["proxy"] = SaturatingArithmetic.add(todayTraffic["proxy"] ?? 0, proxy)
         todayTraffic["direct"] = SaturatingArithmetic.add(todayTraffic["direct"] ?? 0, direct)
         history[today] = todayTraffic
-        UserDefaults.standard.set(history, forKey: "tungbox_traffic_history")
+        UserDefaults.standard.set(history, forKey: TrafficHistoryRetention.historyKey)
     }
 
     func getTrafficSum(days: Int) -> (upload: Int, download: Int, proxy: Int, direct: Int) {
