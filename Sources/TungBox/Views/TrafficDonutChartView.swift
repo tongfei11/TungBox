@@ -43,7 +43,7 @@ final class TrafficDonutChartView: NSView, MD3Themeable {
 
         let proxyColor = MD3.primary
         let directColor = MD3.downloadColor
-        let otherColor = MD3.outlineVariant.withAlphaComponent(0.4)
+        let otherColor = MD3.onSurfaceVariant
 
         var currentAngle: CGFloat = -.pi / 2
         let gap: CGFloat = 0.04

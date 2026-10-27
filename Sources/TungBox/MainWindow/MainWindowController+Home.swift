@@ -600,7 +600,7 @@ extension MainWindowController {
 
         let proxyLegend = makeLegendTabularRow(color: MD3.primary, name: "代理", amountLabel: donutProxyAmountLabel, ratioLabel: donutProxyRatioLabel)
         let directLegend = makeLegendTabularRow(color: MD3.downloadColor, name: "直连", amountLabel: donutDirectAmountLabel, ratioLabel: donutDirectRatioLabel)
-        let otherLegend = makeLegendTabularRow(color: MD3.outlineVariant, name: "其他", amountLabel: donutOtherAmountLabel, ratioLabel: donutOtherRatioLabel)
+        let otherLegend = makeLegendTabularRow(color: MD3.onSurfaceVariant, name: "其他", amountLabel: donutOtherAmountLabel, ratioLabel: donutOtherRatioLabel)
         otherLegend.nameLabel.toolTip = "暂时无法确定去向的流量，不等同于直连流量。"
 
         let legendStack = NSStackView(views: [proxyLegend.row, directLegend.row, otherLegend.row])
@@ -806,7 +806,7 @@ extension MainWindowController {
             self.donutDirectAmountLabel.textColor = MD3.onSurface
             self.donutDirectRatioLabel.textColor = MD3.onSurfaceVariant
 
-            otherLegendDot?.layer?.backgroundColor = MD3.outlineVariant.cgColor
+            otherLegendDot?.layer?.backgroundColor = MD3.onSurfaceVariant.cgColor
             otherLegendName?.textColor = MD3.onSurfaceVariant
             self.donutOtherAmountLabel.textColor = MD3.onSurface
             self.donutOtherRatioLabel.textColor = MD3.onSurfaceVariant
