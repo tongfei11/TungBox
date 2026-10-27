@@ -179,6 +179,7 @@ extension MainWindowController {
                 showError(NSError.user("未检测到 sing-box Core。请在 设置 > 基础 > Core 管理 中导入 sing-box，或安装：brew install sing-box"))
             }
         }
+        aboutCoreVersionLabel.stringValue = "sing-box Core：\(detectedCoreVersion)"
         serviceLabel.invalidateIntrinsicContentSize()
         refreshHomeFeatureStatus()
     }

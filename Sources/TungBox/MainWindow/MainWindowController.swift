@@ -177,6 +177,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         }
     }
     var detectedCoreVersion = "检测中"
+    let aboutCoreVersionLabel = NSTextField(labelWithString: "")
     var subscriptionTimer: Timer?
     var connectionsRefreshTimer: Timer?
     var tunRequestHeartbeatTimer: Timer?
@@ -217,6 +218,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     let tunIncludeIfaceField = MD3TextField()
     let tunExcludeIfaceField = MD3TextField()
     var tunApplyWorkItem: DispatchWorkItem?
+    var tunSettingsApplyID = UUID()
     let tunServiceStatusLabel = NSTextField(labelWithString: "TUN 服务状态：未检测")
     let tunServiceLogLabel = NSTextField(labelWithString: "最近状态：暂无")
     let tunServiceToggleButton = MD3Button()
@@ -497,7 +499,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             button.trailingAnchor.constraint(equalTo: nav.trailingAnchor).isActive = true
         }
 
-        appVersionFooter.versionText = "TungBox v\(TungBoxVersion.release)"
+        appVersionFooter.versionText = "v\(TungBoxVersion.release)"
         appVersionFooter.target = self
         appVersionFooter.action = #selector(appVersionFooterClicked)
         appVersionFooter.translatesAutoresizingMaskIntoConstraints = false
@@ -610,6 +612,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         pages.selectTabViewItem(at: index)
         for button in navButtons {
             button.isSelected = (button.tag == index)
+        }
+        if index == 2 {
+            refreshRuleRowsFromCachesInBackground()
         }
         if index == 6 {
             checkSingBoxInstall(showAlert: false)

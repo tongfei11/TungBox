@@ -21,12 +21,12 @@ extension MainWindowController {
         }
 
         let tabControl = MD3SegmentedControl()
-        tabControl.items = ["常规", "Core", "TUN 设置", "DNS", "规则集", "外观"]
+        tabControl.items = SettingsPageNavigation.titles
         tabControl.selectedSegment = 0
         tabControl.target = self
         tabControl.action = #selector(settingsTabChanged(_:))
         tabControl.translatesAutoresizingMaskIntoConstraints = false
-        tabControl.widthAnchor.constraint(equalToConstant: 460).isActive = true
+        tabControl.widthAnchor.constraint(equalToConstant: SettingsPageNavigation.width).isActive = true
         tabControl.heightAnchor.constraint(equalToConstant: 36).isActive = true
 
         let headerStack = NSStackView(views: [title])
@@ -53,7 +53,8 @@ extension MainWindowController {
             makeSettingsTunPage(),
             makeSettingsDNSPage(),
             makeSettingsRuleSetPage(),
-            makeSettingsAppearancePage()
+            makeSettingsAppearancePage(),
+            makeSettingsAboutPage()
         ]
         
         if !settingsPages.isEmpty {
@@ -102,25 +103,6 @@ extension MainWindowController {
     }
 
     func makeSettingsGeneralPage() -> NSView {
-        let detailsText = NSTextField(labelWithString: """
-        应用版本: \(TungBoxVersion.current)
-        配置目录: \(store.baseURL.path)
-        Clash API: \(TungBoxConfig.clashAPIListen)
-        """)
-        detailsText.textColor = MD3.onSurfaceVariant
-        detailsText.font = .systemFont(ofSize: 13)
-        detailsText.lineBreakMode = .byWordWrapping
-        detailsText.maximumNumberOfLines = 0
-        detailsText.usesSingleLineMode = false
-        detailsText.cell?.wraps = true
-        detailsText.cell?.isScrollable = false
-        detailsText.translatesAutoresizingMaskIntoConstraints = false
-        detailsText.setContentHuggingPriority(.required, for: .vertical)
-        detailsText.setContentCompressionResistancePriority(.required, for: .vertical)
-        detailsText.heightAnchor.constraint(greaterThanOrEqualToConstant: 58).isActive = true
-
-        let openFolderButton = settingsButton(title: "打开配置目录", action: #selector(openFolderClicked), style: .outlined)
-
         settingsLaunchAtLoginCheckbox.title = "开机自启动"
         settingsLaunchAtLoginCheckbox.target = self
         settingsLaunchAtLoginCheckbox.action = #selector(settingsLaunchAtLoginChanged(_:))
@@ -221,8 +203,7 @@ extension MainWindowController {
                 settingsStartSilentlyCheckbox
             ]),
             settingsPanel(title: "订阅", views: [refreshRow]),
-            settingsPanel(title: "自动测速", views: [urlTestIntervalRow, urlTestToleranceRow, urlTestHint]),
-            settingsPanel(title: "软件信息", views: [detailsText, openFolderButton])
+            settingsPanel(title: "自动测速", views: [urlTestIntervalRow, urlTestToleranceRow, urlTestHint])
         ])
     }
 
@@ -246,9 +227,10 @@ extension MainWindowController {
             refreshRuleSetsButton,
             clearRuleSetsButton
         ])
+        let addressHint = settingsLabel("修改地址后，刷新订阅即可将新地址应用到配置。留空时优先使用订阅地址。")
 
         return settingsPageStack([
-            settingsPanel(title: "规则集地址", views: [ruleSetForm, saveRuleSetButton]),
+            settingsPanel(title: "规则集地址", views: [ruleSetForm, addressHint, saveRuleSetButton]),
             settingsPanel(title: "规则集缓存", views: [cacheButtonGrid])
         ])
     }
@@ -543,7 +525,7 @@ extension MainWindowController {
             (ruleSetGeolocationNotCNURLField, TungBoxConfig.ruleSetGeolocationNotCN)
         ]
         for (field, tag) in fields {
-            field.stringValue = TungBoxConfig.ruleSetURL(for: tag)
+            field.stringValue = TungBoxConfig.ruleSetURLOverride(for: tag)
             field.placeholderString = TungBoxConfig.defaultRuleSetURLs[tag]
             field.translatesAutoresizingMaskIntoConstraints = false
             field.heightAnchor.constraint(equalToConstant: 36).isActive = true
@@ -631,15 +613,20 @@ extension MainWindowController {
         ]
         for (tag, value) in values {
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard trimmed.isEmpty || URL(string: trimmed) != nil else {
-                showError(NSError.user("\(tag) 不是有效 URL"))
+            guard trimmed.isEmpty || (URL(string: trimmed).map {
+                ["http", "https"].contains($0.scheme?.lowercased() ?? "") && !($0.host ?? "").isEmpty
+            } ?? false) else {
+                showError(NSError.user("\(tag) 请输入有效的 HTTP 或 HTTPS 地址"))
                 return
             }
+        }
+        for (tag, value) in values {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
             TungBoxConfig.setRuleSetURL(trimmed, for: tag)
         }
         setupRuleSetURLFields()
         appendLog("[规则集] 已保存规则集获取地址。留空时使用订阅地址；订阅没有时使用内置默认地址。\n")
-        showToast("规则集地址已保存", style: .success)
+        showToast("规则集地址已保存，刷新订阅后生效", style: .success)
     }
 
     @discardableResult

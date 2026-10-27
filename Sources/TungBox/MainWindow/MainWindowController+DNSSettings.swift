@@ -202,14 +202,14 @@ extension MainWindowController: NSTextViewDelegate, NSTextFieldDelegate {
 
     @objc func dnsFakeIPRangeCommitted(_ sender: NSTextField) {
         let v = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalized = v.isEmpty ? DNSConfig.defaultFakeIPRange : v
-        if !v.isEmpty, !isPlausibleCIDR(v) {
-            showToast("Fake-IP 网段不是有效 CIDR：\(v)", style: .warning)
-            sender.stringValue = DNSConfig.fakeIPRange
+        let previous = DNSConfig.fakeIPRange
+        guard DNSConfig.setFakeIPRange(v, defaults: .standard) else {
+            showToast("Fake-IP 网段须为 IPv4 CIDR，前缀范围 0–32（例如 198.18.0.0/15）", style: .warning)
+            sender.stringValue = previous
             return
         }
-        guard normalized != DNSConfig.fakeIPRange else { return }
-        DNSConfig.fakeIPRange = v
+        sender.stringValue = DNSConfig.fakeIPRange
+        guard DNSConfig.fakeIPRange != previous else { return }
         scheduleDNSApply()
     }
 
@@ -315,14 +315,6 @@ extension MainWindowController: NSTextViewDelegate, NSTextFieldDelegate {
             return schemeEnd.upperBound < s.endIndex
         }
         return !s.contains("://")
-    }
-
-    private func isPlausibleCIDR(_ s: String) -> Bool {
-        guard let slash = s.firstIndex(of: "/") else { return false }
-        let addr = String(s[s.startIndex..<slash])
-        let maskStr = String(s[s.index(after: slash)...])
-        guard let mask = Int(maskStr), mask >= 0, mask <= 128 else { return false }
-        return !addr.isEmpty
     }
 
     // MARK: - hint

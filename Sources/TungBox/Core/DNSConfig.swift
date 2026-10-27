@@ -120,18 +120,35 @@ enum DNSConfig {
     }
 
     static var fakeIPRange: String {
-        get {
-            let s = UserDefaults.standard.string(forKey: kFakeIPRange)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return s.isEmpty ? defaultFakeIPRange : s
+        get { readFakeIPRange(from: .standard) }
+        set { _ = setFakeIPRange(newValue, defaults: .standard) }
+    }
+
+    static func readFakeIPRange(from defaults: UserDefaults) -> String {
+        let value = defaults.string(forKey: kFakeIPRange)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return isValidIPv4CIDR(value) ? value : defaultFakeIPRange
+    }
+
+    /// Reject invalid input before changing the last saved valid range.
+    @discardableResult
+    static func setFakeIPRange(_ raw: String, defaults: UserDefaults) -> Bool {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard value.isEmpty || isValidIPv4CIDR(value) else { return false }
+        if value.isEmpty || value == defaultFakeIPRange {
+            defaults.removeObject(forKey: kFakeIPRange)
+        } else {
+            defaults.set(value, forKey: kFakeIPRange)
         }
-        set {
-            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty || trimmed == defaultFakeIPRange {
-                UserDefaults.standard.removeObject(forKey: kFakeIPRange)
-            } else {
-                UserDefaults.standard.set(trimmed, forKey: kFakeIPRange)
-            }
-        }
+        return true
+    }
+
+    static func isValidIPv4CIDR(_ value: String) -> Bool {
+        let parts = value.split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count == 2, !parts[1].isEmpty,
+              parts[1].utf8.allSatisfy({ $0 >= 48 && $0 <= 57 }),
+              let prefix = Int(parts[1]), (0...32).contains(prefix) else { return false }
+        var address = in_addr()
+        return String(parts[0]).withCString { inet_pton(AF_INET, $0, &address) == 1 }
     }
 
     static var fakeIPExcludes: [String] {

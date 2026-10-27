@@ -241,57 +241,46 @@ extension MainWindowController {
     /// 一定是真变更。
     private func scheduleTUNApply() {
         tunApplyWorkItem?.cancel()
+        tunSettingsApplyID = UUID()
+        let id = tunSettingsApplyID
         let work = DispatchWorkItem { [weak self] in
-            self?.applyTUNConfigToActiveProfile()
+            Task { @MainActor [weak self] in await self?.applyTUNConfigToActiveProfile(id: id) }
         }
         tunApplyWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 
-    private func applyTUNConfigToActiveProfile() {
-        guard selectedIndex != nil,
-              parseConfigObject(from: editor.string) != nil else {
-            appendLog("[TUN] 设置已保存（无活动配置可热更新，下次刷新订阅时生效）\n")
-            return
+    private func applyTUNConfigToActiveProfile(id: UUID) async {
+        let generation = runtimeTransitionID
+        let profileID = selectedIndex.flatMap { profiles.indices.contains($0) ? profiles[$0].id : nil }
+        let current = { [self] in
+            tunSettingsApplyID == id && runtimeTransitionID == generation
+                && !runtimeCoordinator.state.isTerminating
+                && selectedIndex.flatMap { profiles.indices.contains($0) ? profiles[$0].id : nil } == profileID
         }
-
-        // 关键路径：rebuild config（setTunEnabled 重读 TUNConfig）然后比较是否真变了
-        let wantTun = isTunEnabled
-        let wantProxy = isSystemProxyEnabled
-
-        // 临时构造一份"假设 TUN 开启"的配置，对比 dns/tun inbound 段
-        guard let rebuilt = parseConfigObject(from: editor.string) else { return }
-        // 重新跑一遍 setTunEnabled 拿到新 TUN inbound dict
-        let withTun = setTunEnabled(true, in: rebuilt)
-        let newTunInbound = (withTun["inbounds"] as? [[String: Any]] ?? [])
-            .first { ($0["type"] as? String)?.lowercased() == "tun" } ?? [:]
-        let curTunInbound = (rebuilt["inbounds"] as? [[String: Any]] ?? [])
-            .first { ($0["type"] as? String)?.lowercased() == "tun" } ?? [:]
-        if !wantTun && curTunInbound.isEmpty {
-            // 用户没开 TUN 也没运行，editor 里本来就没 TUN inbound。只保存到 UserDefaults
-            // 即可；下次开 TUN 时 setTunEnabled 会拿新值生成。
-            return
-        }
-        if canonicalJSON(newTunInbound) == canonicalJSON(curTunInbound) {
-            return
-        }
-
-        // editor 里只有"用户代理模式"配置（无 TUN inbound）。TUN inbound 的最新值会在
-        // enableTunServiceSafely / reconcileRuntime 里通过 setTunEnabled(true,...) 注入。
-        // 这里直接触发 reconcile 让 daemon 拿到新 config 即可，editor 本身不需要重写。
-        if wantTun {
-            appendLog("[TUN] 设置变更，正在请求 daemon 热重载\n")
-            showToast("TUN 设置已更新，正在热重载 daemon", style: .info)
-            reconcileRuntime(reason: "TUN 设置变更", forceRestart: true)
-        } else if wantProxy {
-            // TUN 关、系统代理开：影响不到现有路径，仅保存
-            appendLog("[TUN] 设置已保存（TUN 未开启，下次启用时生效）\n")
-        } else {
-            appendLog("[TUN] 设置已保存（代理未运行，下次启用 TUN 时生效）\n")
+        let outcome = await TUNSettingsUpdate.apply(isCurrent: current, isBusy: { [self] in
+            runtimeCoordinator.state.isTransitioning || isApplyingRuleSets || isSyncingHosts
+        }, tunEnabled: { [self] in isTunEnabled }, reload: { [self] in
+            guard parseConfigObject(from: editor.string) != nil else { return false }
+            return await reloadTunConfigInPlace(configText: editor.string)
+        })
+        switch outcome {
+        case .deferred:
+            // Recheck the latest state after the user's switch/transaction finishes.
+            guard tunSettingsApplyID == id else { return }
+            scheduleTUNApply()
+        case .saved:
+            appendLog("[TUN] 设置已保存，下次启用 TUN 时生效\n")
+        case .reloadRequested:
+            appendLog("[TUN] 已按最新设置写入配置并请求 daemon 热重载\n")
+            showToast("TUN 设置已保存，已请求重载", style: .info)
+        case .failed:
+            appendLog("[TUN] 设置已保存，但本次重载请求失败\n")
+            showToast("TUN 设置已保存，重载失败，请查看日志", style: .warning)
+        case .superseded:
+            break
         }
     }
-
-    // MARK: - hint
 
     private func tunHintLabel(_ text: String) -> NSTextField {
         let label = NSTextField(labelWithString: text)

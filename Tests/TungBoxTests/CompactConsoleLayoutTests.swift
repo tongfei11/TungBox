@@ -5,6 +5,23 @@ import XCTest
 /// Hidden standalone views and fake switches only; never creates TungBox's controller.
 final class CompactConsoleLayoutTests: XCTestCase {
     @MainActor
+    func testSettingsTabsFitWithAboutAtDefaultWindowSize() throws {
+        _ = NSApplication.shared
+        let control = MD3SegmentedControl(frame: NSRect(x: 0, y: 0, width: SettingsPageNavigation.width, height: 36))
+        control.items = SettingsPageNavigation.titles
+        control.layoutSubtreeIfNeeded()
+        let buttons = descendants(control).compactMap { $0 as? MD3Button }
+        XCTAssertEqual(buttons.map(\.title), SettingsPageNavigation.titles)
+        XCTAssertEqual(buttons.count, 7)
+        for button in buttons {
+            let label = try XCTUnwrap(descendants(button).compactMap { $0 as? NSTextField }.first)
+            XCTAssertGreaterThanOrEqual(label.frame.width + 0.5, label.intrinsicContentSize.width, button.title)
+            XCTAssertTrue(control.bounds.insetBy(dx: -0.5, dy: -0.5).contains(control.convert(button.bounds, from: button)))
+        }
+        XCTAssertLessThan(SettingsPageNavigation.width + 100, ConsoleLayout.defaultContentSize.width - ConsoleLayout.sidebarWidth)
+    }
+
+    @MainActor
     func testNormalWindowRejectsBothResizeAxesAndRestoresSizeAfterFullscreen() {
         _ = NSApplication.shared
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: ConsoleLayout.defaultContentSize),

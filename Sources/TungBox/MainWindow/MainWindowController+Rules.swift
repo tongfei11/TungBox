@@ -364,6 +364,7 @@ extension MainWindowController {
     }
 
     func refreshRulesFromEditor() {
+        _ = RuleSetCacheRequests.forOwner(self).beginRows()
         loadRuleSetsForCurrentSubscription()
         ruleRows = buildRuleRows(from: editor.string)
         cachedRuleSearchQuery = nil
@@ -375,21 +376,25 @@ extension MainWindowController {
     @objc func refreshRuleSetsManuallyClicked() {
         let sets = currentRouteRuleSets()
         guard !sets.isEmpty else { showToast("当前配置没有规则集", style: .warning); return }
-        ruleSetDownloads.removeAll()
         appendLog("[规则集] 手动刷新 \(sets.count) 个规则集\n")
-        refreshRuleSetCachesIfNeeded()
-        showToast("正在刷新 \(sets.count) 个规则集", style: .info)
+        refreshRuleSetCachesIfNeeded(force: true)
     }
 
     @objc func clearRuleSetCacheClicked() {
+        RuleSetCacheRequests.forOwner(self).invalidate()
         let dir = store.ruleSetsURL
         guard FileManager.default.fileExists(atPath: dir.path) else { showToast("缓存为空", style: .info); return }
         let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
         var n = 0
-        for f in files { try? FileManager.default.removeItem(at: f); n += 1 }
+        for f in files where f.pathExtension == "json" {
+            do { try FileManager.default.removeItem(at: f); n += 1 } catch {
+                appendLog("[规则集] 缓存清理失败：\(error.localizedDescription)\n")
+            }
+        }
         ruleSetDownloads.removeAll()
+        refreshRuleRowsFromCachesInBackground()
         appendLog("[规则集] 已清空缓存（\(n) 个文件）\n")
-        showToast("已清空 \(n) 个规则集缓存", style: .success)
+        showToast("已清空 \(n) 个展示缓存，保留运行规则", style: .success)
     }
 
     func filteredRuleRows() -> [RuleInfo] {
@@ -454,6 +459,38 @@ extension MainWindowController {
         return ConfigInspection.ruleRows(in: config, context: context)
     }
 
+    /// Snapshot UI-owned model values, then read/expand potentially large rule caches off the main queue.
+    func refreshRuleRowsFromCachesInBackground() {
+        let text = editor.string
+        guard let config = parseConfigObject(from: text) else { return }
+        let subscriptionID = currentSubscription()?.id
+        let request = RuleSetCacheRequests.forOwner(self).beginRows()
+        let urls = ConfigInspection.referencedRuleSetTags(in: config).map { ($0, ruleSetJSONURL(for: $0)) }
+        let context = ConfigInspection.RuleContext(
+            customRules: customRulesForCurrentSubscription(),
+            ruleSets: ruleSetsForCurrentSubscription().map { .init(ruleSet: $0, referenceError: ruleSetReferenceError($0, config: config)) },
+            invalidRuleSets: invalidRuleSets, ruleSetApplyStatus: ruleSetApplyStatus,
+            downloadingRuleSets: ruleSetDownloads)
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            var snapshot = context
+            for (tag, url) in urls {
+                if let data = try? Data(contentsOf: url) {
+                    snapshot.cachedRuleSetEntries[tag] = ConfigInspection.ruleSetEntries(from: data)
+                }
+            }
+            let rows = ConfigInspection.ruleRows(in: ConfigCodec.parseObject(from: text), context: snapshot)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.editor.string == text,
+                      self.currentSubscription()?.id == subscriptionID,
+                      RuleSetCacheRequests.forOwner(self).isCurrentRows(request) else { return }
+                self.ruleRows = rows
+                self.cachedRuleSearchQuery = nil
+                self.cachedFilteredRuleRows = nil
+                self.rulesTable.reloadData()
+            }
+        }
+    }
+
     func ruleSetSRSURL(for tag: String) -> URL {
         store.ruleSetsURL.appendingPathComponent(safeFileName(tag)).appendingPathExtension("srs")
     }
@@ -468,27 +505,49 @@ extension MainWindowController {
         }.map(String.init).joined()
     }
 
-    func refreshRuleSetCachesIfNeeded() {
+    func refreshRuleSetCachesIfNeeded(force: Bool = false) {
         let ruleSets = currentRouteRuleSets()
-        guard !ruleSets.isEmpty, let binary = runner.findSingBox() else { return }
+        guard !ruleSets.isEmpty else { return }
+        let requests = RuleSetCacheRequests.forOwner(self)
+        if force { requests.beginManualRefresh() }
+        guard let binary = runner.findSingBox() else {
+            if force { showToast("无法刷新规则集：未找到 sing-box Core", style: .warning) }
+            return
+        }
+        var queued = 0
+        var queuedTags = Set<String>()
         for ruleSet in ruleSets {
             guard let tag = ruleSet["tag"] as? String,
                   !ruleSetJSONURL(for: tag).path.isEmpty,
-                  !FileManager.default.fileExists(atPath: ruleSetJSONURL(for: tag).path),
-                  !ruleSetDownloads.contains(tag) else { continue }
+                  (force || !FileManager.default.fileExists(atPath: ruleSetJSONURL(for: tag).path)),
+                  (force || !ruleSetDownloads.contains(tag)) else { continue }
+            guard queuedTags.insert(tag).inserted else { continue }
             let srsURL = ruleSetSRSURL(for: tag)
             let jsonURL = ruleSetJSONURL(for: tag)
-            let action = RuleSetRuntime.cachePreparationAction(
+            let action: RuleSetRuntime.CachePreparationAction = force && ruleSet["url"] != nil ? .download : RuleSetRuntime.cachePreparationAction(
                 hasLocalSRS: FileManager.default.fileExists(atPath: srsURL.path),
                 hasConnected: firstConnectionGate.hasConnected
             )
             guard action != .waitForConnection else { continue }
             let sourceURL = (ruleSet["url"] as? String).flatMap(URL.init(string:))
             guard action != .download || sourceURL != nil else { continue }
+            if force {
+                guard let sourceURL, ["http", "https"].contains(sourceURL.scheme?.lowercased() ?? "") else { continue }
+            }
+            let request = requests.begin(tag: tag)
+            queued += 1
+            if force { requests.trackManual(request) }
+            let context = editor.string
+            let subscriptionID = currentSubscription()?.id
+            let proxyPort = runner.isRunning ? getMixedProxyPort() : nil
             ruleSetDownloads.insert(tag)
             DispatchQueue.global(qos: .utility).async { [weak self] in
                 self?.prepareRuleSetCache(
                     tag: tag,
+                    request: request,
+                    context: context,
+                    subscriptionID: subscriptionID,
+                    proxyPort: proxyPort,
                     sourceURL: sourceURL,
                     action: action,
                     srsURL: srsURL,
@@ -497,10 +556,27 @@ extension MainWindowController {
                 )
             }
         }
+        if force {
+            if queued == 0 {
+                showToast("未刷新规则集：没有可用的远端 HTTP(S) 下载地址", style: .warning)
+            } else {
+                showToast("正在刷新 \(queued) 个规则集，跳过 \(ruleSets.count - queued) 个", style: .info)
+            }
+        }
+    }
+
+    func finishManualRuleSetRefresh(_ request: UUID, succeeded: Bool, discarded: Bool = false) {
+        guard let result = RuleSetCacheRequests.forOwner(self).completeManual(request, succeeded: succeeded, discarded: discarded) else { return }
+        showToast("规则集缓存刷新：成功 \(result.succeeded)，失败 \(result.failed)，取消 \(result.discarded)。运行规则下次重启生效",
+                  style: result.failed > 0 ? .warning : .info)
     }
 
     nonisolated func prepareRuleSetCache(
         tag: String,
+        request: UUID,
+        context: String,
+        subscriptionID: UUID?,
+        proxyPort: Int?,
         sourceURL: URL?,
         action: RuleSetRuntime.CachePreparationAction,
         srsURL: URL,
@@ -518,8 +594,20 @@ extension MainWindowController {
         do {
             let inputSRS: URL
             if action == .download {
-                guard let sourceURL else { throw NSError.user("规则集缺少下载地址") }
-                let data = try BoundedRemoteDataLoader.fetch(url: sourceURL, maxBytes: SecurityLimits.ruleSetBytes)
+                guard let sourceURL, ["http", "https"].contains(sourceURL.scheme?.lowercased() ?? "") else { throw NSError.user("规则集缺少有效的 HTTP(S) 下载地址") }
+                let configuration = URLSessionConfiguration.ephemeral
+                configuration.timeoutIntervalForRequest = 30
+                configuration.timeoutIntervalForResource = 45
+                configuration.connectionProxyDictionary = StartupNetworkPolicy.postConnectionProxyDictionary(proxyPort: proxyPort)
+                var request = URLRequest(url: sourceURL, timeoutInterval: 30)
+                request.cachePolicy = .reloadIgnoringLocalCacheData
+                let (data, response) = try BoundedRemoteDataLoader.fetch(
+                    request: request, configuration: configuration,
+                    maxBytes: SecurityLimits.ruleSetBytes, timeout: 50)
+                guard let http = response as? HTTPURLResponse,
+                      (200..<300).contains(http.statusCode), !data.isEmpty else {
+                    throw NSError.user("规则集服务器返回无效响应")
+                }
                 try data.write(to: temporarySRS, options: .atomic)
                 inputSRS = temporarySRS
             } else {
@@ -534,38 +622,52 @@ extension MainWindowController {
             process.standardOutput = pipe
             process.standardError = pipe
             try process.run()
+            let output = pipe.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
             if process.terminationStatus != 0 {
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let data = output
                 let message = String(data: data, encoding: .utf8) ?? "规则集解包失败"
                 throw NSError.user(message)
             }
 
-            if action == .download {
-                if FileManager.default.fileExists(atPath: srsURL.path) {
-                    _ = try FileManager.default.replaceItemAt(srsURL, withItemAt: temporarySRS)
-                } else {
-                    try FileManager.default.moveItem(at: temporarySRS, to: srsURL)
-                }
-            }
-            if FileManager.default.fileExists(atPath: jsonURL.path) {
-                _ = try FileManager.default.replaceItemAt(jsonURL, withItemAt: temporaryJSON)
-            } else {
-                try FileManager.default.moveItem(at: temporaryJSON, to: jsonURL)
+            let decoded = try JSONSerialization.jsonObject(with: Data(contentsOf: temporaryJSON))
+            guard let object = decoded as? [String: Any], object["rules"] is [[String: Any]] else {
+                throw NSError.user("规则集解包结果无效")
             }
 
-            DispatchQueue.main.async { [weak self] in
-                self?.ruleSetDownloads.remove(tag)
-                self?.appendLog("[规则集] \(tag) 已\(action == .download ? "下载并" : "从本地")解包\n")
-                self?.ruleRows = self?.buildRuleRows(from: self?.editor.string ?? "") ?? []
-                self?.cachedRuleSearchQuery = nil
-                self?.cachedFilteredRuleRows = nil
-                self?.rulesTable.reloadData()
+            // Publication runs only after the current editor and request generation are checked.
+            // Network/decompilation remain on the utility queue.
+            DispatchQueue.main.sync { [weak self] in
+                guard let self,
+                      RuleSetCacheRequests.forOwner(self).finish(tag: tag, request: request) else { return }
+                self.ruleSetDownloads.remove(tag)
+                guard self.editor.string == context,
+                      self.currentSubscription()?.id == subscriptionID else {
+                    self.finishManualRuleSetRefresh(request, succeeded: false, discarded: true)
+                    return
+                }
+                do {
+                    try RuleSetCacheRequests.publish(
+                        srs: action == .download ? temporarySRS : nil, json: temporaryJSON,
+                        toSRS: srsURL, toJSON: jsonURL)
+                } catch {
+                    self.finishManualRuleSetRefresh(request, succeeded: false)
+                    self.appendLog("[规则集] \(tag) 缓存保存失败：\(error.localizedDescription)\n")
+                    return
+                }
+                _ = RuleSetCacheRequests.forOwner(self).beginRows()
+                self.finishManualRuleSetRefresh(request, succeeded: true)
+                self.appendLog("[规则集] \(tag) 已\(action == .download ? "下载并" : "从本地")解包\n")
+                // Hidden rules must not parse large JSON caches while the user operates the dashboard.
+                guard (self.pages.selectedTabViewItem?.identifier as? String) == "rules" else { return }
+                self.refreshRuleRowsFromCachesInBackground()
             }
         } catch {
             DispatchQueue.main.async { [weak self] in
-                self?.ruleSetDownloads.remove(tag)
-                self?.appendLog("[规则集] \(tag) 缓存准备失败：\(error.localizedDescription)\n")
+                guard let self, RuleSetCacheRequests.forOwner(self).finish(tag: tag, request: request) else { return }
+                self.ruleSetDownloads.remove(tag)
+                self.finishManualRuleSetRefresh(request, succeeded: false)
+                self.appendLog("[规则集] \(tag) 缓存准备失败：\(error.localizedDescription)\n")
             }
         }
     }
