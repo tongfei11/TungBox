@@ -242,6 +242,7 @@ extension MainWindowController {
     func clearConnections() {
         connections.removeAll()
         prevConnections.removeAll()
+        trafficDestinationTracker = TrafficDestinationTracker()
         prevTrafficTotals.removeAll()   // sing-box 重启时基准会归零，下次重新算
         connectionRefreshTime = .distantPast
         refreshConnectionsTable()
@@ -271,7 +272,7 @@ extension MainWindowController {
                 let totals = snapshot.totals
                 await MainActor.run {
                     applyConnections(list, detail: "实时刷新")
-                    if !totals.isEmpty { accumulateTrafficFromTotals(totals) }
+                    if !totals.isEmpty { accumulateTraffic(from: snapshot) }
                 }
             } catch {
                 await MainActor.run {
@@ -322,7 +323,16 @@ extension MainWindowController {
     /// 用 sing-box 进程级累计字节数（`uploadTotal` / `downloadTotal`）算 delta，
     /// 累加到持久化流量历史。包含 UDP / IPv6 / 已关闭的短连接，这是正确流量源。
     /// 同时更新右上角实时速率（基于这一次和上一次的差值 / 间隔）。
-    func accumulateTrafficFromTotals(_ totals: [Int: (upload: Int64, download: Int64)]) {
+    func accumulateTraffic(from snapshot: ClashAPI.ConnectionSnapshot) {
+        // Both page timers consume snapshots; a delayed older response must not
+        // rewind the baseline and count the same bytes again on the next poll.
+        guard snapshot.sampledAt > lastTrafficSnapshotTime else { return }
+        lastTrafficSnapshotTime = snapshot.sampledAt
+        let totals = snapshot.totals
+        let destinations = trafficDestinationTracker.record(
+            connectionsByPort: snapshot.connectionsByPort, totals: totals, previousTotals: prevTrafficTotals,
+            proxyTags: Set(nodes.map(\.tag))
+        )
         // 第一次拉到：仅记录基准，不算 delta（否则会把"从 sing-box 启动到现在"
         // 的累计全部一次性算进当前会话）。
         guard !prevTrafficTotals.isEmpty else {
@@ -345,7 +355,7 @@ extension MainWindowController {
         if deltaUp > 0 || deltaDown > 0 {
             let safeUp = SaturatingArithmetic.clampedInt(deltaUp)
             let safeDown = SaturatingArithmetic.clampedInt(deltaDown)
-            recordTraffic(upload: safeUp, download: safeDown)
+            recordTraffic(upload: safeUp, download: safeDown, proxy: destinations.proxy, direct: destinations.direct)
             totalUploadBytes = SaturatingArithmetic.add(totalUploadBytes, safeUp)
             totalDownloadBytes = SaturatingArithmetic.add(totalDownloadBytes, safeDown)
             updateTrafficLabels()

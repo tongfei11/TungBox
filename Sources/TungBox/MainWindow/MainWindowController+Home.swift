@@ -266,6 +266,9 @@ extension MainWindowController {
         trafficTotalValueLabel.font = .systemFont(ofSize: 32, weight: .bold)
         trafficTotalValueLabel.textColor = MD3.onSurface
         trafficTotalValueLabel.translatesAutoresizingMaskIntoConstraints = false
+        trafficTotalValueLabel.maximumNumberOfLines = 1
+        trafficTotalValueLabel.lineBreakMode = .byClipping
+        trafficTotalValueLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 125).isActive = true
 
         let trafficTotalDescLabel = NSTextField(labelWithString: "总流量")
         trafficTotalDescLabel.font = .systemFont(ofSize: 13, weight: .regular)
@@ -598,6 +601,7 @@ extension MainWindowController {
         let proxyLegend = makeLegendTabularRow(color: MD3.primary, name: "代理", amountLabel: donutProxyAmountLabel, ratioLabel: donutProxyRatioLabel)
         let directLegend = makeLegendTabularRow(color: MD3.downloadColor, name: "直连", amountLabel: donutDirectAmountLabel, ratioLabel: donutDirectRatioLabel)
         let otherLegend = makeLegendTabularRow(color: MD3.outlineVariant, name: "其他", amountLabel: donutOtherAmountLabel, ratioLabel: donutOtherRatioLabel)
+        otherLegend.nameLabel.toolTip = "包含无法确定去向的历史流量。"
 
         let legendStack = NSStackView(views: [proxyLegend.row, directLegend.row, otherLegend.row])
         legendStack.orientation = .vertical
@@ -874,77 +878,89 @@ extension MainWindowController {
     }
 
     func getTodayKey() -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: Date())
+        TrafficHistoryRetention.dayKey(for: Date())
     }
 
-    func recordTraffic(upload: Int, download: Int) {
+    func readTrafficHistory() -> [String: [String: Int]] {
+        let history = UserDefaults.standard.dictionary(forKey: "tungbox_traffic_history") as? [String: [String: Int]] ?? [:]
+        let retained = TrafficHistoryRetention.retained(history)
+        if retained != history {
+            UserDefaults.standard.set(retained, forKey: "tungbox_traffic_history")
+        }
+        return retained
+    }
+
+    func recordTraffic(upload: Int, download: Int, proxy: Int, direct: Int) {
         let today = getTodayKey()
-        var history = UserDefaults.standard.dictionary(forKey: "tungbox_traffic_history") as? [String: [String: Int]] ?? [:]
+        var history = readTrafficHistory()
         var todayTraffic = history[today] ?? ["upload": 0, "download": 0]
         todayTraffic["upload"] = SaturatingArithmetic.add(todayTraffic["upload"] ?? 0, upload)
         todayTraffic["download"] = SaturatingArithmetic.add(todayTraffic["download"] ?? 0, download)
+        todayTraffic["proxy"] = SaturatingArithmetic.add(todayTraffic["proxy"] ?? 0, proxy)
+        todayTraffic["direct"] = SaturatingArithmetic.add(todayTraffic["direct"] ?? 0, direct)
         history[today] = todayTraffic
         UserDefaults.standard.set(history, forKey: "tungbox_traffic_history")
     }
 
-    func getTrafficSum(days: Int) -> (upload: Int, download: Int) {
-        let history = UserDefaults.standard.dictionary(forKey: "tungbox_traffic_history") as? [String: [String: Int]] ?? [:]
+    func getTrafficSum(days: Int) -> (upload: Int, download: Int, proxy: Int, direct: Int) {
+        let history = readTrafficHistory()
         var totalUp = 0
         var totalDown = 0
+        var proxy = 0
+        var direct = 0
         
         let calendar = Calendar.current
         let now = Date()
         
         for i in 0..<days {
             if let date = calendar.date(byAdding: .day, value: -i, to: now) {
-                let formatter = DateFormatter()
-                formatter.dateFormat = "yyyy-MM-dd"
-                let key = formatter.string(from: date)
+                let key = TrafficHistoryRetention.dayKey(for: date, calendar: calendar)
                 if let dayData = history[key] {
                     totalUp = SaturatingArithmetic.add(totalUp, dayData["upload"] ?? 0)
                     totalDown = SaturatingArithmetic.add(totalDown, dayData["download"] ?? 0)
+                    proxy = SaturatingArithmetic.add(proxy, dayData["proxy"] ?? 0)
+                    direct = SaturatingArithmetic.add(direct, dayData["direct"] ?? 0)
                 }
             }
         }
-        return (totalUp, totalDown)
+        return (totalUp, totalDown, proxy, direct)
     }
 
     func updateTrafficLabels() {
-        let up: Int
-        let down: Int
-        let period: TrafficPeriod
-        switch trafficPeriodControl.selectedSegment {
-        case 0: // 今日
-            let sum = getTrafficSum(days: 1)
-            up = sum.upload
-            down = sum.download
-            period = .today
-        case 1: // 近7天
-            let sum = getTrafficSum(days: 7)
-            up = sum.upload
-            down = sum.download
-            period = .last7Days
-        case 2: // 近30天
-            let sum = getTrafficSum(days: 30)
-            up = sum.upload
-            down = sum.download
-            period = .last30Days
-        default:
-            up = totalUploadBytes
-            down = totalDownloadBytes
-            period = .today
+        let period = TrafficPeriod(rawValue: trafficPeriodControl.selectedSegment) ?? .today
+        let days: Int
+        let periodTitle: String
+        switch period {
+        case .today: days = 1; periodTitle = "今日"
+        case .last7Days: days = 7; periodTitle = "近 7 天"
+        case .last30Days: days = 30; periodTitle = "近 30 天"
         }
-        
+        let sum = getTrafficSum(days: days)
+        let up = sum.upload
+        let down = sum.download
+
         let total = SaturatingArithmetic.add(up, down)
-        trafficTotalValueLabel.stringValue = formatBytes(total)
+        trafficTotalValueLabel.stringValue = formatBytes(total, fractionDigits: 0)
+        trafficTotalValueLabel.font = Self.trafficSummaryFont(for: trafficTotalValueLabel.stringValue)
         trafficStatsValueLabel.stringValue = formatBytes(total)
         trafficStatsDetailLabel.stringValue = "上传: \(formatBytes(up))   下载: \(formatBytes(down))"
         trafficUploadStatLabel.stringValue = formatBytes(up)
         trafficDownloadStatLabel.stringValue = formatBytes(down)
         trafficTrendChartView.data = TrafficTrendStore.trendData(for: period, totalUploadBytes: Int64(up), totalDownloadBytes: Int64(down))
-        trafficDonutChartView.centerTotalText = formatBytes(total)
+        let destinations = TrafficDestinationStats(total: total, proxy: sum.proxy, direct: sum.direct)
+        trafficDonutChartView.centerTotalText = formatBytes(destinations.total)
+        trafficDonutChartView.centerSubText = periodTitle
+        let ratios = destinations.ratios
+        trafficDonutChartView.proxyRatio = ratios[0]
+        trafficDonutChartView.directRatio = ratios[1]
+        trafficDonutChartView.otherRatio = ratios[2]
+        let percentages = destinations.percentages
+        for (index, labels) in [(donutProxyAmountLabel, donutProxyRatioLabel),
+                                (donutDirectAmountLabel, donutDirectRatioLabel),
+                                (donutOtherAmountLabel, donutOtherRatioLabel)].enumerated() {
+            labels.0.stringValue = formatBytes([destinations.proxy, destinations.direct, destinations.other][index])
+            labels.1.stringValue = "\(percentages[index])%"
+        }
     }
 
     @objc func trafficPeriodChanged() {
@@ -1191,7 +1207,7 @@ extension MainWindowController {
                             deltaDown = SaturatingArithmetic.add(deltaDown, SaturatingArithmetic.nonnegativeDifference(curr.download, p.download))
                         }
                     }
-                    self.accumulateTrafficFromTotals(totals)
+                    if let snapshot { self.accumulateTraffic(from: snapshot) }
                     if !prevTotals.isEmpty {
                         let upSpeed = SaturatingArithmetic.rate(bytes: deltaUp, elapsed: elapsedSinceLast)
                         let downSpeed = SaturatingArithmetic.rate(bytes: deltaDown, elapsed: elapsedSinceLast)
@@ -1248,46 +1264,6 @@ extension MainWindowController {
                 self.memoryValueLabel.stringValue = memFormatted
                 self.memoryRingView.ratio = memRatio
 
-                if let conns = apiConnections {
-                    var proxyCount = 0
-                    var directCount = 0
-                    var otherCount = 0
-                    for c in conns {
-                        let ob = c.outbound.lowercased()
-                        if ob.contains("direct") {
-                            directCount += 1
-                        } else if ob.contains("reject") || ob.contains("block") {
-                            otherCount += 1
-                        } else {
-                            proxyCount += 1
-                        }
-                    }
-                    let totalC = max(Double(proxyCount + directCount + otherCount), 1.0)
-                    let pRatio = Double(proxyCount) / totalC
-                    let dRatio = Double(directCount) / totalC
-                    let oRatio = Double(otherCount) / totalC
-                    self.trafficDonutChartView.proxyRatio = pRatio
-                    self.trafficDonutChartView.directRatio = dRatio
-                    self.trafficDonutChartView.otherRatio = oRatio
-                    self.donutProxyLabel.stringValue = "代理 \(proxyCount) (\(Int(pRatio * 100))%)"
-                    self.donutDirectLabel.stringValue = "直连 \(directCount) (\(Int(dRatio * 100))%)"
-                    self.donutOtherLabel.stringValue = "其他 \(otherCount) (\(Int(oRatio * 100))%)"
-
-                    let totalBytes = SaturatingArithmetic.add(self.totalUploadBytes, self.totalDownloadBytes)
-                    if totalBytes > 0 {
-                        self.donutProxyAmountLabel.stringValue = self.formatBytes(Int(Double(totalBytes) * pRatio))
-                        self.donutDirectAmountLabel.stringValue = self.formatBytes(Int(Double(totalBytes) * dRatio))
-                        self.donutOtherAmountLabel.stringValue = self.formatBytes(Int(Double(totalBytes) * oRatio))
-                    } else {
-                        self.donutProxyAmountLabel.stringValue = "\(proxyCount) 条"
-                        self.donutDirectAmountLabel.stringValue = "\(directCount) 条"
-                        self.donutOtherAmountLabel.stringValue = "\(otherCount) 条"
-                    }
-                    self.donutProxyRatioLabel.stringValue = "\(Int(pRatio * 100))%"
-                    self.donutDirectRatioLabel.stringValue = "\(Int(dRatio * 100))%"
-                    self.donutOtherRatioLabel.stringValue = "\(Int(oRatio * 100))%"
-                }
-
                 self.recentStatusPill.stringValue = self.isProxyRuntimeRunning() ? "运行正常" : "服务未启动"
 
                 if apiConnections == nil {
@@ -1323,7 +1299,17 @@ extension MainWindowController {
         connectionsDetailLabel.stringValue = detail
     }
 
-    func formatBytes(_ bytes: Int) -> String {
+    static func trafficSummaryFont(for text: String) -> NSFont {
+        var size: CGFloat = 32
+        while size > 12 {
+            let font = NSFont.systemFont(ofSize: size, weight: .bold)
+            if (text as NSString).size(withAttributes: [.font: font]).width <= 125 { return font }
+            size -= 0.5
+        }
+        return .systemFont(ofSize: size, weight: .bold)
+    }
+
+    nonisolated static func formattedTrafficBytes(_ bytes: Int, fractionDigits: Int = 1) -> String {
         let units = ["B", "KB", "MB", "GB", "TB"]
         var value = Double(bytes)
         var index = 0
@@ -1334,7 +1320,11 @@ extension MainWindowController {
         if index == 0 {
             return "\(Int(value)) \(units[index])"
         }
-        return String(format: "%.1f %@", value, units[index])
+        return String(format: "%.*f %@", fractionDigits, value, units[index])
+    }
+
+    func formatBytes(_ bytes: Int, fractionDigits: Int = 1) -> String {
+        Self.formattedTrafficBytes(bytes, fractionDigits: fractionDigits)
     }
 
     // System-proxy switch — independent of TUN; both can be on together.

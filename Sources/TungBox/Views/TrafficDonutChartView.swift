@@ -2,10 +2,10 @@ import AppKit
 
 /// Donut chart for displaying traffic breakdown (Proxy vs Direct vs Other) with center text.
 final class TrafficDonutChartView: NSView, MD3Themeable {
-    var proxyRatio: Double = 0.64 { didSet { needsDisplay = true } }
-    var directRatio: Double = 0.36 { didSet { needsDisplay = true } }
+    var proxyRatio: Double = 0 { didSet { needsDisplay = true } }
+    var directRatio: Double = 0 { didSet { needsDisplay = true } }
     var otherRatio: Double = 0.00 { didSet { needsDisplay = true } }
-    var centerTotalText: String = "3.3 GB" { didSet { needsDisplay = true } }
+    var centerTotalText: String = "0 B" { didSet { needsDisplay = true } }
     var centerSubText: String = "今日" { didSet { needsDisplay = true } }
 
     override init(frame frameRect: NSRect) {

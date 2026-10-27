@@ -84,7 +84,9 @@ enum ClashAPI {
     }
 
     struct ConnectionSnapshot {
+        let sampledAt = ProcessInfo.processInfo.systemUptime
         var connections: [ConnectionInfo] = []
+        var connectionsByPort: [Int: [ConnectionInfo]] = [:]
         var totals: [Int: (upload: Int64, download: Int64)] = [:]
     }
 
@@ -101,6 +103,7 @@ enum ClashAPI {
                     throw NSError.user("连接统计接口响应无效")
                 }
                 let connections = try await parseConnections(from: object)
+                snapshot.connectionsByPort[port] = connections
                 snapshot.connections.append(contentsOf: connections.map { conn in
                     var connection = conn
                     if port != 9090 { connection.id = "p\(port):\(conn.id)" }

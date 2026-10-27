@@ -72,6 +72,8 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     let currentNodeAutoBadge = CenteredPillLabel(labelWithString: "自动")
     let currentNodeDelayLabel = NSTextField(labelWithString: "—")
     var lastRecordedActiveNode: String?
+    var trafficDestinationTracker = TrafficDestinationTracker()
+    var lastTrafficSnapshotTime: TimeInterval = 0
     var totalUploadBytes = 0
     var totalDownloadBytes = 0
     let trafficStatsValueLabel = NSTextField(labelWithString: "0 B")
@@ -520,7 +522,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             nav.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
             nav.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 24),
 
-            appVersionFooter.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            appVersionFooter.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             appVersionFooter.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -20),
             appVersionFooter.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -18)
         ])
