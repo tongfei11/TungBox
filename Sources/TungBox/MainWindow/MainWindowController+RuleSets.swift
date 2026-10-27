@@ -456,7 +456,7 @@ extension MainWindowController {
         presetButton.target = self
         presetButton.action = #selector(fillAIPresetClicked)
         presetButton.translatesAutoresizingMaskIntoConstraints = false
-        presetButton.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        presetButton.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
 
         let wikiButton = MD3Button()
         wikiButton.title = "规则格式说明 →"

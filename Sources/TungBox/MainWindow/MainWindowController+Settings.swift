@@ -27,7 +27,7 @@ extension MainWindowController {
         tabControl.action = #selector(settingsTabChanged(_:))
         tabControl.translatesAutoresizingMaskIntoConstraints = false
         tabControl.widthAnchor.constraint(equalToConstant: SettingsPageNavigation.width).isActive = true
-        tabControl.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        ConsoleControlLayout.configurePageTabs(tabControl)
 
         let headerStack = NSStackView(views: [title])
         headerStack.orientation = .horizontal
@@ -340,44 +340,12 @@ extension MainWindowController {
         button.target = self
         button.action = action
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.heightAnchor.constraint(equalToConstant: 36).isActive = true
-        button.widthAnchor.constraint(greaterThanOrEqualToConstant: 160).isActive = true
+        button.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
         return button
     }
 
     func settingsButtonGrid(_ buttons: [NSView]) -> NSView {
-        let grid = NSStackView()
-        grid.orientation = .vertical
-        grid.spacing = 10
-        grid.alignment = .width
-        grid.translatesAutoresizingMaskIntoConstraints = false
-
-        for index in stride(from: 0, to: buttons.count, by: 2) {
-            var rowViews = [buttons[index]]
-            if index + 1 < buttons.count {
-                rowViews.append(buttons[index + 1])
-            } else {
-                let spacer = NSView()
-                spacer.translatesAutoresizingMaskIntoConstraints = false
-                rowViews.append(spacer)
-            }
-
-            let row = NSStackView(views: rowViews)
-            row.orientation = .horizontal
-            row.spacing = 12
-            row.distribution = .fillEqually
-            row.alignment = .centerY
-            row.translatesAutoresizingMaskIntoConstraints = false
-            grid.addArrangedSubview(row)
-
-            NSLayoutConstraint.activate([
-                row.leadingAnchor.constraint(equalTo: grid.leadingAnchor),
-                row.trailingAnchor.constraint(equalTo: grid.trailingAnchor)
-            ])
-        }
-
-        grid.widthAnchor.constraint(equalToConstant: 520).isActive = true
-        return grid
+        ConsoleControlLayout.settingsButtonGrid(buttons)
     }
 
     @objc func settingsSystemProxyChanged(_ sender: MD3Checkbox) {

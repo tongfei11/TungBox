@@ -55,7 +55,7 @@ extension MainWindowController {
         addRuleSetButton.target = self
         addRuleSetButton.action = #selector(showAddRuleSetDialog)
         addRuleSetButton.translatesAutoresizingMaskIntoConstraints = false
-        addRuleSetButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        addRuleSetButton.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
 
         let addRuleButton = MD3Button()
         addRuleButton.title = "添加规则"
@@ -64,7 +64,7 @@ extension MainWindowController {
         addRuleButton.target = self
         addRuleButton.action = #selector(showAddCustomRuleDialog)
         addRuleButton.translatesAutoresizingMaskIntoConstraints = false
-        addRuleButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        addRuleButton.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
 
         let deleteRuleButton = MD3Button()
         deleteRuleButton.title = "删除选中"
@@ -73,7 +73,7 @@ extension MainWindowController {
         deleteRuleButton.target = self
         deleteRuleButton.action = #selector(deleteSelectedRuleClicked)
         deleteRuleButton.translatesAutoresizingMaskIntoConstraints = false
-        deleteRuleButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        deleteRuleButton.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
 
         let ruleToolbar = NSStackView(views: [ruleSearchField, addRuleSetButton, addRuleButton, deleteRuleButton])
         ruleToolbar.orientation = .horizontal

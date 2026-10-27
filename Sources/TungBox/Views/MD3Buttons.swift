@@ -33,7 +33,10 @@ final class MD3Button: NSButton, MD3Themeable {
     }
 
     var customFontSize: CGFloat? {
-        didSet { updateColors() }
+        didSet {
+            updateColors()
+            invalidateIntrinsicContentSize()
+        }
     }
 
     private let contentStack = NSStackView()
@@ -328,7 +331,7 @@ final class MD3Button: NSButton, MD3Themeable {
             return NSSize(width: max(width, 60), height: 36)
         } else {
             width += 32
-            return NSSize(width: max(width, 80), height: 36)
+            return NSSize(width: max(width, 80), height: ConsoleControlLayout.actionHeight)
         }
     }
 

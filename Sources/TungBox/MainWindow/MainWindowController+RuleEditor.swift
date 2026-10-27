@@ -202,7 +202,7 @@ extension MainWindowController {
         appPickerButton.target = self
         appPickerButton.action = #selector(pickRunningAppForRule(_:))
         appPickerButton.translatesAutoresizingMaskIntoConstraints = false
-        appPickerButton.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        appPickerButton.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
         customRuleAppPickerButton = appPickerButton
         // The picker button is added to / removed from the stack on demand in
         // customRuleTypeChanged(). We must NOT rely on isHidden here: on macOS 26

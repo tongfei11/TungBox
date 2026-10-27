@@ -33,7 +33,7 @@ extension MainWindowController {
         nodesModeControl.target = self
         nodesModeControl.action = #selector(nodesModeChanged)
         nodesModeControl.translatesAutoresizingMaskIntoConstraints = false
-        nodesModeControl.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        ConsoleControlLayout.configurePageTabs(nodesModeControl)
 
         let testButton = MD3Button()
         testButton.title = "⚡ 延迟测试"
@@ -41,7 +41,7 @@ extension MainWindowController {
         testButton.target = self
         testButton.action = #selector(testAllNodesClicked)
         testButton.translatesAutoresizingMaskIntoConstraints = false
-        testButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        testButton.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
         testButton.widthAnchor.constraint(equalToConstant: 120).isActive = true
 
         let spacer = NSView()

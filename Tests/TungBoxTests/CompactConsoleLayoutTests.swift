@@ -5,20 +5,95 @@ import XCTest
 /// Hidden standalone views and fake switches only; never creates TungBox's controller.
 final class CompactConsoleLayoutTests: XCTestCase {
     @MainActor
-    func testSettingsTabsFitWithAboutAtDefaultWindowSize() throws {
+    func testPageTabsFitAtActionHeightWithLargerText() throws {
         _ = NSApplication.shared
-        let control = MD3SegmentedControl(frame: NSRect(x: 0, y: 0, width: SettingsPageNavigation.width, height: 36))
-        control.items = SettingsPageNavigation.titles
-        control.layoutSubtreeIfNeeded()
-        let buttons = descendants(control).compactMap { $0 as? MD3Button }
-        XCTAssertEqual(buttons.map(\.title), SettingsPageNavigation.titles)
-        XCTAssertEqual(buttons.count, 7)
-        for button in buttons {
-            let label = try XCTUnwrap(descendants(button).compactMap { $0 as? NSTextField }.first)
-            XCTAssertGreaterThanOrEqual(label.frame.width + 0.5, label.intrinsicContentSize.width, button.title)
-            XCTAssertTrue(control.bounds.insetBy(dx: -0.5, dy: -0.5).contains(control.convert(button.bounds, from: button)))
+        for (titles, width) in [(SettingsPageNavigation.titles, SettingsPageNavigation.width),
+                                (["直连 / 绕过代理", "全局代理", "规则判定"], CGFloat(480))] {
+            let control = MD3SegmentedControl(frame: NSRect(x: 0, y: 0, width: width, height: ConsoleControlLayout.actionHeight))
+            control.items = titles
+            ConsoleControlLayout.configurePageTabs(control)
+            for selected in titles.indices {
+                control.selectedSegment = selected
+                control.layoutSubtreeIfNeeded()
+                let pill = try XCTUnwrap(control.subviews.compactMap { $0 as? MD3PillView }.first)
+                XCTAssertEqual(pill.frame.height, ConsoleControlLayout.actionHeight, accuracy: 0.5)
+                let buttons = descendants(control).compactMap { $0 as? MD3Button }
+                XCTAssertEqual(buttons.map(\.title), titles)
+                for button in buttons {
+                    let label = try XCTUnwrap(descendants(button).compactMap { $0 as? NSTextField }.first)
+                    XCTAssertEqual(label.font?.pointSize, ConsoleControlLayout.tabFontSize)
+                    XCTAssertGreaterThanOrEqual(label.frame.width + 0.5, label.intrinsicContentSize.width, button.title)
+                    XCTAssertEqual(button.frame.height, ConsoleControlLayout.actionHeight, accuracy: 0.5)
+                    XCTAssertTrue(control.bounds.insetBy(dx: -0.5, dy: -0.5).contains(control.convert(button.bounds, from: button)))
+                }
+            }
+            if let prefix = ProcessInfo.processInfo.environment["TUNGBOX_LAYOUT_PREVIEW"] {
+                let image = try XCTUnwrap(control.bitmapImageRepForCachingDisplay(in: control.bounds))
+                control.cacheDisplay(in: control.bounds, to: image)
+                try XCTUnwrap(image.representation(using: .png, properties: [:]))
+                    .write(to: URL(fileURLWithPath: prefix + "-tabs-\(titles.count).png"))
+            }
+        }
+        let home = MD3SegmentedControl(frame: NSRect(x: 0, y: 0, width: 185, height: 24))
+        home.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        home.items = ["今日", "近 7 天", "近 30 天"]
+        home.layoutSubtreeIfNeeded()
+        let homePill = try XCTUnwrap(home.subviews.compactMap { $0 as? MD3PillView }.first)
+        XCTAssertEqual(homePill.frame.height, 16, accuracy: 0.5)
+        for label in descendants(home).compactMap({ $0 as? NSTextField }) {
+            XCTAssertEqual(label.font?.pointSize, 10, "首页维持原来的小号 tab")
         }
         XCTAssertLessThan(SettingsPageNavigation.width + 100, ConsoleLayout.defaultContentSize.width - ConsoleLayout.sidebarWidth)
+    }
+
+    @MainActor
+    func testSettingsActionGridsFitTextWithoutStretchingButtons() throws {
+        _ = NSApplication.shared
+        let groups = [
+            ["检查 Core 更新", "安装最新 Core", "导入 sing-box Core", "安装旧版 Core（测试）", "打开 Core 目录"],
+            ["安装 TUN 服务", "重新安装 TUN 服务", "重载 TUN 服务", "打开 TUN 日志"],
+            ["打开 GitHub 项目", "提交反馈", "查看版本发布", "打开配置目录"],
+            ["刷新规则集", "清空规则集缓存"]
+        ]
+        for (index, titles) in groups.enumerated() {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 240),
+                                  styleMask: [.borderless], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            defer { window.contentView = nil; window.close() }
+            let root = FlippedView(frame: NSRect(x: 0, y: 0, width: 600, height: 240))
+            window.contentView = root
+            root.wantsLayer = true
+            root.layer?.backgroundColor = MD3.background.cgColor
+            let buttons = titles.map { title in
+                let button = MD3Button()
+                button.title = title
+                button.style = .outlined
+                button.translatesAutoresizingMaskIntoConstraints = false
+                button.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
+                return button
+            }
+            let grid = ConsoleControlLayout.settingsButtonGrid(buttons)
+            root.addSubview(grid)
+            NSLayoutConstraint.activate([
+                grid.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
+                grid.topAnchor.constraint(equalTo: root.topAnchor, constant: 20)
+            ])
+            root.layoutSubtreeIfNeeded()
+            XCTAssertLessThan(grid.frame.width, 416, "按钮网格不再强制占据 520pt")
+            for button in buttons {
+                XCTAssertEqual(button.frame.height, ConsoleControlLayout.actionHeight, accuracy: 0.5)
+                XCTAssertEqual(button.frame.width, button.intrinsicContentSize.width, accuracy: 1)
+                let label = try XCTUnwrap(descendants(button).compactMap { $0 as? NSTextField }.first)
+                XCTAssertGreaterThanOrEqual(label.frame.width + 0.5, label.intrinsicContentSize.width, button.title)
+                XCTAssertTrue(grid.bounds.insetBy(dx: -0.5, dy: -0.5).contains(grid.convert(button.bounds, from: button)))
+            }
+            if let prefix = ProcessInfo.processInfo.environment["TUNGBOX_LAYOUT_PREVIEW"] {
+                let image = try XCTUnwrap(root.bitmapImageRepForCachingDisplay(in: root.bounds))
+                root.cacheDisplay(in: root.bounds, to: image)
+                try XCTUnwrap(image.representation(using: .png, properties: [:]))
+                    .write(to: URL(fileURLWithPath: prefix + "-actions-\(index).png"))
+            }
+        }
     }
 
     @MainActor

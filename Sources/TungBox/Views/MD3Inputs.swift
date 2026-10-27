@@ -151,6 +151,14 @@ final class MD3SegmentedControl: NSView, MD3Themeable {
         didSet { updateSelection(animated: true) }
     }
 
+    var customFontSize: CGFloat? {
+        didSet { buttons.forEach { $0.customFontSize = customFontSize } }
+    }
+
+    var selectionInset: CGFloat = 4 {
+        didSet { needsLayout = true }
+    }
+
     var target: AnyObject?
     var action: Selector?
 
@@ -189,7 +197,7 @@ final class MD3SegmentedControl: NSView, MD3Themeable {
         stackView.layoutSubtreeIfNeeded()
         super.layout()
         layer?.cornerRadius = bounds.height / 2
-        slidingPill.layer?.cornerRadius = (bounds.height - 8) / 2
+        slidingPill.layer?.cornerRadius = max(0, bounds.height / 2 - selectionInset)
         updateSelection(animated: false)
     }
 
@@ -214,6 +222,7 @@ final class MD3SegmentedControl: NSView, MD3Themeable {
             button.target = self
             button.action = #selector(segmentClicked(_:))
             button.style = .segment
+            button.customFontSize = customFontSize
             button.state = (index == selectedSegment) ? .on : .off
             stackView.addArrangedSubview(button)
             buttons.append(button)
@@ -238,7 +247,7 @@ final class MD3SegmentedControl: NSView, MD3Themeable {
         guard !buttons.isEmpty, selectedSegment < buttons.count else { return }
 
         let targetButton = buttons[selectedSegment]
-        let inset: CGFloat = 4
+        let inset = selectionInset
         let targetFrame = convert(targetButton.bounds, from: targetButton).insetBy(dx: inset, dy: inset)
 
         if targetFrame.width <= 0 || targetFrame.height <= 0 { return }

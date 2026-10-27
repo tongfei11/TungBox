@@ -87,7 +87,7 @@ extension MainWindowController {
         clearButton.target = self
         clearButton.action = #selector(clearLogsClicked)
         clearButton.translatesAutoresizingMaskIntoConstraints = false
-        clearButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        clearButton.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
         clearButton.widthAnchor.constraint(equalToConstant: 80).isActive = true
 
         let copyButton = MD3Button()
@@ -96,7 +96,7 @@ extension MainWindowController {
         copyButton.target = self
         copyButton.action = #selector(copyLogsClicked)
         copyButton.translatesAutoresizingMaskIntoConstraints = false
-        copyButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        copyButton.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
         copyButton.widthAnchor.constraint(equalToConstant: 80).isActive = true
 
         let levelStack = NSStackView(views: levelButtons)

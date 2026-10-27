@@ -42,7 +42,7 @@ extension MainWindowController {
         addButton.target = self
         addButton.action = #selector(addSubscriptionClicked)
         addButton.translatesAutoresizingMaskIntoConstraints = false
-        addButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        addButton.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
 
         let refreshAllButton = MD3Button()
         refreshAllButton.title = "刷新全部"
@@ -51,7 +51,7 @@ extension MainWindowController {
         refreshAllButton.target = self
         refreshAllButton.action = #selector(refreshAllSubscriptionsClicked)
         refreshAllButton.translatesAutoresizingMaskIntoConstraints = false
-        refreshAllButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        refreshAllButton.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
 
         let importFileButton = MD3Button()
         importFileButton.title = "从文件导入"
@@ -60,7 +60,7 @@ extension MainWindowController {
         importFileButton.target = self
         importFileButton.action = #selector(importSubscriptionFileClicked)
         importFileButton.translatesAutoresizingMaskIntoConstraints = false
-        importFileButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        importFileButton.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
 
         let importClipboardButton = MD3Button()
         importClipboardButton.title = "从剪贴板"
@@ -69,7 +69,7 @@ extension MainWindowController {
         importClipboardButton.target = self
         importClipboardButton.action = #selector(importSubscriptionFromClipboardClicked)
         importClipboardButton.translatesAutoresizingMaskIntoConstraints = false
-        importClipboardButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        importClipboardButton.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
 
         let deleteButton = MD3Button()
         deleteButton.title = "删除订阅"
@@ -78,7 +78,7 @@ extension MainWindowController {
         deleteButton.target = self
         deleteButton.action = #selector(deleteSubscriptionClicked)
         deleteButton.translatesAutoresizingMaskIntoConstraints = false
-        deleteButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        deleteButton.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
 
         let buttons = NSStackView(views: [addButton, refreshAllButton, importFileButton, importClipboardButton, deleteButton])
         buttons.orientation = .horizontal
