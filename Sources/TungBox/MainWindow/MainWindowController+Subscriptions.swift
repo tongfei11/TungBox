@@ -44,15 +44,6 @@ extension MainWindowController {
         addButton.translatesAutoresizingMaskIntoConstraints = false
         addButton.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
 
-        let refreshAllButton = MD3Button()
-        refreshAllButton.title = "刷新全部"
-        refreshAllButton.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: nil)
-        refreshAllButton.style = .outlined
-        refreshAllButton.target = self
-        refreshAllButton.action = #selector(refreshAllSubscriptionsClicked)
-        refreshAllButton.translatesAutoresizingMaskIntoConstraints = false
-        refreshAllButton.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
-
         let importFileButton = MD3Button()
         importFileButton.title = "从文件导入"
         importFileButton.image = NSImage(systemSymbolName: "doc.text", accessibilityDescription: nil)
@@ -80,7 +71,8 @@ extension MainWindowController {
         deleteButton.translatesAutoresizingMaskIntoConstraints = false
         deleteButton.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
 
-        let buttons = NSStackView(views: [addButton, refreshAllButton, importFileButton, importClipboardButton, deleteButton])
+        let buttons = NSStackView(views: [addButton, importFileButton, importClipboardButton, deleteButton])
+        ConsoleControlLayout.equalizeActionWidths([addButton, importFileButton, importClipboardButton, deleteButton])
         buttons.orientation = .horizontal
         buttons.spacing = 10
         buttons.edgeInsets = NSEdgeInsetsZero
@@ -109,7 +101,7 @@ extension MainWindowController {
         subscriptionTable.delegate = self
         subscriptionTable.dataSource = self
         subscriptionTable.intercellSpacing = NSSize(width: 0, height: 12)
-        subscriptionTable.rowHeight = 160
+        subscriptionTable.rowHeight = 200
         scroll.documentView = subscriptionTable
         subscriptionTable.sizeLastColumnToFit()
 
@@ -122,6 +114,7 @@ extension MainWindowController {
             headerStack.topAnchor.constraint(equalTo: view.topAnchor, constant: 28),
 
             buttons.leadingAnchor.constraint(equalTo: headerStack.leadingAnchor),
+            buttons.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -32),
             buttons.topAnchor.constraint(equalTo: headerStack.bottomAnchor, constant: 18),
             buttons.heightAnchor.constraint(equalToConstant: 34),
 

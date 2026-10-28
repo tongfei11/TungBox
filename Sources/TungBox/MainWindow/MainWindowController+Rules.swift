@@ -76,6 +76,7 @@ extension MainWindowController {
         deleteRuleButton.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
 
         let ruleToolbar = NSStackView(views: [ruleSearchField, addRuleSetButton, addRuleButton, deleteRuleButton])
+        ConsoleControlLayout.equalizeActionWidths([addRuleSetButton, addRuleButton, deleteRuleButton])
         ruleToolbar.orientation = .horizontal
         ruleToolbar.spacing = 10
         ruleToolbar.alignment = .centerY
@@ -83,7 +84,7 @@ extension MainWindowController {
         ruleSearchField.widthAnchor.constraint(greaterThanOrEqualToConstant: 120).isActive = true
         ruleSearchField.setContentHuggingPriority(.defaultLow, for: .horizontal)
         for button in [addRuleSetButton, addRuleButton, deleteRuleButton] {
-            button.setContentHuggingPriority(.required, for: .horizontal)
+            button.setContentHuggingPriority(.defaultHigh, for: .horizontal)
             button.setContentCompressionResistancePriority(.required, for: .horizontal)
         }
 

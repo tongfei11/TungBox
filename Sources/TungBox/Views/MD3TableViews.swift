@@ -149,12 +149,16 @@ final class MD3ProfileCellView: NSTableCellView {
     }
 }
 
+final class SubscriptionRefreshButton: NSButton {
+    override var alignmentRectInsets: NSEdgeInsets { NSEdgeInsetsZero }
+}
+
 final class MD3SubscriptionItemView: NSView, MD3Themeable {
     private let card = NSView()
     let titleLabel = NSTextField(labelWithString: "")
     let updatedAtPill = NSView()
     let updatedAtLabel = NSTextField(labelWithString: "")
-    let refreshButton = NSButton()
+    let refreshButton = SubscriptionRefreshButton()
 
     let domainStack = NSStackView()
     let linkIconView = NSImageView()
@@ -167,6 +171,7 @@ final class MD3SubscriptionItemView: NSView, MD3Themeable {
     let trafficBar = NSView()
     let trafficFill = NSView()
     private var trafficFillWidth: NSLayoutConstraint!
+    private let edgeGlowBands = (0..<4).map { _ in CAGradientLayer() }
 
     let expireRow = NSStackView()
     let expireIconCircle = NSView()
@@ -214,6 +219,8 @@ final class MD3SubscriptionItemView: NSView, MD3Themeable {
         card.wantsLayer = true
         card.layer?.cornerRadius = 14
         card.layer?.borderWidth = 1
+        card.layer?.masksToBounds = true
+        edgeGlowBands.forEach { card.layer?.insertSublayer($0, at: 0) }
         card.translatesAutoresizingMaskIntoConstraints = false
         addSubview(card)
 
@@ -223,7 +230,7 @@ final class MD3SubscriptionItemView: NSView, MD3Themeable {
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
 
         updatedAtPill.wantsLayer = true
-        updatedAtPill.layer?.cornerRadius = 10
+        updatedAtPill.layer?.cornerRadius = 11
         updatedAtPill.translatesAutoresizingMaskIntoConstraints = false
 
         updatedAtLabel.font = .systemFont(ofSize: 10, weight: .medium)
@@ -357,7 +364,7 @@ final class MD3SubscriptionItemView: NSView, MD3Themeable {
 
             updatedAtPill.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
             updatedAtPill.trailingAnchor.constraint(equalTo: refreshButton.leadingAnchor, constant: -6),
-            updatedAtPill.heightAnchor.constraint(equalToConstant: 20),
+            updatedAtPill.heightAnchor.constraint(equalToConstant: 22),
 
             updatedAtLabel.leadingAnchor.constraint(equalTo: updatedAtPill.leadingAnchor, constant: 8),
             updatedAtLabel.trailingAnchor.constraint(equalTo: updatedAtPill.trailingAnchor, constant: -8),
@@ -374,8 +381,8 @@ final class MD3SubscriptionItemView: NSView, MD3Themeable {
             // Traffic Box
             trafficBox.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 14),
             trafficBox.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -14),
-            trafficBox.topAnchor.constraint(equalTo: domainStack.bottomAnchor, constant: 10),
-            trafficBox.heightAnchor.constraint(equalToConstant: 50),
+            trafficBox.topAnchor.constraint(equalTo: domainStack.bottomAnchor, constant: 12),
+            trafficBox.heightAnchor.constraint(equalToConstant: 68),
 
             trafficHeaderLabel.leadingAnchor.constraint(equalTo: trafficBox.leadingAnchor, constant: 10),
             trafficHeaderLabel.topAnchor.constraint(equalTo: trafficBox.topAnchor, constant: 6),
@@ -390,7 +397,7 @@ final class MD3SubscriptionItemView: NSView, MD3Themeable {
             trafficBar.leadingAnchor.constraint(equalTo: trafficBox.leadingAnchor, constant: 10),
             trafficBar.trailingAnchor.constraint(equalTo: trafficBox.trailingAnchor, constant: -10),
             trafficBar.bottomAnchor.constraint(equalTo: trafficBox.bottomAnchor, constant: -7),
-            trafficBar.heightAnchor.constraint(equalToConstant: 5),
+            trafficBar.heightAnchor.constraint(equalToConstant: 8),
 
             trafficFill.leadingAnchor.constraint(equalTo: trafficBar.leadingAnchor),
             trafficFill.topAnchor.constraint(equalTo: trafficBar.topAnchor),
@@ -406,7 +413,8 @@ final class MD3SubscriptionItemView: NSView, MD3Themeable {
             expireIconView.heightAnchor.constraint(equalToConstant: 13),
 
             expireRow.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
-            expireRow.topAnchor.constraint(equalTo: trafficBox.bottomAnchor, constant: 9),
+            expireRow.topAnchor.constraint(greaterThanOrEqualTo: trafficBox.bottomAnchor, constant: 9),
+            expireRow.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -14),
             expireRow.trailingAnchor.constraint(lessThanOrEqualTo: card.trailingAnchor, constant: -16),
 
             errorLabel.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
@@ -520,15 +528,10 @@ final class MD3SubscriptionItemView: NSView, MD3Themeable {
         layer?.backgroundColor = NSColor.clear.cgColor
         let isDark = MD3.isDark
         if isSelected {
-            card.layer?.backgroundColor = isDark
-                ? MD3.primary.withAlphaComponent(0.12).cgColor
-                : MD3.primaryContainer.withAlphaComponent(0.4).cgColor
+            card.layer?.backgroundColor = MD3.surfaceContainer.mixed(with: MD3.primary, ratio: isDark ? 0.08 : 0.06).cgColor
             card.layer?.borderColor = MD3.primary.cgColor
             card.layer?.borderWidth = 1.8
-            card.layer?.shadowColor = MD3.primary.cgColor
-            card.layer?.shadowRadius = 8
-            card.layer?.shadowOpacity = 0.28
-            card.layer?.shadowOffset = .zero
+            card.layer?.shadowOpacity = 0
         } else {
             let bg = isHovered ? MD3.surfaceContainerHigh : MD3.surfaceContainer
             card.layer?.backgroundColor = bg.cgColor
@@ -536,6 +539,8 @@ final class MD3SubscriptionItemView: NSView, MD3Themeable {
             card.layer?.borderWidth = 1
             card.layer?.shadowOpacity = 0
         }
+
+        updateEdgeGlowBands()
 
         titleLabel.textColor = MD3.onSurface
         domainLabel.textColor = MD3.onSurfaceVariant
@@ -552,6 +557,7 @@ final class MD3SubscriptionItemView: NSView, MD3Themeable {
             : MD3.surface.cgColor
         trafficBox.layer?.borderColor = MD3.outlineVariant.withAlphaComponent(0.2).cgColor
         trafficBox.layer?.borderWidth = 1
+        trafficBox.layer?.shadowOpacity = 0
 
         trafficHeaderLabel.textColor = MD3.onSurfaceVariant
         trafficLabel.textColor = MD3.primary
@@ -564,6 +570,37 @@ final class MD3SubscriptionItemView: NSView, MD3Themeable {
         expireTitleLabel.textColor = MD3.onSurfaceVariant
         expiresLabel.textColor = MD3.onSurface
         errorLabel.textColor = MD3.error
+    }
+
+    override func layout() {
+        super.layout()
+        updateEdgeGlowBands()
+    }
+
+    private func updateEdgeGlowBands() {
+        guard let layer = card.layer else { return }
+        let bounds = layer.bounds
+        let band: CGFloat = 12
+        let colors = [MD3.primary.withAlphaComponent(isSelected ? 0.22 : 0).cgColor,
+                      MD3.primary.withAlphaComponent(0).cgColor]
+        for (index, glow) in edgeGlowBands.enumerated() {
+            glow.isHidden = !isSelected
+            glow.colors = colors
+            switch index {
+            case 0: // top
+                glow.frame = CGRect(x: 0, y: 0, width: bounds.width, height: band)
+                glow.startPoint = CGPoint(x: 0.5, y: 0); glow.endPoint = CGPoint(x: 0.5, y: 1)
+            case 1: // bottom
+                glow.frame = CGRect(x: 0, y: bounds.height - band, width: bounds.width, height: band)
+                glow.startPoint = CGPoint(x: 0.5, y: 1); glow.endPoint = CGPoint(x: 0.5, y: 0)
+            case 2: // left
+                glow.frame = CGRect(x: 0, y: 0, width: band, height: bounds.height)
+                glow.startPoint = CGPoint(x: 0, y: 0.5); glow.endPoint = CGPoint(x: 1, y: 0.5)
+            default: // right
+                glow.frame = CGRect(x: bounds.width - band, y: 0, width: band, height: bounds.height)
+                glow.startPoint = CGPoint(x: 1, y: 0.5); glow.endPoint = CGPoint(x: 0, y: 0.5)
+            }
+        }
     }
 
     func themeChanged() { updateColors() }

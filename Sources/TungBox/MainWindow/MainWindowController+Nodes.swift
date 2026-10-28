@@ -42,7 +42,7 @@ extension MainWindowController {
         testButton.action = #selector(testAllNodesClicked)
         testButton.translatesAutoresizingMaskIntoConstraints = false
         testButton.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
-        testButton.widthAnchor.constraint(equalToConstant: 120).isActive = true
+        ConsoleControlLayout.equalizeActionWidths([testButton])
 
         let spacer = NSView()
         spacer.translatesAutoresizingMaskIntoConstraints = false

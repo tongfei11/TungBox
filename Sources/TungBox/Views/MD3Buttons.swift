@@ -15,6 +15,9 @@ final class MD3ButtonCell: NSButtonCell {
 // MARK: - MD3 Button
 
 final class MD3Button: NSButton, MD3Themeable {
+    // The custom background occupies the entire frame, unlike AppKit's bezel.
+    override var alignmentRectInsets: NSEdgeInsets { NSEdgeInsetsZero }
+
     enum ButtonStyle {
         case filled
         case tonal

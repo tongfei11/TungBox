@@ -57,7 +57,6 @@ extension MainWindowController {
         refreshButton.action = #selector(refreshConnectionsClicked)
         refreshButton.translatesAutoresizingMaskIntoConstraints = false
         refreshButton.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
-        refreshButton.widthAnchor.constraint(equalToConstant: 88).isActive = true
 
         let closeButton = MD3Button()
         closeButton.title = "关闭全部"
@@ -67,9 +66,9 @@ extension MainWindowController {
         closeButton.action = #selector(closeAllConnectionsClicked)
         closeButton.translatesAutoresizingMaskIntoConstraints = false
         closeButton.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
-        closeButton.widthAnchor.constraint(equalToConstant: 112).isActive = true
 
         let buttons = NSStackView(views: [refreshButton, closeButton])
+        ConsoleControlLayout.equalizeActionWidths([refreshButton, closeButton])
         buttons.orientation = .horizontal
         buttons.spacing = 10
         buttons.translatesAutoresizingMaskIntoConstraints = false

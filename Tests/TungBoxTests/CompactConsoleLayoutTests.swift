@@ -47,13 +47,16 @@ final class CompactConsoleLayoutTests: XCTestCase {
     }
 
     @MainActor
-    func testSettingsActionGridsFitTextWithoutStretchingButtons() throws {
+    func testPageActionsKeepEqualCompactWidths() throws {
         _ = NSApplication.shared
         let groups = [
             ["检查 Core 更新", "安装最新 Core", "导入 sing-box Core", "安装旧版 Core（测试）", "打开 Core 目录"],
             ["安装 TUN 服务", "重新安装 TUN 服务", "重载 TUN 服务", "打开 TUN 日志"],
             ["打开 GitHub 项目", "提交反馈", "查看版本发布", "打开配置目录"],
-            ["刷新规则集", "清空规则集缓存"]
+            ["刷新规则集", "清空规则集缓存"],
+            ["添加规则集", "添加规则", "删除选中"],
+            ["添加订阅", "从文件导入", "从剪贴板", "删除订阅"],
+            ["刷新", "关闭全部"], ["复制", "清空"], ["⚡ 延迟测试"]
         ]
         for (index, titles) in groups.enumerated() {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 240),
@@ -67,22 +70,33 @@ final class CompactConsoleLayoutTests: XCTestCase {
             let buttons = titles.map { title in
                 let button = MD3Button()
                 button.title = title
+                if index >= 4 && index <= 6 { button.image = NSImage(systemSymbolName: "plus.circle", accessibilityDescription: nil) }
                 button.style = .outlined
                 button.translatesAutoresizingMaskIntoConstraints = false
                 button.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
                 return button
             }
-            let grid = ConsoleControlLayout.settingsButtonGrid(buttons)
+            let grid: NSView
+            if index < 4 {
+                grid = ConsoleControlLayout.settingsButtonGrid(buttons)
+            } else {
+                let row = NSStackView(views: buttons)
+                row.orientation = .horizontal
+                row.spacing = 10
+                row.translatesAutoresizingMaskIntoConstraints = false
+                ConsoleControlLayout.equalizeActionWidths(buttons)
+                grid = row
+            }
             root.addSubview(grid)
             NSLayoutConstraint.activate([
                 grid.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
                 grid.topAnchor.constraint(equalTo: root.topAnchor, constant: 20)
             ])
             root.layoutSubtreeIfNeeded()
-            XCTAssertLessThan(grid.frame.width, 416, "按钮网格不再强制占据 520pt")
+            XCTAssertLessThan(grid.frame.width, index < 4 ? 416 : 756, "同页按钮等宽且留白紧凑")
             for button in buttons {
                 XCTAssertEqual(button.frame.height, ConsoleControlLayout.actionHeight, accuracy: 0.5)
-                XCTAssertEqual(button.frame.width, button.intrinsicContentSize.width, accuracy: 1)
+                XCTAssertEqual(button.frame.width, buttons.map { $0.intrinsicContentSize.width }.max() ?? 0, accuracy: 1)
                 let label = try XCTUnwrap(descendants(button).compactMap { $0 as? NSTextField }.first)
                 XCTAssertGreaterThanOrEqual(label.frame.width + 0.5, label.intrinsicContentSize.width, button.title)
                 XCTAssertTrue(grid.bounds.insetBy(dx: -0.5, dy: -0.5).contains(grid.convert(button.bounds, from: button)))
@@ -93,6 +107,34 @@ final class CompactConsoleLayoutTests: XCTestCase {
                 try XCTUnwrap(image.representation(using: .png, properties: [:]))
                     .write(to: URL(fileURLWithPath: prefix + "-actions-\(index).png"))
             }
+        }
+    }
+
+    @MainActor
+    func testSubscriptionCardFitsDesignHeightAndRefreshBadge() throws {
+        _ = NSApplication.shared
+        let previousDark = MD3.isDark
+        defer { MD3.isDark = previousDark }
+        MD3.isDark = true
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 375, height: 200), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.contentView = nil; window.close() }
+        let card = MD3SubscriptionItemView(frame: NSRect(x: 0, y: 0, width: 375, height: 200))
+        window.contentView = card
+        card.configure(with: Subscription(id: UUID(), name: "tt", url: "https://tungcloud.vip/config", updatedAt: Date(),
+                                          upload: 20 * 1024, download: 184 * 1024 * 1024 * 1024, total: 3 * 1024 * 1024 * 1024 * 1024), selected: true)
+        card.layoutSubtreeIfNeeded()
+        XCTAssertEqual(card.updatedAtPill.frame.height, 22, accuracy: 0.5)
+        XCTAssertEqual(card.refreshButton.frame.height, 26, accuracy: 0.5)
+        XCTAssertEqual(card.refreshButton.frame.width, 26, accuracy: 0.5)
+        XCTAssertEqual(card.trafficBox.frame.height, 68, accuracy: 0.5)
+        for view in [card.titleLabel, card.updatedAtPill, card.refreshButton, card.trafficBox, card.expireRow] {
+            XCTAssertTrue(card.bounds.contains(card.convert(view.bounds, from: view)))
+        }
+        if let prefix = ProcessInfo.processInfo.environment["TUNGBOX_LAYOUT_PREVIEW"] {
+            let image = try XCTUnwrap(card.bitmapImageRepForCachingDisplay(in: card.bounds))
+            card.cacheDisplay(in: card.bounds, to: image)
+            try XCTUnwrap(image.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: prefix + "-subscription.png"))
         }
     }
 

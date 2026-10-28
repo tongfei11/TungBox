@@ -57,6 +57,7 @@ extension MainWindowController {
             makeSettingsAboutPage()
         ]
         
+        settingsPages.forEach { ConsoleControlLayout.equalizePageActions(in: $0) }
         if !settingsPages.isEmpty {
             let firstPage = settingsPages[0]
             settingsTabView.addSubview(firstPage)
