@@ -118,7 +118,7 @@ final class Runner: @unchecked Sendable {
         }
         let actualConfig = try preprocessConfig(at: config)
         defer { removeGeneratedRuntimeConfig(actualConfig, original: config) }
-        let result = runAndWait(binary, ["check", "-c", actualConfig.path])
+        let result = runAndWait(binary, ["check", "-c", actualConfig.path], timeoutSeconds: 15)
         if result.status != 0 {
             throw NSError.user(result.output.isEmpty ? "配置检查失败" : result.output)
         }
@@ -535,6 +535,11 @@ final class Runner: @unchecked Sendable {
         json = fixedJson
 
         var changed = !fixes.isEmpty
+        let cachedJson = FakeIPCacheConfig.applying(to: FakeIPRoutingConfig.migratingLegacyIPv6Pool(in: json))
+        if !NSDictionary(dictionary: cachedJson).isEqual(to: json) {
+            json = cachedJson
+            changed = true
+        }
         let localizedRuleSets = RuleSetRuntime.localizeBuiltInRuleSets(
             in: json,
             ruleSetDirectory: store.ruleSetsURL
@@ -547,6 +552,7 @@ final class Runner: @unchecked Sendable {
         var convertedTun = false
 
         if userMode {
+            json = ProxyModeConfig.ensuringRuntimeRuleMode(in: json)
             json = LocalAPIConfiguration.authenticated(
                 json,
                 listen: TungBoxConfig.clashAPIListen,

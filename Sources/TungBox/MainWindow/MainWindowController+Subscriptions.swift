@@ -1,6 +1,5 @@
 import AppKit
 import Foundation
-import UserNotifications
 
 extension MainWindowController {
     
@@ -13,61 +12,76 @@ extension MainWindowController {
         }
 
         let title = NSTextField(labelWithString: "订阅")
-        title.font = .systemFont(ofSize: 30, weight: .bold)
+        title.font = .systemFont(ofSize: 26, weight: .bold)
         title.textColor = MD3.onSurface
         title.translatesAutoresizingMaskIntoConstraints = false
-        tightenLabelCell(title)   // 让字符紧贴 frame.x，避免视觉缩进
+        tightenLabelCell(title)
         registerThemeObserver { [weak title] in
             title?.textColor = MD3.onSurface
         }
 
+        let subtitle = NSTextField(labelWithString: "管理订阅链接，获取并更新节点信息")
+        subtitle.font = .systemFont(ofSize: 12)
+        subtitle.textColor = MD3.onSurfaceVariant
+        subtitle.translatesAutoresizingMaskIntoConstraints = false
+        tightenLabelCell(subtitle)
+        registerThemeObserver { [weak subtitle] in
+            subtitle?.textColor = MD3.onSurfaceVariant
+        }
+
+        let headerStack = NSStackView(views: [title, subtitle])
+        headerStack.orientation = .vertical
+        headerStack.alignment = .leading
+        headerStack.spacing = 3
+        headerStack.translatesAutoresizingMaskIntoConstraints = false
+
         let addButton = MD3Button()
         addButton.title = "添加订阅"
+        addButton.image = NSImage(systemSymbolName: "plus.circle.fill", accessibilityDescription: nil)
         addButton.style = .filled
         addButton.target = self
         addButton.action = #selector(addSubscriptionClicked)
         addButton.translatesAutoresizingMaskIntoConstraints = false
-        addButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
-        addButton.widthAnchor.constraint(equalToConstant: 120).isActive = true
+        addButton.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
 
         let importFileButton = MD3Button()
         importFileButton.title = "从文件导入"
+        importFileButton.image = NSImage(systemSymbolName: "doc.text", accessibilityDescription: nil)
         importFileButton.style = .outlined
         importFileButton.target = self
         importFileButton.action = #selector(importSubscriptionFileClicked)
         importFileButton.translatesAutoresizingMaskIntoConstraints = false
-        importFileButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
-        importFileButton.widthAnchor.constraint(equalToConstant: 120).isActive = true
+        importFileButton.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
 
         let importClipboardButton = MD3Button()
         importClipboardButton.title = "从剪贴板"
+        importClipboardButton.image = NSImage(systemSymbolName: "doc.on.clipboard", accessibilityDescription: nil)
         importClipboardButton.style = .outlined
         importClipboardButton.target = self
         importClipboardButton.action = #selector(importSubscriptionFromClipboardClicked)
         importClipboardButton.translatesAutoresizingMaskIntoConstraints = false
-        importClipboardButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
-        importClipboardButton.widthAnchor.constraint(equalToConstant: 120).isActive = true
+        importClipboardButton.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
 
-        // 顶部操作栏不再放"更新选中" —— 每张卡片右上角已有刷新按钮，避免重复。
         let deleteButton = MD3Button()
         deleteButton.title = "删除订阅"
+        deleteButton.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
         deleteButton.style = .destructive
         deleteButton.target = self
         deleteButton.action = #selector(deleteSubscriptionClicked)
         deleteButton.translatesAutoresizingMaskIntoConstraints = false
-        deleteButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
-        deleteButton.widthAnchor.constraint(equalToConstant: 120).isActive = true
+        deleteButton.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
 
         let buttons = NSStackView(views: [addButton, importFileButton, importClipboardButton, deleteButton])
+        ConsoleControlLayout.equalizeActionWidths([addButton, importFileButton, importClipboardButton, deleteButton])
         buttons.orientation = .horizontal
-        buttons.spacing = 12
-        buttons.edgeInsets = NSEdgeInsetsZero   // 显式清零，否则按钮和标题/卡片对不齐
+        buttons.spacing = 10
+        buttons.edgeInsets = NSEdgeInsetsZero
         buttons.translatesAutoresizingMaskIntoConstraints = false
 
         let scroll = MD3ScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.hasVerticalScroller = true
-        scroll.applyThinOverlayScroller()       // 极简悬浮滚动条
+        scroll.applyThinOverlayScroller()
         scroll.automaticallyAdjustsContentInsets = false
         scroll.contentInsets = NSEdgeInsetsZero
         
@@ -86,28 +100,25 @@ extension MainWindowController {
         subscriptionTable.headerView = nil
         subscriptionTable.delegate = self
         subscriptionTable.dataSource = self
-        // NSTableView 默认 intercellSpacing = (3, 2) 会让 cell 内容横向缩进 3pt，
-        // 视觉上卡片就比标题/按钮右移 → 看不齐。清零横向间距，保留 8pt 行间距。
-        subscriptionTable.intercellSpacing = NSSize(width: 0, height: 8)
-        subscriptionTable.rowHeight = 84   // 紧凑卡片高度（行间距由 intercellSpacing 给）
+        subscriptionTable.intercellSpacing = NSSize(width: 0, height: 12)
+        subscriptionTable.rowHeight = 200
         scroll.documentView = subscriptionTable
         subscriptionTable.sizeLastColumnToFit()
 
-        // 直接把 scroll 放到 view 上（不再包 MD3Panel 底色），让卡片左缘和上方按钮、
-        // 标题完全对齐 —— 视觉上更干净。
-        view.addSubview(title)
+        view.addSubview(headerStack)
         view.addSubview(buttons)
         view.addSubview(scroll)
 
         NSLayoutConstraint.activate([
-            title.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
-            title.topAnchor.constraint(equalTo: view.topAnchor, constant: 28),
+            headerStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
+            headerStack.topAnchor.constraint(equalTo: view.topAnchor, constant: 28),
 
-            buttons.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            buttons.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 20),
-            buttons.heightAnchor.constraint(equalToConstant: 36),
+            buttons.leadingAnchor.constraint(equalTo: headerStack.leadingAnchor),
+            buttons.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -32),
+            buttons.topAnchor.constraint(equalTo: headerStack.bottomAnchor, constant: 18),
+            buttons.heightAnchor.constraint(equalToConstant: 34),
 
-            scroll.leadingAnchor.constraint(equalTo: title.leadingAnchor),
+            scroll.leadingAnchor.constraint(equalTo: headerStack.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
             scroll.topAnchor.constraint(equalTo: buttons.bottomAnchor, constant: 16),
             scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -24)
@@ -215,6 +226,17 @@ extension MainWindowController {
         
         dialog.onCancel = { [weak dialog] in
             dialog?.dismiss()
+        }
+    }
+
+    @objc func refreshAllSubscriptionsClicked() {
+        guard !subscriptions.isEmpty else {
+            showToast("暂无订阅可刷新", style: .info)
+            return
+        }
+        showToast("正在刷新全部 \(subscriptions.count) 个订阅...", style: .info)
+        for index in subscriptions.indices {
+            refreshSubscription(at: index)
         }
     }
 
@@ -401,7 +423,7 @@ extension MainWindowController {
         )
     }
 
-    func refreshSubscription(at index: Int) {
+    func refreshSubscription(at index: Int, automatic: Bool = false) {
         guard subscriptions.indices.contains(index) else { return }
         let subscription = subscriptions[index]
         let refreshToken = subscriptionRefreshTracker.begin(subscriptionID: subscription.id, url: subscription.url)
@@ -428,8 +450,11 @@ extension MainWindowController {
                     manualIssues = ConfigCompatibilityChecker.check(config: obj).filter { !$0.autoFixed }
                 }
                 DispatchQueue.main.async {
-                    guard let self,
-                          let idx = self.subscriptions.firstIndex(where: { $0.id == subscription.id }),
+                    guard let self else { return }
+                    defer {
+                        if automatic { self.finishAutomaticSubscriptionRefresh(subscriptionID: subscription.id) }
+                    }
+                    guard let idx = self.subscriptions.firstIndex(where: { $0.id == subscription.id }),
                           self.subscriptionRefreshTracker.isCurrent(refreshToken, currentURL: self.subscriptions[idx].url) else { return }
                     if ua != SubscriptionImporter.fallbackUserAgents.first {
                         self.appendLog("[订阅] 服务端按 UA 返回不同内容，使用「\(ua)」拉取成功\n")
@@ -472,8 +497,11 @@ extension MainWindowController {
             } catch {
                 let errorMsg = error.localizedDescription
                 DispatchQueue.main.async {
-                    guard let self,
-                          let currentIndex = self.subscriptions.firstIndex(where: { $0.id == subscription.id }),
+                    guard let self else { return }
+                    defer {
+                        if automatic { self.finishAutomaticSubscriptionRefresh(subscriptionID: subscription.id) }
+                    }
+                    guard let currentIndex = self.subscriptions.firstIndex(where: { $0.id == subscription.id }),
                           self.subscriptionRefreshTracker.isCurrent(refreshToken, currentURL: self.subscriptions[currentIndex].url) else { return }
                     // Store error on subscription card
                     if var sub = self.subscriptions.first(where: { $0.id == subscription.id }) {
@@ -484,10 +512,8 @@ extension MainWindowController {
                             self.subscriptionTable.reloadData()
                         }
                     }
+                    // 卡片状态与日志已呈现失败，后台刷新不再弹窗或发送系统通知。
                     self.appendLog("[订阅] \(subscription.name) 刷新失败：\(errorMsg)\n")
-                    // macOS notification for auto-refresh failures (not for manual refresh)
-                    self.notifySubscriptionFailure(name: subscription.name, error: errorMsg)
-                    self.showError(error)
                 }
             }
         }
@@ -497,9 +523,7 @@ extension MainWindowController {
         subscriptionTimer?.invalidate()
         subscriptionTimer = nil
 
-        let minutes = UserDefaults.standard.integer(forKey: "subscriptionRefreshMinutes")
-        let effectiveMinutes = minutes > 0 ? minutes : 60
-        let seconds = TimeInterval(effectiveMinutes * 60)
+        let minutes = SubscriptionRefreshSchedule.minutes()
 
         // If set to "off" (0 minutes), don't start a timer
         guard minutes != 0 else {
@@ -507,50 +531,32 @@ extension MainWindowController {
             return
         }
 
-        let formatter = DateComponentsFormatter()
-        formatter.unitsStyle = .abbreviated
-        let intervalText = formatter.string(from: seconds) ?? "\(effectiveMinutes)分"
-
-        subscriptionTimer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: true) { [weak self] _ in
+        subscriptionTimer = SubscriptionRefreshSchedule.makeTimer(minutes: minutes) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self, !self.subscriptions.isEmpty else { return }
+                guard self.subscriptionRefreshBatch.begin(subscriptionIDs: self.subscriptions.map(\.id)) else {
+                    self.appendLog("[订阅] 上一批自动刷新尚未结束，本次跳过\n")
+                    return
+                }
                 self.appendLog("[订阅] 自动刷新开始\n")
                 self.subscriptionAutoStatusLabel.stringValue = "订阅自动刷新：正在刷新 \(self.subscriptions.count) 个订阅"
                 for index in self.subscriptions.indices {
-                    self.refreshSubscription(at: index)
+                    self.refreshSubscription(at: index, automatic: true)
                 }
             }
         }
-        appendLog("[订阅] 自动刷新已开启，间隔：\(intervalText)\n")
+        appendLog("[订阅] 自动刷新已开启，间隔：\(SubscriptionRefreshSchedule.statusText(minutes: minutes))\n")
     }
 
-    @MainActor
-    func downgradeCoreForCompatibility() async {
-        let oldVersion = "1.11.10"
-        serviceLabel.stringValue = "sing-box Core：正在安装兼容版本 \(oldVersion)..."
-        appendLog("[Core] 订阅兼容性要求降级 Core 至 \(oldVersion)\n")
-        do {
-            let release = try await CoreUpdater.release(version: oldVersion)
-            installCoreRelease(release, reason: "兼容旧订阅")
-        } catch {
-            serviceLabel.stringValue = "sing-box Core：安装 \(oldVersion) 失败\n\(error.localizedDescription)"
-            showError(error)
-        }
-    }
-
-    func notifySubscriptionFailure(name: String, error: String) {
-        // UNUserNotificationCenter.current() ABORTS (SIGABRT, NSAssertion) when the
-        // process has no bundle identifier — e.g. `swift run` runs the raw binary
-        // outside an .app, and a subscription failure here would crash the whole
-        // app. Only call it when packaged; otherwise the log + showError already
-        // surface the failure.
-        guard Bundle.main.bundleIdentifier != nil else { return }
-        let content = UNMutableNotificationContent()
-        content.title = "订阅刷新失败"
-        content.body = "\(name): \(String(error.prefix(120)))"
-        content.sound = .default
-        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request)
+    func finishAutomaticSubscriptionRefresh(subscriptionID: UUID) {
+        guard let shouldReload = subscriptionRefreshBatch.finish(
+            subscriptionID: subscriptionID, currentSubscriptionID: currentSubscription()?.id,
+            runtimeGeneration: runtimeTransitionID
+        ) else { return }
+        appendLog("[订阅] 本批自动刷新已结束\n")
+        let minutes = SubscriptionRefreshSchedule.minutes()
+        subscriptionAutoStatusLabel.stringValue = "订阅自动刷新：\(SubscriptionRefreshSchedule.statusText(minutes: minutes))，最近一批已结束"
+        if shouldReload { reloadRuntimeAfterSubscriptionRefresh() }
     }
 
     func applySubscriptionConfig(
@@ -578,13 +584,18 @@ extension MainWindowController {
         let configURL = store.configURL(for: profile)
         let baseURL = store.ruleBaseURL(for: subscription.id)
         let projectionURL = store.ruleProjectionURL(for: subscription.id)
+        var resolvedConfig = config
+        if FileManager.default.fileExists(atPath: configURL.path),
+           let existingText = try? String(contentsOf: configURL, encoding: .utf8) {
+            resolvedConfig = ProxyModeConfig.preserveSelectorDefaults(from: existingText, into: config)
+        }
         var snapshots: [(URL, Data?)] = []
         do {
             for url in [configURL, baseURL, projectionURL] {
                 snapshots.append((url, FileManager.default.fileExists(atPath: url.path) ? try Data(contentsOf: url) : nil))
             }
-            try store.saveRuleBase(config, for: subscription.id)
-            let merged = try renderConfig(try applyCustomRules(to: config, subscriptionID: subscription.id, freshSubscription: true))
+            try store.saveRuleBase(resolvedConfig, for: subscription.id)
+            let merged = try renderConfig(try applyCustomRules(to: resolvedConfig, subscriptionID: subscription.id))
             try checkRuleSetConfig(merged)
             try Data(merged.utf8).write(to: configURL, options: .atomic)
             try store.saveRuleProjection(merged, for: subscription.id)
@@ -631,20 +642,30 @@ extension MainWindowController {
             refreshHomeFeatureStatus()
         }
         appendLog("[订阅] \(subscription.name) 已刷新并写入配置\n")
+        RecentStatusTracker.shared.record("订阅「\(subscription.name)」已更新", level: .success)
         showToast("订阅「\(subscription.name)」已更新", style: .success)
 
         // runner 重启**只**在当前 profile 被刷新时做。其他订阅的刷新不应该惊动当前
         // 流量。
         if isCurrent, isSystemProxyEnabled || isTunEnabled {
-            beginFeatureTransition(
-                systemProxy: isSystemProxyEnabled ? .starting : nil,
-                tun: isTunEnabled ? .starting : nil
-            )
-            for i in nodes.indices { nodes[i].delay = "未测试" }
-            refreshNodeGroupsView()
-            Task { _ = try? await ClashAPI.closeConnections(port: delayAPIPort()) }
-            reconcileRuntime(reason: "订阅刷新", forceRestart: true)
+            if subscriptionRefreshBatch.deferReload(subscriptionID: subscriptionID, runtimeGeneration: runtimeTransitionID) {
+                appendLog("[订阅] 当前订阅已更新，等待本批下载结束后应用运行配置\n")
+            } else {
+                reloadRuntimeAfterSubscriptionRefresh()
+            }
         }
+    }
+
+    func reloadRuntimeAfterSubscriptionRefresh() {
+        guard !runtimeCoordinator.state.isTerminating, isSystemProxyEnabled || isTunEnabled else { return }
+        beginFeatureTransition(
+            systemProxy: isSystemProxyEnabled ? .starting : nil,
+            tun: isTunEnabled ? .starting : nil
+        )
+        for i in nodes.indices { nodes[i].delay = "未测试" }
+        refreshNodeGroupsView()
+        Task { _ = try? await ClashAPI.closeConnections(port: delayAPIPort()) }
+        reconcileRuntime(reason: "订阅刷新", forceRestart: true)
     }
 
     func currentSubscription() -> Subscription? {

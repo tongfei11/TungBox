@@ -58,6 +58,16 @@ struct RuleInfo {
     var ruleSetID: UUID? = nil
     /// Set when this row represents a rule-set file that failed to load.
     var ruleSetInvalidURL: URL? = nil
+    /// Validation is separate from the user's persisted enable preference.
+    var referenceError: String? = nil
+    var strategyReferenceError: String? = nil
+
+    /// Menu actions follow actual availability, rather than the saved preference alone.
+    var isEffectivelyEnabled: Bool {
+        enabled && referenceError == nil && ruleSetInvalidURL == nil
+    }
+
+    var enableActionTitle: String { isEffectivelyEnabled ? "停用" : "启用" }
 }
 
 struct CustomRule: Codable, Equatable {
@@ -197,25 +207,22 @@ enum TungBoxConfig {
         LocalAPISecret.secret(forPort: port)
     }
 
-    static func ruleSetURL(for tag: String) -> String {
-        let stored = UserDefaults.standard.string(forKey: ruleSetURLKey(tag))?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let stored, !stored.isEmpty {
-            return stored
-        }
-        return defaultRuleSetURLs[tag] ?? ""
+    static func ruleSetURLOverride(for tag: String, defaults: UserDefaults = .standard) -> String {
+        let stored = defaults.string(forKey: ruleSetURLKey(tag))?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return stored ?? ""
     }
 
-    static func setRuleSetURL(_ url: String, for tag: String) {
+    static func setRuleSetURL(_ url: String, for tag: String, defaults: UserDefaults = .standard) {
         let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty || trimmed == defaultRuleSetURLs[tag] {
-            UserDefaults.standard.removeObject(forKey: ruleSetURLKey(tag))
+        if trimmed.isEmpty {
+            defaults.removeObject(forKey: ruleSetURLKey(tag))
         } else {
-            UserDefaults.standard.set(trimmed, forKey: ruleSetURLKey(tag))
+            defaults.set(trimmed, forKey: ruleSetURLKey(tag))
         }
     }
 
-    static func resolvedRuleSetURL(for tag: String, subscriptionURLs: [String: String]) -> String {
-        let stored = UserDefaults.standard.string(forKey: ruleSetURLKey(tag))?.trimmingCharacters(in: .whitespacesAndNewlines)
+    static func resolvedRuleSetURL(for tag: String, subscriptionURLs: [String: String], defaults: UserDefaults = .standard) -> String {
+        let stored = defaults.string(forKey: ruleSetURLKey(tag))?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let stored, !stored.isEmpty {
             return stored
         }

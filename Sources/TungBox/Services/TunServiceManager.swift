@@ -5,6 +5,7 @@ enum TunServiceStatus {
     case notInstalled
     case installedRunning
     case installedIdle
+    case updateRequired
     case abnormal(String)
 
     var displayText: String {
@@ -15,6 +16,8 @@ enum TunServiceStatus {
             return "已安装并运行"
         case .installedIdle:
             return "已安装，等待随代理开启"
+        case .updateRequired:
+            return "服务需要更新，请重新安装 TUN 服务"
         case .abnormal(let message):
             return "异常：\(message)"
         }
@@ -44,7 +47,13 @@ enum TunServiceStatus {
     }
 
     var shouldReinstall: Bool {
+        if needsUpdate { return true }
         if case .abnormal = self { return true }
+        return false
+    }
+
+    var needsUpdate: Bool {
+        if case .updateRequired = self { return true }
         return false
     }
 }
@@ -72,7 +81,8 @@ enum TunServiceManager {
     static let legacyStdoutPath = "/tmp/\(label).out.log"
     static let legacyStderrPath = "/tmp/\(label).err.log"
     static let tunInterfaceName = "utun29"
-    static let tunIPv4Address = "198.19.0.1"
+    static let tunIPv4Address = TUNAddressPlan.interfaceIPv4
+    static let tunDNSIPv4Address = TUNAddressPlan.dnsIPv4
     static let legacyTunIPv4Address = "172.19.0.1"
     static let requestHeartbeatTimeout: TimeInterval = 30
     static let unexpectedChildExitShell = """
@@ -105,7 +115,7 @@ enum TunServiceManager {
             return .abnormal("Core 路径错误")
         }
         guard installedServiceDefinitionIsCurrent() else {
-                return .abnormal("服务需要更新，请重新安装 TUN 服务")
+            return .updateRequired
         }
         guard launchDaemonIsLoaded() else {
             return .abnormal("服务未加载，请重新安装 TUN 服务")
@@ -661,7 +671,7 @@ enum TunServiceManager {
         return nil
     }
 
-    private static func serviceScript(store: Store) -> String {
+    static func serviceScript(store: Store) -> String {
         let script = """
         #!/bin/sh
         CORE=\(shellQuote(corePath))
@@ -673,9 +683,9 @@ enum TunServiceManager {
         PIDFILE=\(shellQuote(pidPath))
         LOG=\(shellQuote(logPath))
         DNS_BACKUP=\(shellQuote(dnsBackupPath))
-        TUN_DNS_ADDR="198.18.0.2"
+        TUN_DNS_ADDR="\(tunDNSIPv4Address)"
         CHILD=""
-        SCRIPT_VERSION="2026-09-tun-recovery-v26"
+        SCRIPT_VERSION="2026-09-tun-recovery-v27"
         REQUEST_MAX_AGE=30
         CLEANING_UP=0
         LOG_MAX_BYTES=1048576
@@ -823,8 +833,8 @@ enum TunServiceManager {
         }
 
         # Force the active physical service to resolve through the TUN DNS
-        # (sing-box answers 198.18.0.2 via hijack-dns with an ipv4_only, un-poisoned
-        # result). Without this, macOS mDNSResponder sends queries bound to the
+        # (the Core recognizes its subnet-derived DNS address before FakeIP lookup).
+        # Without this, macOS mDNSResponder sends queries bound to the
         # physical interface, bypassing utun29, and the GFW poisons google/youtube/
         # facebook (and AAAA -> 2001::1). The original DNS is backed up so it can be
         # restored on every teardown path. This is the macOS approach used by Surge.
@@ -1084,7 +1094,7 @@ enum TunServiceManager {
         sha256Hex(try Data(contentsOf: url, options: [.mappedIfSafe]))
     }
 
-    private static func launchDaemonPlist(scriptPath: String) -> String {
+    static func launchDaemonPlist(scriptPath: String) -> String {
         """
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -1115,7 +1125,15 @@ enum TunServiceManager {
               let plist = try? String(contentsOfFile: plistPath) else {
             return false
         }
-        return script.contains(configPath)
+        return serviceDefinitionIsCurrent(script: script, plist: plist)
+    }
+
+    /// Pure validation so stale privileged scripts cannot silently keep an old DNS sink.
+    static func serviceDefinitionIsCurrent(script: String, plist: String) -> Bool {
+        let dnsAssignment = "TUN_DNS_ADDR=\"\(tunDNSIPv4Address)\""
+        let hasCurrentDNS = script.components(separatedBy: .newlines)
+            .contains { $0.trimmingCharacters(in: .whitespaces) == dnsAssignment }
+        return hasCurrentDNS && script.contains(configPath)
             && script.contains(flagPath)
             && script.contains("REQUEST_CONFIG=")
             && script.contains("REQUEST_FLAG=")
@@ -1130,7 +1148,7 @@ enum TunServiceManager {
             && script.contains("clean_routes")
             && script.contains("wait_for_pid_exit")
             && script.contains("stop_pid")
-            && script.contains("2026-09-tun-recovery-v26")
+            && script.contains("2026-09-tun-recovery-v27")
             && script.contains("rotate_log_if_big")
             && script.contains("clean_dns")
             && script.contains("flush_dns_after_tun_up")

@@ -1,5 +1,10 @@
 import AppKit
 
+enum ConsoleLayout {
+    static let defaultContentSize = NSSize(width: 960, height: 600)
+    static let sidebarWidth: CGFloat = 140
+}
+
 /// Navigation is always visible. Avoid split-view collapse and restoration state.
 final class FixedSidebarLayout: NSView {
     let sidebar = NSView()
@@ -15,7 +20,7 @@ final class FixedSidebarLayout: NSView {
             sidebar.leadingAnchor.constraint(equalTo: leadingAnchor),
             sidebar.topAnchor.constraint(equalTo: topAnchor),
             sidebar.bottomAnchor.constraint(equalTo: bottomAnchor),
-            sidebar.widthAnchor.constraint(equalToConstant: 180),
+            sidebar.widthAnchor.constraint(equalToConstant: ConsoleLayout.sidebarWidth),
             mainContent.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: 1),
             mainContent.trailingAnchor.constraint(equalTo: trailingAnchor),
             mainContent.topAnchor.constraint(equalTo: topAnchor),

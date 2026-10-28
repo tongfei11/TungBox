@@ -5,28 +5,44 @@ extension MainWindowController {
     
     func makeNodesView() -> NSView {
         let title = NSTextField(labelWithString: "节点")
-        title.font = .systemFont(ofSize: 30, weight: .bold)
+        title.font = .systemFont(ofSize: 26, weight: .bold)
         title.textColor = MD3.onSurface
         title.translatesAutoresizingMaskIntoConstraints = false
+        tightenLabelCell(title)
         registerThemeObserver { [weak title] in
             title?.textColor = MD3.onSurface
         }
 
-        nodesModeControl.items = ["直连/绕过代理", "全局代理", "规则判定"]
+        let subtitle = NSTextField(labelWithString: "选择节点或让系统自动选择最优节点")
+        subtitle.font = .systemFont(ofSize: 12)
+        subtitle.textColor = MD3.onSurfaceVariant
+        subtitle.translatesAutoresizingMaskIntoConstraints = false
+        tightenLabelCell(subtitle)
+        registerThemeObserver { [weak subtitle] in
+            subtitle?.textColor = MD3.onSurfaceVariant
+        }
+
+        let headerStack = NSStackView(views: [title, subtitle])
+        headerStack.orientation = .vertical
+        headerStack.alignment = .leading
+        headerStack.spacing = 3
+        headerStack.translatesAutoresizingMaskIntoConstraints = false
+
+        nodesModeControl.items = ["直连 / 绕过代理", "全局代理", "规则判定"]
         nodesModeControl.selectedSegment = 2
         nodesModeControl.target = self
         nodesModeControl.action = #selector(nodesModeChanged)
         nodesModeControl.translatesAutoresizingMaskIntoConstraints = false
-        nodesModeControl.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        ConsoleControlLayout.configurePageTabs(nodesModeControl)
 
         let testButton = MD3Button()
-        testButton.title = "延迟测试"
-        testButton.style = .tonal
+        testButton.title = "⚡ 延迟测试"
+        testButton.style = .filled
         testButton.target = self
         testButton.action = #selector(testAllNodesClicked)
         testButton.translatesAutoresizingMaskIntoConstraints = false
-        testButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
-        testButton.widthAnchor.constraint(equalToConstant: 120).isActive = true
+        testButton.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
+        ConsoleControlLayout.equalizeActionWidths([testButton])
 
         let spacer = NSView()
         spacer.translatesAutoresizingMaskIntoConstraints = false
@@ -62,25 +78,24 @@ extension MainWindowController {
         scroll.documentView = document
         document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor).isActive = true
 
-        // 不再用有底色的 MD3Panel 包裹，scroll 直接贴 view，卡片左缘和标题/工具栏对齐
         let view = NSView()
-        view.addSubview(title)
+        view.addSubview(headerStack)
         view.addSubview(topBar)
         view.addSubview(scroll)
 
         NSLayoutConstraint.activate([
-            title.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
-            title.topAnchor.constraint(equalTo: view.topAnchor, constant: 28),
+            headerStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
+            headerStack.topAnchor.constraint(equalTo: view.topAnchor, constant: 28),
 
-            topBar.leadingAnchor.constraint(equalTo: title.leadingAnchor),
+            topBar.leadingAnchor.constraint(equalTo: headerStack.leadingAnchor),
             topBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
-            topBar.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 20),
-            topBar.heightAnchor.constraint(equalToConstant: 42),
-            nodesModeControl.widthAnchor.constraint(equalToConstant: 520),
+            topBar.topAnchor.constraint(equalTo: headerStack.bottomAnchor, constant: 18),
+            topBar.heightAnchor.constraint(equalToConstant: 38),
+            nodesModeControl.widthAnchor.constraint(equalToConstant: 480),
 
-            scroll.leadingAnchor.constraint(equalTo: title.leadingAnchor),
+            scroll.leadingAnchor.constraint(equalTo: headerStack.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
-            scroll.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 12),
+            scroll.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 14),
             scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -24)
         ])
 
@@ -310,7 +325,8 @@ extension MainWindowController {
             }
         }
         
-        tile.nameLabel.stringValue = displayName
+        let flag = CountryFlagHelper.flag(for: displayName)
+        tile.nameLabel.stringValue = "\(flag) \(displayName)"
         tile.subLabel.stringValue = nodeSubLabel(displayType: displayType, node: node)
         tile.delayValue = displayDelay
         
@@ -331,7 +347,7 @@ extension MainWindowController {
         }
 
         tile.translatesAutoresizingMaskIntoConstraints = false
-        tile.heightAnchor.constraint(equalToConstant: 42).isActive = true
+        tile.heightAnchor.constraint(equalToConstant: 46).isActive = true
         
         return tile
     }
@@ -386,6 +402,10 @@ extension MainWindowController {
 
     /// Every entry point shares runtime reselection and freshness checks.
     func runNodeDelayTest(tags requestedTags: [String], title: String) {
+        guard !nodeDelayTestState.isActive else {
+            showToast("测速正在进行，请等待完成", style: .warning)
+            return
+        }
         guard !isProxyServiceTransitioning else {
             showToast("正在切换运行状态，请稍后再测")
             return
@@ -398,8 +418,11 @@ extension MainWindowController {
             let testURL = enteredURL.isEmpty ? TungBoxConfig.urlTestURL : enteredURL
             let requestID = UUID()
             nodeDelayTestID = requestID
+            guard nodeDelayTestState.begin(id: requestID, tags: tags) else { return }
             let transitionID = runtimeTransitionID
             let configText = editor.string
+            let configIdentity = NodeDelayTestPolicy.configurationIdentity(configText)
+            let selectionID = selectorSelectionID
             let profileID = selectedIndex.map { profiles[$0].id }
             let runtimeRunning = isProxyRuntimeRunning()
             let apiPort = delayAPIPort()
@@ -421,13 +444,17 @@ extension MainWindowController {
                 if nodes[index].delay == "测试中" { nodes[index].delay = "未测试" }
                 if tags.contains(nodes[index].tag) { nodes[index].delay = "测试中" }
             }
-            nodeTestStatusLabel.stringValue = "节点 URLTest：测试中，\(tags.count) 个节点"
+            nodeTestStatusLabel.stringValue = nodeDelayTestState.statusText
             refreshNodeGroupsView()
-            Task { @MainActor [weak self] in
+            appendLog("[节点] 开始测速：\(tags.count) 个节点\n")
+            nodeDelayTestTask = Task { @MainActor [weak self] in
                 guard let self else { return }
+                defer { self.finishNodeDelayTest(id: requestID, succeeded: false) }
                 @MainActor func isCurrent() -> Bool {
-                    self.nodeDelayTestID == requestID && self.runtimeTransitionID == transitionID
-                        && self.editor.string == configText && self.selectedIndex.map { self.profiles[$0].id } == profileID
+                    !Task.isCancelled && self.nodeDelayTestID == requestID && self.runtimeTransitionID == transitionID
+                        && self.selectorSelectionID == selectionID
+                        && (self.editor.string == configText || (configIdentity != nil && NodeDelayTestPolicy.configurationIdentity(self.editor.string) == configIdentity))
+                        && self.selectedIndex.map { self.profiles[$0].id } == profileID
                         && !self.isProxyServiceTransitioning
                         && self.runner.isRunning == userRunning && self.isTunRuntimeRunning() == tunRunning
                         && self.delayAPIPort() == apiPort
@@ -446,11 +473,18 @@ extension MainWindowController {
                     for await (tag, result) in tasks {
                         guard isCurrent() else { tasks.cancelAll(); continue }
                         if let index = self.nodes.firstIndex(where: { $0.tag == tag }) { self.nodes[index].delay = result }
+                        self.nodeDelayTestState.receivedResult(id: requestID, tag: tag)
+                        self.nodeTestStatusLabel.stringValue = self.nodeDelayTestState.statusText
+                        self.nodeTable.reloadData()
+                        self.refreshNodeDelayTiles()
                     }
                 }
                 guard isCurrent() else { return }
                 var selectionRefreshFailed = false
                 if runtimeRunning {
+                    self.nodeDelayTestState.refreshSelection(id: requestID)
+                    self.nodeTestStatusLabel.stringValue = self.nodeDelayTestState.statusText
+                    self.appendLog("[节点] 节点结果已返回，开始刷新自动选择\n")
                     // Both independent cores must retest; no selector PUT or invented minimum selection.
                     let ports: [Int?] = userRunning && tunRunning ? [nil, TungBoxConfig.tunDaemonClashPort] : [apiPort]
                     for port in ports {
@@ -467,8 +501,10 @@ extension MainWindowController {
                         }
                     }
                     do {
+                        let observation = self.selectorCoordinator.observationToken
                         let proxies = try await ClashAPI.proxies(port: apiPort)
-                        guard isCurrent() else { return }
+                        guard isCurrent(), self.selectorCoordinator.acceptsObservation(observation) else { return }
+                        self.recordSelectorObservation(proxies, port: apiPort ?? 9090, source: "测速读回")
                         self.lastProxiesObj = proxies
                         self.syncNodeDelaysFromClashAPI(proxiesObj: proxies)
                         let active = self.resolveActiveOutbound(proxiesObj: proxies)
@@ -484,13 +520,30 @@ extension MainWindowController {
                     }
                 }
                 guard isCurrent() else { return }
-                self.nodeTable.reloadData()
-                self.refreshNodeGroupsView()
-                self.nodeTestStatusLabel.stringValue = "节点 URLTest：已完成，\(tags.count) 个节点"
+                self.finishNodeDelayTest(id: requestID, succeeded: true)
                 let summary = self.delayTestSummary(memberTags: tags)
                 self.showToast(selectionRefreshFailed ? "测速完成，但自动选择状态刷新失败" : "\(title) 测速完成（\(summary)）", style: selectionRefreshFailed || summary.contains("可用 0") ? .warning : .success)
             }
         } catch { showError(error) }
+    }
+
+    func finishNodeDelayTest(id: UUID, succeeded: Bool) {
+        guard nodeDelayTestState.finish(id: id, succeeded: succeeded) else { return }
+        nodeDelayTestTask = nil
+        NodeDelayTestState.clearPendingDelays(in: &nodes)
+        nodeTestStatusLabel.stringValue = nodeDelayTestState.statusText
+        nodeTable.reloadData()
+        refreshNodeGroupsView()
+        appendLog(succeeded ? "[节点] 测速已完成\n" : "[节点] 测速已取消，运行状态或配置已变化\n")
+    }
+
+    func refreshNodeDelayTiles() {
+        var delays = Dictionary(nodes.map { ($0.tag, $0.delay) }, uniquingKeysWith: { first, _ in first })
+        for group in nodeGroups where ["urltest", "url-test", "fallback"].contains(group.type.lowercased()) {
+            let resolved = resolveActiveOutboundForGroup(groupTag: group.tag, proxiesObj: isProxyRuntimeRunning() ? lastProxiesObj : nil).name
+            delays[group.tag] = delays[resolved.isEmpty ? group.current : resolved]
+        }
+        MD3NodeTileView.refreshDelays(in: nodeGroupsStack, delays: delays)
     }
 
     /// 以节点服务器 TCP 连接作为稳定的可用性与延迟基准；UDP-only 节点
@@ -544,6 +597,7 @@ extension MainWindowController {
         nodesModeControl.selectedSegment = modeControl.selectedSegment
         do {
             try applySelectedMode()
+            RecentStatusTracker.shared.record("出站模式切换为\(selectedMode().displayName)", level: .info)
             showToast("出站模式：\(selectedMode().displayName)", style: .info)
         } catch {
             refreshModeFromEditor()
@@ -555,6 +609,7 @@ extension MainWindowController {
         modeControl.selectedSegment = nodesModeControl.selectedSegment
         do {
             try applySelectedMode()
+            RecentStatusTracker.shared.record("出站模式切换为\(selectedMode().displayName)", level: .info)
             showToast("出站模式：\(selectedMode().displayName)", style: .info)
         } catch {
             refreshModeFromEditor()
@@ -588,5 +643,320 @@ extension MainWindowController {
     @objc func refreshNodesClicked() {
         refreshNodesFromEditor()
         showToast("节点列表已刷新（\(nodes.count) 个）", style: .info)
+    }
+
+    func refreshNodesFromEditor() {
+        // Re-parsing the editor rebuilds NodeInfo with delay "未测试", which would
+        // wipe latencies already measured this session (e.g. when switching the
+        // selected node from auto to a manual one). Carry the measured delay over
+        // for nodes that are still the same (matched by tag + server).
+        let previousDelays = Dictionary(
+            nodes.map { ("\($0.tag)\u{1}\($0.server)", $0.delay) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var parsed = parseNodes(from: editor.string)
+        for index in parsed.indices {
+            let key = "\(parsed[index].tag)\u{1}\(parsed[index].server)"
+            if let previous = previousDelays[key], previous != "未测试", previous != "测试中" {
+                parsed[index].delay = previous
+            }
+        }
+        nodes = parsed
+        nodeGroups = parseNodeGroups(from: editor.string)
+        nodeTable.reloadData()
+        populateRuleStrategyPopup()
+        refreshNodeGroupsView()
+        selectCurrentNodeInTable()
+    }
+
+    func activeSelectorAPIPorts() -> [Int] {
+        var ports: [Int] = []
+        if runner.isRunning { ports.append(9090) }
+        if isTunRuntimeRunning() { ports.append(TungBoxConfig.tunDaemonClashPort) }
+        return ports
+    }
+
+    func selectNode(at index: Int) {
+        guard nodes.indices.contains(index) else { return }
+        selectNode(nodes[index].tag, inGroup: TungBoxConfig.tagManual)
+    }
+
+    static func optimisticSelectionState(
+        nodeGroups: [NodeGroupInfo],
+        proxiesObj: [String: Any]?,
+        nodeTag: String,
+        groupTag: String
+    ) -> (nodeGroups: [NodeGroupInfo], proxiesObj: [String: Any]?) {
+        var updatedGroups = nodeGroups
+        if let index = updatedGroups.firstIndex(where: { $0.tag == groupTag }) {
+            updatedGroups[index].current = nodeTag
+        }
+
+        var updatedProxiesObj = proxiesObj
+        if var root = updatedProxiesObj,
+           var proxies = root["proxies"] as? [String: Any] {
+            var runtimeGroup = proxies[groupTag] as? [String: Any] ?? [:]
+            runtimeGroup["now"] = nodeTag
+            proxies[groupTag] = runtimeGroup
+            root["proxies"] = proxies
+            updatedProxiesObj = root
+        }
+        return (updatedGroups, updatedProxiesObj)
+    }
+
+    func applyOptimisticNodeSelection(nodeTag: String, groupTag: String) {
+        let state = Self.optimisticSelectionState(
+            nodeGroups: nodeGroups,
+            proxiesObj: lastProxiesObj,
+            nodeTag: nodeTag,
+            groupTag: groupTag
+        )
+        nodeGroups = state.nodeGroups
+        lastProxiesObj = state.proxiesObj
+        refreshNodeGroupsView()
+
+        if groupTag == OutboundSelection.group(for: selectedMode().value) && isProxyServiceActiveOrRequested() {
+            let active = resolveActiveOutbound(proxiesObj: lastProxiesObj)
+            currentNodeNameLabel.stringValue = active.name.isEmpty ? nodeTag : active.name
+            currentNodeAutoBadge.isHidden = !active.isAuto
+            let delay = nodes.first(where: { $0.tag == active.name })?.delay ?? "—"
+            currentNodeDelayLabel.stringValue = delay == "未测试" ? "—" : delay
+            currentNodeDelayLabel.textColor = MD3.latencyTextColor(currentNodeDelayLabel.stringValue)
+            refreshTrayIcon()
+        }
+    }
+
+    func selectNode(_ nodeTag: String, inGroup groupTag: String) {
+        guard !runtimeCoordinator.state.isTerminating, let index = selectedIndex,
+              profiles.indices.contains(index) else { return }
+        let profileID = profiles[index].id
+        let previousConfig = editor.string
+        let previousNodeGroups = nodeGroups
+        let previousProxiesObj = lastProxiesObj
+        selectorSelectionID = UUID()
+        let selectionID = selectorSelectionID
+        let transitionID = runtimeTransitionID
+
+        applyOptimisticNodeSelection(nodeTag: nodeTag, groupTag: groupTag)
+        do {
+            guard var config = parseConfigObject(from: previousConfig),
+                  var outbounds = config["outbounds"] as? [[String: Any]],
+                  let group = outbounds.firstIndex(where: { $0["tag"] as? String == groupTag && $0["type"] as? String == "selector" }),
+                  (outbounds[group]["outbounds"] as? [String] ?? []).contains(nodeTag) else {
+                throw NSError.user("当前配置中未找到可用的节点选择：\(groupTag) / \(nodeTag)")
+            }
+            // Persist intent before yielding to HTTP. A concurrent startup/reload
+            // must see this choice rather than restoring the previous auto default.
+            outbounds[group]["default"] = nodeTag
+            config["outbounds"] = outbounds
+            editor.string = try renderConfig(config)
+            _ = try saveCurrent()
+            selectorCoordinator.remember(profile: profileID, group: groupTag, node: nodeTag)
+            applyOptimisticNodeSelection(nodeTag: nodeTag, groupTag: groupTag)
+        } catch {
+            editor.string = previousConfig
+            nodeGroups = previousNodeGroups
+            lastProxiesObj = previousProxiesObj
+            refreshNodeGroupsView()
+            showError(error)
+            return
+        }
+
+        selectorSelectionTask = Task { @MainActor in
+            defer {
+                if selectorSelectionID == selectionID {
+                    selectorSelectionTask = nil
+                    selectorSelectionID = UUID() // invalidate responses captured during the switch
+                }
+            }
+            let current: @MainActor @Sendable () -> Bool = { [self] in
+                selectorSelectionID == selectionID && runtimeTransitionID == transitionID
+                    && selectedIndex.map { profiles[$0].id } == profileID && !runtimeCoordinator.state.isTerminating
+            }
+            guard current() else { return }
+            do {
+                if isProxyRuntimeRunning() {
+                    // Replay all saved selectors so rapid choices in two groups
+                    // remain independent when an older click is superseded.
+                    let selections = selectorCoordinator.selections(in: editor.string, profile: profileID)
+                    let applied = try await selectorCoordinator.apply(selections: selections, ports: activeSelectorAPIPorts(),
+                        isCurrent: current, write: { [self] selection, port in
+                            try await ClashAPI.selectProxy(group: selection.group, node: selection.node, port: port)
+                            appendLog("[节点选择 \(Date.now.ISO8601Format())] 来源=手动同步 模式=\(selectedMode().value) 端口=\(port) 分组=\(selection.group) 已确认=\(selection.node)\n")
+                        }, finishPort: { port in _ = try? await ClashAPI.closeConnections(port: port) })
+                    guard applied, current() else { return }
+                }
+                appendLog("[节点] \(groupTag) 已选择并保存: \(nodeTag)\n")
+                RecentStatusTracker.shared.record("切换节点至 \(nodeTag)", level: .info)
+            } catch {
+                guard current() else { return }
+                appendLog("[节点] 运行时选择未确认，按已保存的手动选择恢复：\(error.localizedDescription)\n")
+                if isTunEnabled {
+                    _ = await reloadTunConfigInPlace(configText: editor.string)
+                    guard current() else { return }
+                }
+                if isSystemProxyEnabled { reconcileRuntime(reason: "节点切换后恢复", forceRestart: true, refreshNodeDelays: false) }
+            }
+            refreshStatus()
+        }
+    }
+    func parseNodes(from text: String) -> [NodeInfo] {
+        ConfigInspection.parseNodes(from: text)
+    }
+
+    func parseNodeGroups(from text: String) -> [NodeGroupInfo] {
+        ConfigInspection.parseNodeGroups(from: text)
+    }
+    func resolveActiveOutbound(proxiesObj: [String: Any]?) -> (name: String, isAuto: Bool) {
+        return resolveActiveOutboundForGroup(groupTag: OutboundSelection.group(for: selectedMode().value), proxiesObj: proxiesObj)
+    }
+
+    nonisolated static func automaticSelectionTransition(
+        previous: String?,
+        currentName: String,
+        isAutomatic: Bool
+    ) -> (next: String?, didChange: Bool) {
+        guard isAutomatic, !currentName.isEmpty, currentName != "自动选择" else {
+            return (nil, false)
+        }
+        return (currentName, previous != nil && previous != currentName)
+    }
+
+    func resolveActiveOutboundForGroup(groupTag: String, proxiesObj: [String: Any]?) -> (name: String, isAuto: Bool) {
+        OutboundSelection.resolve(group: groupTag, proxiesObject: proxiesObj, groups: nodeGroups,
+                                  configText: editor.string, fallback: nodes.first?.tag ?? "默认")
+    }
+
+    func recordSelectorObservation(_ snapshot: [String: Any], port: Int, source: String) {
+        guard let proxies = snapshot["proxies"] as? [String: Any] else { return }
+        var observed: [String: String] = [:]
+        for group in nodeGroups where group.type.lowercased() == "selector" {
+            guard let info = proxies[group.tag] as? [String: Any],
+                  let node = info["now"] as? String else { continue }
+            observed[group.tag] = node
+            let previous = lastObservedSelectorChoices[port]?[group.tag]
+            if previous != node {
+                appendLog("[节点状态 \(Date.now.ISO8601Format())] 来源=\(source) 端口=\(port) 分组=\(group.tag) 先前=\(previous ?? "未记录") 当前=\(node)\n")
+            }
+        }
+        lastObservedSelectorChoices[port] = observed
+    }
+
+    func syncNodeDelaysFromClashAPI(proxiesObj: [String: Any]?) {
+        guard let proxiesObj = proxiesObj,
+              let proxies = proxiesObj["proxies"] as? [String: Any] else { return }
+
+        var updated = nodeDelayTestState.syncBackgroundDelays(proxies: proxies, in: &nodes)
+
+        // Sync group active nodes (current values) from Clash API
+        for index in nodeGroups.indices {
+            let groupTag = nodeGroups[index].tag
+            if let groupData = proxies[groupTag] as? [String: Any],
+               let now = groupData["now"] as? String {
+                if nodeGroups[index].current != now {
+                    nodeGroups[index].current = now
+                    updated = true
+                }
+            }
+        }
+
+        if updated {
+            nodeTable.reloadData()
+            refreshNodeGroupsView()
+        }
+    }
+
+    func modeDisplayName(_ mode: String) -> String {
+        ConfigInspection.modeDisplayName(mode)
+    }
+
+    func refreshModeFromEditor() {
+        guard let config = parseConfigObject(from: editor.string) else {
+            syncModeControls(mode: "Rule")
+            modeStatusLabel.stringValue = "当前模式：无法读取配置"
+            return
+        }
+        let mode = readMode(from: config)
+        syncModeControls(mode: mode)
+        updateModeStatus()
+    }
+
+    func syncModeControls(mode: String) {
+        let segment = modeSegment(for: mode)
+        modeControl.selectedSegment = segment
+        nodesModeControl.selectedSegment = segment
+        modeControl.layoutSubtreeIfNeeded()
+        nodesModeControl.layoutSubtreeIfNeeded()
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.modeControl.selectedSegment = segment
+            self.nodesModeControl.selectedSegment = segment
+            self.modeControl.layoutSubtreeIfNeeded()
+            self.nodesModeControl.layoutSubtreeIfNeeded()
+        }
+    }
+
+    func updateModeStatus() {
+        let mode = selectedMode()
+        let hasClashModeRules = editor.string.contains("\"clash_mode\"")
+        let suffix = hasClashModeRules
+            ? "配置中已包含 clash_mode 规则。"
+            : "配置中暂未看到 clash_mode 规则，切换模式时会补 direct/global 前置规则。"
+        modeStatusLabel.stringValue = "当前模式：\(mode.displayName)\n\(suffix)"
+    }
+
+    func applySelectedMode() throws {
+        guard !runtimeCoordinator.state.isTerminating else { return }
+        guard var config = parseConfigObject(from: editor.string) else {
+            throw NSError.user("当前配置不是有效 JSON")
+        }
+        let previousMode = readMode(from: config)
+        let mode = selectedMode()
+        let refreshDelays = NodeDelayTestPolicy.refreshAfterModeChange(
+            from: previousMode, to: mode.value,
+            pendingRefresh: modeChangeNeedsDelayRefresh
+        )
+        config = ensureModeSupport(in: config, mode: mode)
+        editor.string = try renderConfig(config)
+        let url = try saveCurrent()
+        let output = try runner.check(config: url)
+        appendLog("[mode] 已切换到 \(mode.displayName)：\(output)\n")
+        refreshModeFromEditor()
+        refreshNodeGroupsView()   // re-filter shown groups for the new mode
+
+        if isProxyServiceActiveOrRequested() {
+            applyRuntimeMode(mode.value, refreshNodeDelays: refreshDelays)
+        } else if refreshDelays {
+            testAllNodesClicked()
+        }
+    }
+    struct Mode {
+        var value: String
+        var displayName: String
+    }
+
+    func selectedMode() -> Mode {
+        switch modeControl.selectedSegment {
+        case 0: return Mode(value: "Direct", displayName: "直连/绕过代理")
+        case 1: return Mode(value: "Global", displayName: "全局代理")
+        default: return Mode(value: "Rule", displayName: "规则判定")
+        }
+    }
+
+    func modeSegment(for mode: String) -> Int {
+        switch mode.lowercased() {
+        case "direct": return 0
+        case "global": return 1
+        default: return 2
+        }
+    }
+
+    func nodesModeSegment(forHomeSegment segment: Int) -> Int {
+        segment
+    }
+
+    func homeModeSegment(forNodesSegment segment: Int) -> Int {
+        segment
     }
 }

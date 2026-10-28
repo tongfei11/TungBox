@@ -87,8 +87,7 @@ extension MainWindowController {
         clearButton.target = self
         clearButton.action = #selector(clearLogsClicked)
         clearButton.translatesAutoresizingMaskIntoConstraints = false
-        clearButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
-        clearButton.widthAnchor.constraint(equalToConstant: 80).isActive = true
+        clearButton.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
 
         let copyButton = MD3Button()
         copyButton.title = "复制"
@@ -96,8 +95,7 @@ extension MainWindowController {
         copyButton.target = self
         copyButton.action = #selector(copyLogsClicked)
         copyButton.translatesAutoresizingMaskIntoConstraints = false
-        copyButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
-        copyButton.widthAnchor.constraint(equalToConstant: 80).isActive = true
+        copyButton.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
 
         let levelStack = NSStackView(views: levelButtons)
         levelStack.orientation = .horizontal; levelStack.spacing = 4; levelStack.alignment = .centerY
@@ -108,6 +106,7 @@ extension MainWindowController {
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         let toolbar = NSStackView(views: [searchField, levelStack, spacer, copyButton, clearButton])
+        ConsoleControlLayout.equalizeActionWidths([copyButton, clearButton])
         toolbar.orientation = .horizontal; toolbar.spacing = 12; toolbar.alignment = .centerY
         toolbar.translatesAutoresizingMaskIntoConstraints = false
         searchField.widthAnchor.constraint(equalToConstant: 200).isActive = true

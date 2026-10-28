@@ -21,13 +21,13 @@ extension MainWindowController {
         }
 
         let tabControl = MD3SegmentedControl()
-        tabControl.items = ["常规", "Core", "TUN 设置", "DNS", "规则集", "外观"]
+        tabControl.items = SettingsPageNavigation.titles
         tabControl.selectedSegment = 0
         tabControl.target = self
         tabControl.action = #selector(settingsTabChanged(_:))
         tabControl.translatesAutoresizingMaskIntoConstraints = false
-        tabControl.widthAnchor.constraint(equalToConstant: 460).isActive = true
-        tabControl.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        tabControl.widthAnchor.constraint(equalToConstant: SettingsPageNavigation.width).isActive = true
+        ConsoleControlLayout.configurePageTabs(tabControl)
 
         let headerStack = NSStackView(views: [title])
         headerStack.orientation = .horizontal
@@ -53,9 +53,11 @@ extension MainWindowController {
             makeSettingsTunPage(),
             makeSettingsDNSPage(),
             makeSettingsRuleSetPage(),
-            makeSettingsAppearancePage()
+            makeSettingsAppearancePage(),
+            makeSettingsAboutPage()
         ]
         
+        settingsPages.forEach { ConsoleControlLayout.equalizePageActions(in: $0) }
         if !settingsPages.isEmpty {
             let firstPage = settingsPages[0]
             settingsTabView.addSubview(firstPage)
@@ -102,25 +104,6 @@ extension MainWindowController {
     }
 
     func makeSettingsGeneralPage() -> NSView {
-        let detailsText = NSTextField(labelWithString: """
-        应用版本: \(TungBoxVersion.current)
-        配置目录: \(store.baseURL.path)
-        Clash API: \(TungBoxConfig.clashAPIListen)
-        """)
-        detailsText.textColor = MD3.onSurfaceVariant
-        detailsText.font = .systemFont(ofSize: 13)
-        detailsText.lineBreakMode = .byWordWrapping
-        detailsText.maximumNumberOfLines = 0
-        detailsText.usesSingleLineMode = false
-        detailsText.cell?.wraps = true
-        detailsText.cell?.isScrollable = false
-        detailsText.translatesAutoresizingMaskIntoConstraints = false
-        detailsText.setContentHuggingPriority(.required, for: .vertical)
-        detailsText.setContentCompressionResistancePriority(.required, for: .vertical)
-        detailsText.heightAnchor.constraint(greaterThanOrEqualToConstant: 58).isActive = true
-
-        let openFolderButton = settingsButton(title: "打开配置目录", action: #selector(openFolderClicked), style: .outlined)
-
         settingsLaunchAtLoginCheckbox.title = "开机自启动"
         settingsLaunchAtLoginCheckbox.target = self
         settingsLaunchAtLoginCheckbox.action = #selector(settingsLaunchAtLoginChanged(_:))
@@ -135,15 +118,14 @@ extension MainWindowController {
         // Subscription auto-refresh interval
         let refreshLabel = settingsLabel("订阅自动刷新间隔")
         let refreshPopup = MD3PopUpButton()
-        let intervals: [(String, Int)] = [("关闭", 0), ("30 分钟", 30), ("1 小时", 60), ("2 小时", 120), ("4 小时", 240), ("6 小时", 360), ("12 小时", 720), ("24 小时", 1440)]
+        let intervals = SubscriptionRefreshSchedule.options
         refreshPopup.removeAllItems()
         for (title, _) in intervals { refreshPopup.addItem(withTitle: title) }
-        let savedInterval = UserDefaults.standard.integer(forKey: "subscriptionRefreshMinutes")
-        let savedMinutes = savedInterval > 0 ? savedInterval : 60
+        let savedMinutes = SubscriptionRefreshSchedule.minutes()
         if let idx = intervals.firstIndex(where: { $0.1 == savedMinutes }) {
             refreshPopup.selectItem(at: idx)
         } else {
-            refreshPopup.selectItem(at: 2) // default 1h
+            refreshPopup.selectItem(at: 0) // default 关闭
         }
         refreshPopup.target = self
         refreshPopup.action = #selector(subscriptionRefreshIntervalChanged(_:))
@@ -222,83 +204,8 @@ extension MainWindowController {
                 settingsStartSilentlyCheckbox
             ]),
             settingsPanel(title: "订阅", views: [refreshRow]),
-            settingsPanel(title: "自动测速", views: [urlTestIntervalRow, urlTestToleranceRow, urlTestHint]),
-            settingsPanel(title: "软件信息", views: [detailsText, openFolderButton])
+            settingsPanel(title: "自动测速", views: [urlTestIntervalRow, urlTestToleranceRow, urlTestHint])
         ])
-    }
-
-    func makeSettingsCorePage() -> NSView {
-        serviceLabel.font = .systemFont(ofSize: 14, weight: .bold)
-        serviceLabel.textColor = MD3.onSurface
-        serviceLabel.lineBreakMode = .byWordWrapping
-        serviceLabel.maximumNumberOfLines = 0
-        serviceLabel.usesSingleLineMode = false
-        serviceLabel.cell?.wraps = true
-        serviceLabel.translatesAutoresizingMaskIntoConstraints = false
-
-        let checkUpdateButton = settingsButton(title: "检查 Core 更新", action: #selector(checkCoreUpdateClicked), style: .tonal)
-        let installLatestButton = settingsButton(title: "安装最新 Core", action: #selector(installLatestCoreClicked), style: .filled)
-        let importCoreButton = settingsButton(title: "导入 sing-box Core", action: #selector(importCoreClicked), style: .filled)
-        let installOldCoreButton = settingsButton(title: "安装旧版 Core（测试）", action: #selector(installOldCoreForTestClicked), style: .outlined)
-        let openCoreFolderButton = settingsButton(title: "打开 Core 目录", action: #selector(openCoreFolderClicked), style: .outlined)
-        let coreButtonGrid = settingsButtonGrid([
-            checkUpdateButton,
-            installLatestButton,
-            importCoreButton,
-            installOldCoreButton,
-            openCoreFolderButton
-        ])
-
-        return settingsPageStack([
-            settingsPanel(title: "Core 管理", views: [
-                serviceLabel,
-                coreButtonGrid
-            ])
-        ])
-    }
-
-    func makeSettingsTunPage() -> NSView {
-        tunServiceStatusLabel.font = .systemFont(ofSize: 14, weight: .semibold)
-        tunServiceStatusLabel.textColor = MD3.onSurface
-        tunServiceStatusLabel.lineBreakMode = .byWordWrapping
-        tunServiceStatusLabel.maximumNumberOfLines = 0
-        tunServiceStatusLabel.translatesAutoresizingMaskIntoConstraints = false
-
-        tunServiceLogLabel.textColor = MD3.onSurfaceVariant
-        tunServiceLogLabel.font = .systemFont(ofSize: 13)
-        tunServiceLogLabel.lineBreakMode = .byWordWrapping
-        tunServiceLogLabel.maximumNumberOfLines = 0
-        tunServiceLogLabel.translatesAutoresizingMaskIntoConstraints = false
-
-        configureSettingsButton(tunServiceToggleButton, title: "安装 TUN 服务", action: #selector(toggleTunServiceInstallClicked), style: .filled)
-        configureSettingsButton(tunServiceReinstallButton, title: "重新安装 TUN 服务", action: #selector(reinstallTunServiceClicked), style: .outlined)
-        configureSettingsButton(tunServiceReloadButton, title: "重载 TUN 服务", action: #selector(reloadTunServiceClicked), style: .tonal)
-        let openLogButton = settingsButton(title: "打开 TUN 日志", action: #selector(openTunLogClicked), style: .outlined)
-        let tunButtonGrid = settingsButtonGrid([
-            tunServiceToggleButton,
-            tunServiceReinstallButton,
-            tunServiceReloadButton,
-            openLogButton
-        ])
-
-        let hint = NSTextField(labelWithString: "安装、卸载、重装和重载 TUN 服务会请求管理员授权。首页 TUN 开关只负责启用或关闭本用户的控制请求；TUN 服务校验配置后使用 /Library/Application Support/TungBox 下的 root-owned 运行配置。")
-        hint.textColor = MD3.onSurfaceVariant
-        hint.font = .systemFont(ofSize: 13)
-        hint.lineBreakMode = .byWordWrapping
-        hint.maximumNumberOfLines = 0
-        hint.translatesAutoresizingMaskIntoConstraints = false
-
-        refreshTunServiceStatus()
-        var cards: [NSView] = [
-            settingsPanel(title: "服务管理", views: [
-                tunServiceStatusLabel,
-                tunButtonGrid,
-                tunServiceLogLabel,
-                hint
-            ])
-        ]
-        cards.append(contentsOf: makeTunConfigPanels())
-        return settingsPageStack(cards)
     }
 
     func makeSettingsRuleSetPage() -> NSView {
@@ -311,7 +218,7 @@ extension MainWindowController {
         ])
         ruleSetForm.translatesAutoresizingMaskIntoConstraints = false
         ruleSetForm.column(at: 0).xPlacement = .trailing
-        ruleSetForm.column(at: 1).width = 560
+        ruleSetForm.column(at: 1).width = 480
         ruleSetForm.rowSpacing = 10
         ruleSetForm.columnSpacing = 10
         let saveRuleSetButton = settingsButton(title: "保存规则集地址", action: #selector(saveRuleSetURLsClicked))
@@ -321,80 +228,12 @@ extension MainWindowController {
             refreshRuleSetsButton,
             clearRuleSetsButton
         ])
+        let addressHint = settingsLabel("修改地址后，刷新订阅即可将新地址应用到配置。留空时优先使用订阅地址。")
 
         return settingsPageStack([
-            settingsPanel(title: "规则集地址", views: [ruleSetForm, saveRuleSetButton]),
+            settingsPanel(title: "规则集地址", views: [ruleSetForm, addressHint, saveRuleSetButton]),
             settingsPanel(title: "规则集缓存", views: [cacheButtonGrid])
         ])
-    }
-
-    func makeSettingsAppearancePage() -> NSView {
-        let trayIconStyleLabel = settingsLabel("图标样式")
-        trayIconStylePopup.removeAllItems()
-        let trayIconStyles: [TrayIconStyle] = [.iconOnly, .iconAndSpeed, .speedOnly]
-        for style in trayIconStyles {
-            trayIconStylePopup.addItem(withTitle: style.title)
-        }
-        trayIconStylePopup.selectItem(at: TrayIconStyle.current.rawValue)
-        trayIconStylePopup.target = self
-        trayIconStylePopup.action = #selector(trayIconStyleChanged(_:))
-        trayIconStylePopup.translatesAutoresizingMaskIntoConstraints = false
-        trayIconStylePopup.heightAnchor.constraint(equalToConstant: 36).isActive = true
-        trayIconStylePopup.widthAnchor.constraint(equalToConstant: 190).isActive = true
-
-        let trayIconStyleRow = NSStackView(views: [trayIconStyleLabel, trayIconStylePopup])
-        trayIconStyleRow.orientation = .horizontal
-        trayIconStyleRow.alignment = .centerY
-        trayIconStyleRow.spacing = 12
-        trayIconStyleRow.translatesAutoresizingMaskIntoConstraints = false
-
-        let statusBarPanel = settingsPanel(title: "状态栏", views: [trayIconStyleRow])
-
-        let themeButton = settingsButton(title: "切换深浅色", action: #selector(toggleThemeClicked), style: .tonal)
-        colorSchemeRows = (0..<MD3.colorSchemes.count).map { index in
-            let row = MD3ColorSchemeRow(index: index)
-            row.translatesAutoresizingMaskIntoConstraints = false
-            row.heightAnchor.constraint(equalToConstant: 36).isActive = true
-            row.isSelected = (index == MD3.currentSchemeIndex)
-            row.onClick = { [weak self] in self?.changeColorScheme(to: index) }
-            return row
-        }
-        
-        let half = (colorSchemeRows.count + 1) / 2
-        let leftRows = Array(colorSchemeRows.prefix(half))
-        let rightRows = Array(colorSchemeRows.suffix(colorSchemeRows.count - half))
-        
-        let leftStack = NSStackView(views: leftRows)
-        leftStack.orientation = .vertical
-        leftStack.spacing = 4
-        leftStack.alignment = .leading
-        leftStack.translatesAutoresizingMaskIntoConstraints = false
-        leftRows.forEach { row in
-            row.leadingAnchor.constraint(equalTo: leftStack.leadingAnchor).isActive = true
-            row.trailingAnchor.constraint(equalTo: leftStack.trailingAnchor).isActive = true
-        }
-        
-        let rightStack = NSStackView(views: rightRows)
-        rightStack.orientation = .vertical
-        rightStack.spacing = 4
-        rightStack.alignment = .leading
-        rightStack.translatesAutoresizingMaskIntoConstraints = false
-        rightRows.forEach { row in
-            row.leadingAnchor.constraint(equalTo: rightStack.leadingAnchor).isActive = true
-            row.trailingAnchor.constraint(equalTo: rightStack.trailingAnchor).isActive = true
-        }
-        
-        let columnsStack = NSStackView(views: [leftStack, rightStack])
-        columnsStack.orientation = .horizontal
-        columnsStack.spacing = 40
-        columnsStack.distribution = .fillEqually
-        columnsStack.alignment = .top
-        columnsStack.translatesAutoresizingMaskIntoConstraints = false
-        columnsStack.widthAnchor.constraint(equalToConstant: 640).isActive = true
-        
-        let appearancePanel = settingsPanel(title: "外观", views: [themeButton, columnsStack])
-
-        return settingsPageStack([statusBarPanel, appearancePanel])
     }
 
     func settingsPageStack(_ cards: [NSView]) -> NSView {
@@ -496,168 +335,18 @@ extension MainWindowController {
     }
 
     @discardableResult
-    private func configureSettingsButton(_ button: MD3Button, title: String, action: Selector, style: MD3Button.ButtonStyle = .filled) -> MD3Button {
+    func configureSettingsButton(_ button: MD3Button, title: String, action: Selector, style: MD3Button.ButtonStyle = .filled) -> MD3Button {
         button.title = title
         button.style = style
         button.target = self
         button.action = action
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.heightAnchor.constraint(equalToConstant: 36).isActive = true
-        button.widthAnchor.constraint(greaterThanOrEqualToConstant: 160).isActive = true
+        button.heightAnchor.constraint(equalToConstant: ConsoleControlLayout.actionHeight).isActive = true
         return button
     }
 
     func settingsButtonGrid(_ buttons: [NSView]) -> NSView {
-        let grid = NSStackView()
-        grid.orientation = .vertical
-        grid.spacing = 10
-        grid.alignment = .width
-        grid.translatesAutoresizingMaskIntoConstraints = false
-
-        for index in stride(from: 0, to: buttons.count, by: 2) {
-            var rowViews = [buttons[index]]
-            if index + 1 < buttons.count {
-                rowViews.append(buttons[index + 1])
-            } else {
-                let spacer = NSView()
-                spacer.translatesAutoresizingMaskIntoConstraints = false
-                rowViews.append(spacer)
-            }
-
-            let row = NSStackView(views: rowViews)
-            row.orientation = .horizontal
-            row.spacing = 12
-            row.distribution = .fillEqually
-            row.alignment = .centerY
-            row.translatesAutoresizingMaskIntoConstraints = false
-            grid.addArrangedSubview(row)
-
-            NSLayoutConstraint.activate([
-                row.leadingAnchor.constraint(equalTo: grid.leadingAnchor),
-                row.trailingAnchor.constraint(equalTo: grid.trailingAnchor)
-            ])
-        }
-
-        grid.widthAnchor.constraint(equalToConstant: 520).isActive = true
-        return grid
-    }
-
-    @objc func checkCoreUpdateClicked() {
-        serviceLabel.stringValue = "sing-box Core：正在检查更新..."
-        Task {
-            do {
-                let release = try await CoreUpdater.latestStableRelease()
-                await MainActor.run { [weak self] in
-                    self?.handleCoreUpdateCheck(release)
-                }
-            } catch {
-                await MainActor.run { [weak self] in
-                    self?.serviceLabel.stringValue = "sing-box Core：检查更新失败\n\(error.localizedDescription)"
-                    self?.showToast("Core 更新检查失败")
-                    self?.showError(error)
-                }
-            }
-        }
-    }
-
-    @objc func installLatestCoreClicked() {
-        serviceLabel.stringValue = "sing-box Core：正在准备安装最新版本..."
-        Task {
-            do {
-                let release = try await CoreUpdater.latestStableRelease()
-                await MainActor.run { [weak self] in
-                    self?.installCoreRelease(release, reason: "最新版本")
-                }
-            } catch {
-                await MainActor.run { [weak self] in
-                    self?.serviceLabel.stringValue = "sing-box Core：获取最新版本失败\n\(error.localizedDescription)"
-                    self?.showToast("获取 Core 最新版本失败")
-                    self?.showError(error)
-                }
-            }
-        }
-    }
-
-    @objc func installOldCoreForTestClicked() {
-        serviceLabel.stringValue = "sing-box Core：正在准备安装测试旧版..."
-        Task {
-            do {
-                let release = try await CoreUpdater.release(version: CoreUpdater.testOldVersion)
-                await MainActor.run { [weak self] in
-                    self?.installCoreRelease(release, reason: "测试旧版")
-                }
-            } catch {
-                await MainActor.run { [weak self] in
-                    self?.serviceLabel.stringValue = "sing-box Core：获取测试旧版失败\n\(error.localizedDescription)"
-                    self?.showToast("获取测试旧版 Core 失败")
-                    self?.showError(error)
-                }
-            }
-        }
-    }
-
-    private func handleCoreUpdateCheck(_ release: CoreRelease) {
-        let current = runner.installedVersionNumber()
-        if let current, Runner.compareVersions(current, release.version) != .orderedAscending {
-            serviceLabel.stringValue = """
-            sing-box Core：已是最新
-            当前版本：\(current)
-            最新版本：\(release.version)
-            """
-            showToast("Core 已是最新版：\(release.version)")
-            appendLog("[Core] 已是最新版：\(release.version)\n")
-            return
-        }
-
-        let currentText = current ?? "未安装"
-        serviceLabel.stringValue = """
-        sing-box Core：发现可更新版本
-        当前版本：\(currentText)
-        最新版本：\(release.version)
-        """
-        showToast("发现 Core 更新：\(currentText) → \(release.version)")
-
-        let dialog = showMD3Dialog(
-            title: "发现 sing-box Core 更新",
-            message: "当前版本：\(currentText)\n最新版本：\(release.version)\n是否现在安装？",
-            customView: nil,
-            confirmTitle: "安装",
-            cancelTitle: "稍后"
-        )
-        dialog.onConfirm = { [weak self, weak dialog] in
-            self?.installCoreRelease(release, reason: "更新")
-            dialog?.dismiss()
-        }
-        dialog.onCancel = { [weak dialog] in
-            dialog?.dismiss()
-        }
-    }
-
-    func installCoreRelease(_ release: CoreRelease, reason: String) {
-        let wasRunning = isProxyRuntimeRunning()
-
-        serviceLabel.stringValue = "sing-box Core：正在安装 \(release.version)..."
-        appendLog("[Core] 开始安装 \(reason)：\(release.version)\n")
-        let coreBinaryURL = store.coreBinaryURL
-
-        Task {
-            do {
-                try await CoreUpdater.install(release, to: coreBinaryURL)
-                await MainActor.run { [weak self] in
-                    self?.appendLog("[Core] 已安装 \(release.version) 到 \(coreBinaryURL.path)\n")
-                    self?.checkSingBoxInstall(showAlert: false)
-                    self?.showToast(wasRunning
-                        ? "Core 已更新至 \(release.version)，当前代理保持运行"
-                        : "Core 已安装：\(release.version)")
-                }
-            } catch {
-                await MainActor.run { [weak self] in
-                    self?.serviceLabel.stringValue = "sing-box Core：安装失败\n\(error.localizedDescription)"
-                    self?.showToast("Core 安装失败")
-                    self?.showError(error)
-                }
-            }
-        }
+        ConsoleControlLayout.settingsButtonGrid(buttons)
     }
 
     @objc func settingsSystemProxyChanged(_ sender: MD3Checkbox) {
@@ -723,143 +412,13 @@ extension MainWindowController {
         refreshStatus()
     }
 
-    @objc func trayIconStyleChanged(_ sender: MD3PopUpButton) {
-        let index = max(0, min(sender.indexOfSelectedItem, TrayIconStyle.speedOnly.rawValue))
-        let style = TrayIconStyle(rawValue: index) ?? .iconOnly
-        UserDefaults.standard.set(style.rawValue, forKey: TrayIconStyle.defaultsKey)
-        refreshTrayIcon()
-        appendLog("[设置] 状态栏图标样式已设为 \(style.title)\n")
-    }
-
-    @objc func toggleTunServiceInstallClicked() {
-        let status = TunServiceManager.status(store: store)
-        if status.shouldReinstall {
-            installTunServiceClicked()
-        } else if status.isInstalled {
-            uninstallTunServiceClicked()
-        } else {
-            installTunServiceClicked()
-        }
-    }
-
-    @objc func installTunServiceClicked() {
-        runTunServiceOperation(
-            progressText: "最近状态：正在安装 TUN 服务...",
-            successLog: "[TUN] TUN 服务已安装\n",
-            successToast: "TUN 服务已安装",
-            failurePrefix: "安装失败",
-            operation: { store in
-                try TunServiceManager.install(store: store)
-            },
-            completion: { [weak self] in
-                self?.checkSingBoxInstall(showAlert: false)
-            }
-        )
-    }
-
-    @objc func uninstallTunServiceClicked() {
-        isTunEnabled = false
-        UserDefaults.standard.set(false, forKey: "tunEnabled")
-        runTunServiceOperation(
-            progressText: "最近状态：正在卸载 TUN 服务...",
-            successLog: "[TUN] TUN 服务已卸载\n",
-            successToast: "TUN 服务已卸载",
-            failurePrefix: "卸载失败",
-            operation: { store in
-                try TunServiceManager.uninstall(store: store)
-            },
-            completion: { [weak self] in
-                self?.syncProxyPreferenceControls()
-            }
-        )
-    }
-
-    @objc func reinstallTunServiceClicked() {
-        let shouldRestoreTun = isTunEnabled
-        runTunServiceOperation(
-            progressText: "最近状态：正在重新安装 TUN 服务...",
-            successLog: "[TUN] TUN 服务已重新安装\n",
-            successToast: "TUN 服务已重新安装",
-            failurePrefix: "重新安装失败",
-            operation: { store in
-                try TunServiceManager.install(store: store)
-            },
-            completion: { [weak self] in
-                guard let self else { return }
-                if shouldRestoreTun {
-                    self.reconcileRuntime(reason: "重装后恢复 TUN")
-                }
-                self.checkSingBoxInstall(showAlert: false)
-                self.syncProxyPreferenceControls()
-            }
-        )
-    }
-
-    @objc func reloadTunServiceClicked() {
-        if isTunEnabled {
-            reconcileRuntime(reason: "重载 TUN")
-        }
-
-        runTunServiceOperation(
-            progressText: "最近状态：正在重载 TUN 服务...",
-            successLog: "[TUN] TUN 服务已重载\n",
-            successToast: "TUN 服务已重载",
-            failurePrefix: "重载失败",
-            operation: { store in
-                try TunServiceManager.reload(store: store)
-            }
-        )
-    }
-
-    func runTunServiceOperation(
-        progressText: String,
-        successLog: String,
-        successToast: String,
-        failurePrefix: String,
-        operation: @escaping @Sendable (Store) throws -> Void,
-        completion: (@MainActor @Sendable () throws -> Void)? = nil
-    ) {
-        setTunServiceControlsBusy(true, progressText: progressText)
-        let store = store
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let result = Result {
-                try operation(store)
-            }
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                self.setTunServiceControlsBusy(false, progressText: nil)
-                do {
-                    try result.get()
-                    try completion?()
-                    self.appendLog(successLog)
-                    self.showToast(successToast)
-                    self.refreshTunServiceStatus()
-                    self.refreshStatus()
-                } catch {
-                    self.tunServiceLogLabel.stringValue = "最近状态：\(failurePrefix)\n\(error.localizedDescription)"
-                    self.showError(error)
-                    self.refreshTunServiceStatus()
-                    self.refreshStatus()
-                }
-            }
-        }
-    }
-
-    func setTunServiceControlsBusy(_ busy: Bool, progressText: String?) {
-        tunServiceOperationInProgress = busy
-        tunServiceToggleButton.isEnabled = !busy
-        tunServiceReinstallButton.isEnabled = !busy
-        tunServiceReloadButton.isEnabled = !busy
-        if let progressText {
-            tunServiceLogLabel.stringValue = progressText
-        }
-    }
-
     @objc func subscriptionRefreshIntervalChanged(_ sender: MD3PopUpButton) {
-        let intervals = [0, 30, 60, 120, 240, 360, 720, 1440]
-        let minutes = intervals[sender.indexOfSelectedItem]
-        UserDefaults.standard.set(minutes, forKey: "subscriptionRefreshMinutes")
+        let intervals = SubscriptionRefreshSchedule.options
+        guard intervals.indices.contains(sender.indexOfSelectedItem) else { return }
+        let minutes = intervals[sender.indexOfSelectedItem].minutes
+        UserDefaults.standard.set(minutes, forKey: SubscriptionRefreshSchedule.defaultsKey)
         startSubscriptionTimer()
+        refreshHomeFeatureStatus()
         appendLog("[设置] 订阅自动刷新间隔已设为 \(sender.titleOfSelectedItem ?? "关闭")\n")
     }
 
@@ -881,14 +440,6 @@ extension MainWindowController {
         showToast("自动测速容差：\(ms) ms（下次刷新订阅生效）", style: .info)
     }
 
-    @objc func openTunLogClicked() {
-        if FileManager.default.fileExists(atPath: TunServiceManager.logURL.path) {
-            NSWorkspace.shared.open(TunServiceManager.logURL)
-        } else {
-            showToast("暂无 TUN 日志")
-        }
-    }
-
     func syncProxyPreferenceControls() {
         // Two independent switches (system proxy + TUN, can both be on).
         serviceSwitch.isOn = isSystemProxyEnabled
@@ -900,360 +451,8 @@ extension MainWindowController {
         }
     }
 
-    func reconcileSystemProxyForCurrentMode() {
-        guard isProxyRuntimeRunning() else { return }
-        if isTunEnabled {
-            setSystemProxy(enabled: false, port: getMixedProxyPort())
-        } else {
-            setSystemProxy(enabled: isSystemProxyEnabled, port: getMixedProxyPort())
-        }
-    }
-
-    func isProxyRuntimeRunning() -> Bool {
-        runner.isRunning || isTunRuntimeRunning()
-    }
-
-    /// 测速时应打的 sing-box ClashAPI 端口。
-    /// 用户代理在跑用 9090；仅 TUN 守护在跑用 9091；否则返回 nil（走 sing-box URLTest）。
-    func delayAPIPort() -> Int? {
-        if runner.isRunning { return nil }           // nil → ClashAPI 默认 9090
-        if isTunRuntimeRunning() { return TungBoxConfig.tunDaemonClashPort }
-        return nil
-    }
-
-    /// 监听系统唤醒：睡醒后 TUN 守护进程的 DNS 缓存 / UDP NAT 会话 / utun 路由可能失效，
-    /// 但 sing-box 没有 wake-poke 机制，浏览器再访问也激不活 UDP 通道。表现就是
-    /// "TUN 开关亮着但全网无响应，得手动切一下系统代理才恢复"——切代理顺带
-    /// 触发了 reconcileRuntime → enableTunServiceSafely，把守护进程的配置重新下发
-    /// 一遍，UDP/DNS 链路才重建。这里就把"切一下"自动化：只在 TUN 在跑时动它，
-    /// 用户代理依赖 inbound 触发，会自愈，不碰。
-    func registerSystemWakeObserver() {
-        NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didWakeNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            guard let self else { return }
-            // 网络接口（en*）的 IP / 默认路由 / DNS resolver 在 didWake 那一刻
-            // 可能还没回来，立刻 reconcile 会建在错的接口上。等 2s 再动手。
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                guard let self else { return }
-                guard self.isTunEnabled else { return }
-                self.appendLog("[TungBox] 系统已唤醒，自动重新下发 TUN 配置以恢复守护进程\n")
-                self.reconcileRuntime(reason: "唤醒", forceRestart: false)
-            }
-        }
-    }
-
-    func isProxyServiceActiveOrRequested() -> Bool {
-        isProxyServiceTransitioning
-            || runner.isRunning
-            || isTunRuntimeRunning()
-            || (isTunEnabled && (isSystemProxyEnabled || TunServiceManager.hasEnableRequest(store: store)))
-    }
-
-    func isTunRuntimeRunning() -> Bool {
-        // Non-blocking (cache/pidfile only) — called from refreshStatus on the main
-        // thread, so it must never trigger the ~2s `ps` scan or the UI freezes.
-        isTunEnabled && TunServiceManager.activeSingBoxPID(store: store, allowScan: false) != nil
-    }
-
-    func enableTunServiceSafely(configText: String) throws {
-        try ensureTunRouteIsSafeToStart()
-        let preparedConfig = try preparedTunConfigText(from: configText)
-        // Note: the OS system-proxy setting is managed independently by
-        // reconcileRuntime() now (system proxy and TUN can be enabled together), so
-        // enabling TUN must not force the system proxy off here.
-
-        try TunServiceManager.enable(store: store, configText: preparedConfig)
-        startTunRequestHeartbeat()
-        wasTunActiveInThisSession = true
-        verifyTunStartupAsync()
-    }
-
-    /// Reload the TUN config in place while it is already running (e.g. a node
-    /// switch where the clash API hot-switch failed). Rewrites the request config
-    /// so the daemon hot-reloads, but deliberately skips the start-time route
-    /// safety check (the TUN is already up and safe) and never reverts UI state or
-    /// rethrows, so a transient failure can't tear the running TUN down.
-    func reloadTunConfigInPlace(configText: String) {
-        do {
-            let prepared = try preparedTunConfigText(from: configText)
-            try TunServiceManager.writeRequestConfig(prepared, store: store)
-            if !FileManager.default.fileExists(atPath: store.tunRequestFlagURL.path) {
-                FileManager.default.createFile(atPath: store.tunRequestFlagURL.path, contents: Data())
-            }
-            TunServiceManager.refreshRequestHeartbeat(store: store)
-            startTunRequestHeartbeat()
-            appendLog("[节点] 已请求 TUN 热重载新节点配置\n")
-            // The daemon restarts sing-box for the reload, which restores the
-            // cached selection and can override the new default; re-assert it once
-            // the reloaded process should be up.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
-                self?.reconcileSelectorSelectionsToConfig()
-            }
-        } catch {
-            appendLog("[节点] TUN 配置热重载失败（保持当前运行不变）：\(error.localizedDescription)\n")
-        }
-    }
-
-    /// After requesting TUN, confirm in the background that sing-box actually came
-    /// up (process alive + utun29 carrying its address). The root daemon validates
-    /// the config with `sing-box check`, which passes for some configs that then
-    /// FATAL at `run` (e.g. the dns-detour case) — leaving the UI showing "on"
-    /// while nothing works. If the TUN does not come online in time, surface the
-    /// last error from the daemon log instead of failing silently. Runs entirely
-    /// off the main thread, so it adds no switch latency.
-    func verifyTunStartupAsync() {
-        let store = self.store
-        let transitionID = runtimeTransitionID
-        Task.detached { [weak self] in
-            let deadline = Date().addingTimeInterval(8)
-            var online = false
-            while Date() < deadline {
-                try? await Task.sleep(nanoseconds: 500_000_000)
-                let stillWanted = await MainActor.run { [weak self] in
-                    guard let self else { return false }
-                    return self.isTunEnabled && self.runtimeTransitionID == transitionID
-                }
-                guard stillWanted else { return }
-                if TunServiceManager.activeSingBoxPID(store: store, allowScan: false) != nil,
-                   TunServiceManager.tunInterfaceIsActive() {
-                    online = true
-                    break
-                }
-            }
-            if online {
-                do {
-                    try await ClashAPI.verifyAuthentication(port: TungBoxConfig.tunDaemonClashPort)
-                } catch {
-                    let stillWanted = await MainActor.run { [weak self] in
-                        guard let self else { return false }
-                        return self.isTunEnabled && self.runtimeTransitionID == transitionID
-                    }
-                    guard stillWanted else { return }
-                    await MainActor.run { [weak self] in
-                        guard let self else { return }
-                        self.appendLog("[TUN] 本地控制接口认证校验失败，已停止 TUN\n")
-                        self.stopTunRequestHeartbeat()
-                        try? TunServiceManager.disable(store: self.store)
-                        self.isTunEnabled = false
-                        UserDefaults.standard.set(false, forKey: "tunEnabled")
-                        self.wasTunActiveInThisSession = false
-                        self.tunTransition = .none
-                        self.syncProxyPreferenceControls()
-                        self.refreshStatus()
-                        self.showToast("TUN 控制接口认证失败")
-                    }
-                    return
-                }
-                // sing-box restores the last selector selection from cache.db,
-                // which can override the config's `default` (e.g. a manual node
-                // reverting to auto after switching into TUN). Re-assert the
-                // config's selection via the clash API so manual stays manual and
-                // auto stays auto.
-                await MainActor.run { [weak self] in
-                    self?.reconcileSelectorSelectionsToConfig()
-                    self?.runDeferredNetworkChecksAfterConnection(proxyPort: nil)
-                }
-                return
-            }
-            let stillWanted = await MainActor.run { [weak self] in
-                guard let self else { return false }
-                return self.isTunEnabled && self.runtimeTransitionID == transitionID
-            }
-            guard stillWanted else { return }
-            let reason = TunServiceManager.lastDaemonErrorLine() ?? "未知原因，请查看 TUN 日志"
-            await MainActor.run { [weak self] in
-                guard let self else { return }
-                self.appendLog("[TUN] 启动校验失败：sing-box 未在 8 秒内就绪。原因：\(reason)\n")
-                self.stopTunRequestHeartbeat()
-                try? TunServiceManager.disable(store: self.store)
-                self.isTunEnabled = false
-                UserDefaults.standard.set(false, forKey: "tunEnabled")
-                self.wasTunActiveInThisSession = false
-                self.tunTransition = .none
-                self.syncProxyPreferenceControls()
-                self.refreshStatus()
-                self.showToast("TUN 启动失败：\(reason)")
-            }
-        }
-    }
-
-    /// Re-assert each selector group's configured `default` selection via the clash
-    /// API. sing-box's cache_file remembers the previously selected outbound and
-    /// restores it on (re)start, which otherwise overrides the user's last explicit
-    /// choice when sing-box is restarted (e.g. switching capture mode into TUN).
-    func reconcileSelectorSelectionsToConfig() {
-        guard let config = parseConfigObject(from: editor.string),
-              let outbounds = config["outbounds"] as? [[String: Any]] else { return }
-        var targets: [(group: String, node: String)] = []
-        for outbound in outbounds {
-            guard (outbound["type"] as? String)?.lowercased() == "selector",
-                  let tag = outbound["tag"] as? String,
-                  let def = (outbound["default"] as? String), !def.isEmpty else { continue }
-            targets.append((tag, def))
-        }
-        guard !targets.isEmpty else { return }
-        let apiPorts = activeSelectorAPIPorts()
-        let selectionID = selectorSelectionID
-        let transitionID = runtimeTransitionID
-        Task {
-            for target in targets {
-                for apiPort in apiPorts {
-                    guard selectionID == selectorSelectionID, transitionID == runtimeTransitionID else { return }
-                    try? await ClashAPI.selectProxy(group: target.group, node: target.node, port: apiPort)
-                }
-            }
-        }
-    }
-
-    func startTunRequestHeartbeat() {
-        TunServiceManager.refreshRequestHeartbeat(store: store)
-        tunRequestHeartbeatTimer?.invalidate()
-        tunRequestHeartbeatTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                switch TunServiceManager.heartbeatAction(isTunEnabled: self.isTunEnabled, store: self.store) {
-                case .refresh:
-                    TunServiceManager.refreshRequestHeartbeat(store: self.store)
-                case .recover:
-                    self.appendLog("[TUN] 请求文件意外丢失，正在恢复 TUN\n")
-                    self.stopTunRequestHeartbeat()
-                    self.reconcileRuntime(reason: "恢复 TUN 请求")
-                case .stop:
-                    self.stopTunRequestHeartbeat()
-                }
-            }
-        }
-    }
-
-    func stopTunRequestHeartbeat() {
-        tunRequestHeartbeatTimer?.invalidate()
-        tunRequestHeartbeatTimer = nil
-    }
-
-    func ensureTunRouteIsSafeToStart() throws {
-        guard let conflict = externalTunDefaultRouteDescription() else { return }
-        appendLog("[TUN] 已阻止启动：检测到系统默认网络仍在 \(conflict)\n")
-        throw NSError.user("检测到系统默认路由在 TUN/VPN 上（\(conflict)），且没有找到可用的物理出口接口。TungBox 暂不启动 TUN。请检查 Wi-Fi/有线网络，或改用系统代理模式。")
-    }
-
-    func externalTunDefaultRouteDescription() -> String? {
-        if isTunRuntimeRunning() { return nil }
-        let route = runProcessAndGetOutput("/sbin/route", args: ["-n", "get", "default"])
-        guard let interface = route
-            .components(separatedBy: .newlines)
-            .compactMap({ line -> String? in
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                guard trimmed.hasPrefix("interface:") else { return nil }
-                return trimmed
-                    .replacingOccurrences(of: "interface:", with: "")
-                    .trimmingCharacters(in: .whitespaces)
-            })
-            .first,
-            interface.hasPrefix("utun")
-        else {
-            return nil
-        }
-        if let egress = TunServiceManager.defaultNetworkInterface(), !egress.hasPrefix("utun") {
-            return nil
-        }
-
-        let ifconfig = runProcessAndGetOutput("/sbin/ifconfig", args: [interface])
-        var detail = "\(interface)"
-        if let address = firstIPv4Address(in: ifconfig) {
-            detail += " \(address)"
-        }
-        if let dns = firstFakeTunDNSServer() {
-            detail += "，DNS \(dns)"
-        }
-        return detail
-    }
-
-    private func firstIPv4Address(in text: String) -> String? {
-        for line in text.components(separatedBy: .newlines) {
-            let parts = line.trimmingCharacters(in: .whitespaces).components(separatedBy: .whitespaces)
-            if let index = parts.firstIndex(of: "inet"), parts.indices.contains(index + 1) {
-                return parts[index + 1]
-            }
-        }
-        return nil
-    }
-
-    private func firstFakeTunDNSServer() -> String? {
-        let dns = runProcessAndGetOutput("/usr/sbin/scutil", args: ["--dns"])
-        for line in dns.components(separatedBy: .newlines) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard trimmed.hasPrefix("nameserver"), trimmed.contains("198.18.") else { continue }
-            return trimmed.components(separatedBy: ":").last?.trimmingCharacters(in: .whitespaces)
-        }
-        return nil
-    }
-
-    func currentProxyPID() -> Int32? {
-        if runner.isRunning {
-            return runner.pid
-        }
-        if isTunRuntimeRunning() {
-            return TunServiceManager.activeSingBoxPID(store: store, allowScan: false)
-        }
-        return nil
-    }
-
-    func refreshTunServiceStatus() {
-        tunServiceStatusLabel.stringValue = "TUN 服务状态：正在检查..."
-        let store = store
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            let status = TunServiceManager.status(store: store)
-            let recentLog: String
-            if let text = TunServiceManager.recentLogText(maxBytes: 16 * 1024) {
-                recentLog = text
-            } else {
-                recentLog = ""
-            }
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                self.applyTunServiceStatus(status, recentLogText: recentLog)
-            }
-        }
-    }
-
-    func applyTunServiceStatus(_ status: TunServiceStatus, recentLogText: String) {
-        tunServiceStatusLabel.stringValue = "TUN 服务状态：\(status.displayText)"
-        if status.shouldReinstall {
-            tunServiceToggleButton.title = "更新 TUN 服务"
-            tunServiceToggleButton.style = .filled
-        } else {
-            tunServiceToggleButton.title = status.isInstalled ? "卸载 TUN 服务" : "安装 TUN 服务"
-            tunServiceToggleButton.style = status.isInstalled ? .destructive : .filled
-        }
-        if tunServiceOperationInProgress {
-            return
-        }
-        tunServiceToggleButton.isEnabled = true
-        tunServiceReinstallButton.isEnabled = status.isInstalled
-        tunServiceReloadButton.isEnabled = status.isUsable
-        if !recentLogText.isEmpty {
-            let text = recentLogText
-            let lines = text.components(separatedBy: .newlines).filter { !$0.isEmpty }
-            tunServiceLogLabel.stringValue = "最近状态：\(lines.suffix(3).joined(separator: "\n"))"
-        } else {
-            tunServiceLogLabel.stringValue = "最近状态：暂无日志"
-        }
-    }
-
     @objc func showLogsFromHomeClicked() {
         selectPage(at: 5)
-    }
-
-    func changeColorScheme(to index: Int) {
-        MD3.currentSchemeIndex = index
-        for row in colorSchemeRows {
-            row.isSelected = (row.index == index)
-        }
-        notifyThemeChanged()
-        appendLog("[TungBox] 已切换配色方案为: \(MD3.colorSchemes[index].name)\n")
     }
 
     @objc func tableClicked() {
@@ -1287,38 +486,6 @@ extension MainWindowController {
         if !profiles.isEmpty { selectProfile(at: min(index, profiles.count - 1)) }
     }
 
-    func checkSingBoxInstall(showAlert: Bool) {
-        if let binary = runner.findSingBox() {
-            let result = runner.versionResult()
-            let versionLine: String
-            if let result, result.status == 0,
-               let firstLine = result.output.components(separatedBy: .newlines).first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
-                versionLine = firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            } else {
-                let output = result?.output.trimmingCharacters(in: .whitespacesAndNewlines)
-                versionLine = output?.isEmpty == false ? "版本读取失败：\(output!)" : "版本读取失败"
-            }
-            detectedCoreVersion = versionLine
-            serviceLabel.stringValue = "sing-box Core：已就绪 · \(versionLine)"
-            serviceLabel.invalidateIntrinsicContentSize()
-            appendLog("[TungBox] 检测到 \(versionLine) @ \(binary)\n")
-        } else {
-            detectedCoreVersion = "未找到"
-            serviceLabel.stringValue = """
-            sing-box Core：未找到
-            可选处理：
-            1. 使用 Homebrew 安装：brew install sing-box
-            2. 在这里导入一个 sing-box 可执行文件
-            3. 发布包时把 sing-box 放到 App 的 Resources/Core/sing-box
-            """
-            if showAlert {
-                showError(NSError.user("未检测到 sing-box Core。请在 设置 > 基础 > Core 管理 中导入 sing-box，或安装：brew install sing-box"))
-            }
-        }
-        serviceLabel.invalidateIntrinsicContentSize()
-        refreshHomeFeatureStatus()
-    }
-
     func setupRuleSetURLFields() {
         let fields = [
             (ruleSetPrivateURLField, TungBoxConfig.ruleSetPrivate),
@@ -1327,7 +494,7 @@ extension MainWindowController {
             (ruleSetGeolocationNotCNURLField, TungBoxConfig.ruleSetGeolocationNotCN)
         ]
         for (field, tag) in fields {
-            field.stringValue = TungBoxConfig.ruleSetURL(for: tag)
+            field.stringValue = TungBoxConfig.ruleSetURLOverride(for: tag)
             field.placeholderString = TungBoxConfig.defaultRuleSetURLs[tag]
             field.translatesAutoresizingMaskIntoConstraints = false
             field.heightAnchor.constraint(equalToConstant: 36).isActive = true
@@ -1415,24 +582,20 @@ extension MainWindowController {
         ]
         for (tag, value) in values {
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard trimmed.isEmpty || URL(string: trimmed) != nil else {
-                showError(NSError.user("\(tag) 不是有效 URL"))
+            guard trimmed.isEmpty || (URL(string: trimmed).map {
+                ["http", "https"].contains($0.scheme?.lowercased() ?? "") && !($0.host ?? "").isEmpty
+            } ?? false) else {
+                showError(NSError.user("\(tag) 请输入有效的 HTTP 或 HTTPS 地址"))
                 return
             }
+        }
+        for (tag, value) in values {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
             TungBoxConfig.setRuleSetURL(trimmed, for: tag)
         }
         setupRuleSetURLFields()
         appendLog("[规则集] 已保存规则集获取地址。留空时使用订阅地址；订阅没有时使用内置默认地址。\n")
-        showToast("规则集地址已保存", style: .success)
-    }
-
-    @objc func toggleThemeClicked() {
-        MD3.isDark.toggle()
-        UserDefaults.standard.set(MD3.isDark, forKey: "appearanceIsDark")
-        NSApp.appearance = NSAppearance(named: MD3.isDark ? .darkAqua : .aqua)
-        notifyThemeChanged()
-        appendLog("[TungBox] 已切换到\(MD3.isDark ? "深色" : "浅色")外观\n")
-        showToast("已切换到\(MD3.isDark ? "深色" : "浅色")外观", style: .info)
+        showToast("规则集地址已保存，刷新订阅后生效", style: .success)
     }
 
     @discardableResult
@@ -1470,50 +633,6 @@ extension MainWindowController {
         NSWorkspace.shared.open(store.baseURL)
     }
 
-    @objc func openCoreFolderClicked() {
-        NSWorkspace.shared.open(store.coreURL)
-    }
-
-    @objc func importCoreClicked() {
-        let panel = NSOpenPanel()
-        panel.title = "选择 sing-box Core"
-        panel.message = "请选择 sing-box 或 singbox 可执行文件。TungBox 会复制一份到自己的 Core 目录。"
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        if panel.runModal() == .OK, let source = panel.url {
-            do {
-                guard FileManager.default.isExecutableFile(atPath: source.path) else {
-                    showError(NSError.user("所选文件不是可执行的 sing-box 程序。请确保选择了正确的二进制文件。"))
-                    return
-                }
-                // Quick sanity check: try running version
-                let test = Process()
-                test.executableURL = source
-                test.arguments = ["version"]
-                let pipe = Pipe()
-                test.standardOutput = pipe
-                test.standardError = pipe
-                try test.run()
-                test.waitUntilExit()
-                guard test.terminationStatus == 0 else {
-                    let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-                    showError(NSError.user("所选文件无法执行 sing-box version：\(output.prefix(200))"))
-                    return
-                }
-
-                if FileManager.default.fileExists(atPath: store.coreBinaryURL.path) {
-                    try FileManager.default.removeItem(at: store.coreBinaryURL)
-                }
-                try FileManager.default.copyItem(at: source, to: store.coreBinaryURL)
-                try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: store.coreBinaryURL.path)
-                appendLog("[Core] 已导入 sing-box Core：\(store.coreBinaryURL.path)\n")
-                checkSingBoxInstall(showAlert: true)
-            } catch {
-                showError(NSError.user("导入 sing-box Core 失败：\(error.localizedDescription)"))
-            }
-        }
-    }
 }
 
 final class MD3SettingsPageView: NSView, MD3Themeable {

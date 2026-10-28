@@ -120,18 +120,35 @@ enum DNSConfig {
     }
 
     static var fakeIPRange: String {
-        get {
-            let s = UserDefaults.standard.string(forKey: kFakeIPRange)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return s.isEmpty ? defaultFakeIPRange : s
+        get { readFakeIPRange(from: .standard) }
+        set { _ = setFakeIPRange(newValue, defaults: .standard) }
+    }
+
+    static func readFakeIPRange(from defaults: UserDefaults) -> String {
+        let value = defaults.string(forKey: kFakeIPRange)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return isValidIPv4CIDR(value) ? value : defaultFakeIPRange
+    }
+
+    /// Reject invalid input before changing the last saved valid range.
+    @discardableResult
+    static func setFakeIPRange(_ raw: String, defaults: UserDefaults) -> Bool {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard value.isEmpty || isValidIPv4CIDR(value) else { return false }
+        if value.isEmpty || value == defaultFakeIPRange {
+            defaults.removeObject(forKey: kFakeIPRange)
+        } else {
+            defaults.set(value, forKey: kFakeIPRange)
         }
-        set {
-            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty || trimmed == defaultFakeIPRange {
-                UserDefaults.standard.removeObject(forKey: kFakeIPRange)
-            } else {
-                UserDefaults.standard.set(trimmed, forKey: kFakeIPRange)
-            }
-        }
+        return true
+    }
+
+    static func isValidIPv4CIDR(_ value: String) -> Bool {
+        let parts = value.split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count == 2, !parts[1].isEmpty,
+              parts[1].utf8.allSatisfy({ $0 >= 48 && $0 <= 57 }),
+              let prefix = Int(parts[1]), (0...32).contains(prefix) else { return false }
+        var address = in_addr()
+        return String(parts[0]).withCString { inet_pton(AF_INET, $0, &address) == 1 }
     }
 
     static var fakeIPExcludes: [String] {
@@ -154,19 +171,17 @@ enum DNSConfig {
     }
 
     static var readSystemHosts: Bool {
-        get {
-            if let v = UserDefaults.standard.object(forKey: kReadSystemHosts) as? Bool {
-                return v
-            }
-            return defaultReadSystemHosts
-        }
-        set {
-            if newValue == defaultReadSystemHosts {
-                UserDefaults.standard.removeObject(forKey: kReadSystemHosts)
-            } else {
-                UserDefaults.standard.set(newValue, forKey: kReadSystemHosts)
-            }
-        }
+        get { readSystemHosts(from: .standard) }
+        set { setReadSystemHosts(newValue, defaults: .standard) }
+    }
+
+    static func readSystemHosts(from defaults: UserDefaults) -> Bool {
+        (defaults.object(forKey: kReadSystemHosts) as? Bool) ?? defaultReadSystemHosts
+    }
+
+    static func setReadSystemHosts(_ enabled: Bool, defaults: UserDefaults) {
+        if enabled == defaultReadSystemHosts { defaults.removeObject(forKey: kReadSystemHosts) }
+        else { defaults.set(enabled, forKey: kReadSystemHosts) }
     }
 
     static var customHosts: String {
@@ -193,9 +208,14 @@ enum DNSConfig {
     /// - /etc/hosts 格式：`ip host1 host2 ...`
     /// - 自定义格式：`domain=ip[;ip2,ip3]`（每行一条）
     static func collectHostsEntries() -> [String: [String]] {
-        var result: [String: [String]] = [:]
+        let systemText = readSystemHosts ? (try? String(contentsOfFile: "/etc/hosts", encoding: .utf8)) : nil
+        return parseHostsEntries(systemHosts: systemText, customHosts: customHosts)
+    }
 
-        if readSystemHosts, let content = try? String(contentsOfFile: "/etc/hosts", encoding: .utf8) {
+    /// Parse a single snapshot; custom entries take precedence over system entries.
+    static func parseHostsEntries(systemHosts: String?, customHosts: String) -> [String: [String]] {
+        var result: [String: [String]] = [:]
+        if let content = systemHosts {
             for rawLine in content.components(separatedBy: .newlines) {
                 let line = rawLine.trimmingCharacters(in: .whitespaces)
                 if line.isEmpty || line.hasPrefix("#") { continue }
@@ -206,10 +226,14 @@ enum DNSConfig {
                     .filter { !$0.isEmpty }
                 guard parts.count >= 2 else { continue }
                 let ip = parts[0]
+                guard isValidIPAddress(ip) else { continue }
                 for host in parts.dropFirst() {
+                    let cleanHost = host.trimmingCharacters(in: .whitespaces).lowercased()
                     // 跳过 localhost 这种系统已有的，避免污染
-                    if host == "localhost" || host == "broadcasthost" { continue }
-                    result[host, default: []].append(ip)
+                    if cleanHost.isEmpty || cleanHost == "localhost" || cleanHost == "broadcasthost" { continue }
+                    if !result[cleanHost, default: []].contains(ip) {
+                        result[cleanHost, default: []].append(ip)
+                    }
                 }
             }
         }
@@ -219,11 +243,11 @@ enum DNSConfig {
             if line.isEmpty || line.hasPrefix("#") { continue }
             let parts = line.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
             guard parts.count == 2 else { continue }
-            let domain = parts[0].trimmingCharacters(in: .whitespaces)
+            let domain = parts[0].trimmingCharacters(in: .whitespaces).lowercased()
             let ips = parts[1]
                 .split(whereSeparator: { $0 == ";" || $0 == "," })
                 .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty }
+                .filter { isValidIPAddress($0) }
             guard !domain.isEmpty, !ips.isEmpty else { continue }
             // 自定义优先覆盖系统 hosts
             result[domain] = ips
@@ -231,10 +255,38 @@ enum DNSConfig {
         return result
     }
 
+    static func isValidIPAddress(_ str: String) -> Bool {
+        var sin = sockaddr_in()
+        var sin6 = sockaddr_in6()
+        return str.withCString { cstr in
+            inet_pton(AF_INET, cstr, &sin.sin_addr) == 1 || inet_pton(AF_INET6, cstr, &sin6.sin6_addr) == 1
+        }
+    }
+
+    /// 获取系统 /etc/hosts 的指纹（修改时间 + 文件大小），用于轻量检测外部文件变更
+    static func systemHostsFingerprint() -> String? {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: "/etc/hosts"),
+              let modDate = attrs[.modificationDate] as? Date,
+              let size = attrs[.size] as? NSNumber else {
+            return nil
+        }
+        return "\(modDate.timeIntervalSince1970)_\(size.intValue)"
+    }
+
     // MARK: - sing-box dns 字典生成
 
     /// 拼出 sing-box 配置里的 `dns` 块。被 SubscriptionImporter.basicDNS() 调用。
-    static func buildSingBoxDNS() -> [String: Any] {
+    static func applying(to config: [String: Any]) -> [String: Any] {
+        FakeIPCacheConfig.applying(to: replacingDNS(in: config, with: buildSingBoxDNS()))
+    }
+
+    static func replacingDNS(in config: [String: Any], with dns: [String: Any]) -> [String: Any] {
+        var result = ProxyModeConfig.removingHostsRules(in: config)
+        result["dns"] = dns
+        return result
+    }
+
+    static func buildSingBoxDNS(hostsEntries: [String: [String]]? = nil) -> [String: Any] {
         var servers: [[String: Any]] = []
 
         if let localDict = parseServerURL(localServer, tag: "dns-local", detour: nil) {
@@ -261,13 +313,17 @@ enum DNSConfig {
 
         // Hosts 优先级最高：放在所有规则前面，仅对配置的域名生效（精确匹配）。
         // 未匹配的域名落到后面的规则，所以不会"吃掉"全部流量。
-        let hostsMap = collectHostsEntries()
+        let hostsMap = hostsEntries ?? collectHostsEntries()
         if !hostsMap.isEmpty {
-            servers.append([
+            var hostsServer: [String: Any] = [
                 "type": "hosts",
                 "tag": "dns-hosts",
                 "predefined": hostsMap
-            ])
+            ]
+            // An empty path list makes sing-box read /etc/hosts implicitly.
+            // Use macOS's empty file so only our merged snapshot supplies answers.
+            hostsServer["path"] = ["/dev/null"]
+            servers.append(hostsServer)
             rules.append([
                 "domain": Array(hostsMap.keys).sorted(),
                 "server": "dns-hosts"
@@ -279,7 +335,7 @@ enum DNSConfig {
                 "type": "fakeip",
                 "tag": "dns-fakeip",
                 "inet4_range": fakeIPRange,
-                "inet6_range": "fc00::/18"
+                "inet6_range": FakeIPRoutingConfig.ipv6Pool
             ])
 
             // 国内域名 + 私有 → 国内 DNS（真实解析）
@@ -325,10 +381,10 @@ enum DNSConfig {
             dns["fakeip"] = [
                 "enabled": true,
                 "inet4_range": fakeIPRange,
-                "inet6_range": "fc00::/18"
+                "inet6_range": FakeIPRoutingConfig.ipv6Pool
             ]
-            // Fake-IP 拿到的是合成 IP，必须缓存到磁盘才能跨重启复用。否则关掉 sing-box
-            // 再开，浏览器里旧连接拿到的 198.18.x.x 地址全成野指针。
+            // DNS cache isolation is separate from Fake-IP persistence. The latter
+            // is enabled by FakeIPCacheConfig in every generated runtime config.
             dns["independent_cache"] = true
         }
 

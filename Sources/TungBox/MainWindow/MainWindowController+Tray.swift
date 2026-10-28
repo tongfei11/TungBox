@@ -1,6 +1,26 @@
 import AppKit
 import Foundation
 
+enum TrayIconStyle: Int {
+    case iconOnly = 0
+    case iconAndSpeed = 1
+    case speedOnly = 2
+
+    static let defaultsKey = "trayIconStyle"
+
+    static var current: TrayIconStyle {
+        TrayIconStyle(rawValue: UserDefaults.standard.integer(forKey: defaultsKey)) ?? .iconOnly
+    }
+
+    var title: String {
+        switch self {
+        case .iconOnly: return "仅显示图标"
+        case .iconAndSpeed: return "显示图标和实时速度"
+        case .speedOnly: return "仅显示实时速度"
+        }
+    }
+}
+
 enum TrayPresentationState {
     static func isActive(systemProxyEnabled: Bool, tunEnabled: Bool) -> Bool {
         systemProxyEnabled || tunEnabled
@@ -120,11 +140,19 @@ extension MainWindowController {
 
     private func refreshTrayRuntimeState(for menu: NSMenu) {
         guard isProxyRuntimeRunning() else { return }
+        let transitionID = runtimeTransitionID
+        let selectionID = selectorSelectionID
+        let observation = selectorCoordinator.observationToken
+        let profileID = selectedIndex.map { profiles[$0].id }
         Task { [weak self, weak menu] in
             let apiPort = await MainActor.run { [weak self] in self?.delayAPIPort() }
             guard let proxiesObj = try? await ClashAPI.proxies(port: apiPort) else { return }
             await MainActor.run { [weak self, weak menu] in
-                guard let self, let menu, menu === self.statusItem?.menu else { return }
+                guard let self, let menu, menu === self.statusItem?.menu,
+                      self.runtimeTransitionID == transitionID, self.selectorSelectionID == selectionID,
+                      self.selectedIndex.map({ self.profiles[$0].id }) == profileID,
+                      self.selectorCoordinator.acceptsObservation(observation) else { return }
+                self.recordSelectorObservation(proxiesObj, port: apiPort ?? 9090, source: "托盘刷新")
                 self.lastProxiesObj = proxiesObj
                 self.syncNodeDelaysFromClashAPI(proxiesObj: proxiesObj)
                 self.rebuildTrayMenu(menu)
@@ -296,7 +324,6 @@ extension MainWindowController {
     }
 
     @objc func quitFromTray() {
-        stopServiceFromDelegate()
         NSApp.terminate(nil)
     }
 }

@@ -101,7 +101,7 @@ extension MainWindowController: NSTextViewDelegate, NSTextFieldDelegate {
         dnsReadSystemHostsCheckbox.state = DNSConfig.readSystemHosts ? .on : .off
         let systemHostsRow = settingsToggleRow(
             title: "读取系统 /etc/hosts",
-            hint: "TUN 接管 53 端口后系统 /etc/hosts 默认不生效；启用后由 sing-box 一并读取。与上方「自定义 hosts」相互独立，可单独使用；同名域名以自定义为准。",
+            hint: "启用后读取系统 /etc/hosts；命中后直连映射 IP，不受域名代理规则影响。与上方「自定义 hosts」可单独使用；同名域名以自定义为准。",
             checkbox: dnsReadSystemHostsCheckbox
         )
 
@@ -193,7 +193,7 @@ extension MainWindowController: NSTextViewDelegate, NSTextFieldDelegate {
         scheduleDNSApply()
     }
 
-    @objc func dnsFakeIPToggled(_ sender: NSButton) {
+    @objc func dnsFakeIPToggled(_ sender: MD3Checkbox) {
         let on = sender.state == .on
         guard on != DNSConfig.fakeIPEnabled else { return }
         DNSConfig.fakeIPEnabled = on
@@ -202,22 +202,23 @@ extension MainWindowController: NSTextViewDelegate, NSTextFieldDelegate {
 
     @objc func dnsFakeIPRangeCommitted(_ sender: NSTextField) {
         let v = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalized = v.isEmpty ? DNSConfig.defaultFakeIPRange : v
-        if !v.isEmpty, !isPlausibleCIDR(v) {
-            showToast("Fake-IP 网段不是有效 CIDR：\(v)", style: .warning)
-            sender.stringValue = DNSConfig.fakeIPRange
+        let previous = DNSConfig.fakeIPRange
+        guard DNSConfig.setFakeIPRange(v, defaults: .standard) else {
+            showToast("Fake-IP 网段须为 IPv4 CIDR，前缀范围 0–32（例如 198.18.0.0/15）", style: .warning)
+            sender.stringValue = previous
             return
         }
-        guard normalized != DNSConfig.fakeIPRange else { return }
-        DNSConfig.fakeIPRange = v
+        sender.stringValue = DNSConfig.fakeIPRange
+        guard DNSConfig.fakeIPRange != previous else { return }
         scheduleDNSApply()
     }
 
-    @objc func dnsReadSystemHostsToggled(_ sender: NSButton) {
+    @objc func dnsReadSystemHostsToggled(_ sender: MD3Checkbox) {
         let on = sender.state == .on
         guard on != DNSConfig.readSystemHosts else { return }
         DNSConfig.readSystemHosts = on
-        scheduleDNSApply()
+        lastKnownSystemHostsFingerprint = nil
+        syncHostsToRunningConfig(reason: on ? "启用系统 hosts" : "停用系统 hosts")
     }
 
     @objc func dnsSettingsResetClicked() {
@@ -295,40 +296,10 @@ extension MainWindowController: NSTextViewDelegate, NSTextFieldDelegate {
     }
 
     private func applyDNSConfigToActiveProfile() {
-        let wasRunning = isProxyRuntimeRunning()
-        guard let _ = selectedIndex,
-              var config = parseConfigObject(from: editor.string) else {
-            appendLog("[DNS] 已保存（无活动配置可热更新，下次刷新订阅时生效）\n")
-            return
-        }
-
-        let newDNS = DNSConfig.buildSingBoxDNS()
-        // 比较新旧 dns 段，相等就什么都不做：避免无意义的写盘 / 重启 / 弹 toast
-        let oldDNS = config["dns"] as? [String: Any] ?? [:]
-        if canonicalJSON(newDNS) == canonicalJSON(oldDNS) {
-            return
-        }
-
-        config["dns"] = newDNS
-        do {
-            editor.string = try renderConfig(config)
-            _ = try saveCurrent()
-        } catch {
-            appendLog("[DNS] 写回当前配置失败：\(error.localizedDescription)\n")
-            showToast("DNS 写回失败：\(error.localizedDescription)", style: .warning)
-            return
-        }
-        appendLog("[DNS] 已更新当前配置 dns 段\n")
-        if wasRunning {
-            appendLog("[DNS] 代理运行中，正在重启服务以应用新 DNS 设置\n")
-            showToast("DNS 已更新，正在重启代理", style: .info)
-            reconcileRuntime(reason: "DNS 设置变更", forceRestart: true)
-        } else {
-            showToast("DNS 设置已保存", style: .success)
-        }
+        syncHostsToRunningConfig(reason: "DNS 设置变更")
     }
 
-    private func canonicalJSON(_ obj: [String: Any]) -> String {
+    func canonicalJSON(_ obj: [String: Any]) -> String {
         guard let data = try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys]),
               let s = String(data: data, encoding: .utf8) else { return "" }
         return s
@@ -344,14 +315,6 @@ extension MainWindowController: NSTextViewDelegate, NSTextFieldDelegate {
             return schemeEnd.upperBound < s.endIndex
         }
         return !s.contains("://")
-    }
-
-    private func isPlausibleCIDR(_ s: String) -> Bool {
-        guard let slash = s.firstIndex(of: "/") else { return false }
-        let addr = String(s[s.startIndex..<slash])
-        let maskStr = String(s[s.index(after: slash)...])
-        guard let mask = Int(maskStr), mask >= 0, mask <= 128 else { return false }
-        return !addr.isEmpty
     }
 
     // MARK: - hint
