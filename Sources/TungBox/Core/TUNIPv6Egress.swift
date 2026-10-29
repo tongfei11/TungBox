@@ -25,11 +25,27 @@ enum TUNIPv6Egress {
     static func applying(to source: [String: Any], supportsIPv6: Bool?) -> [String: Any] {
         guard supportsIPv6 == false, var dns = source["dns"] as? [String: Any],
               dns["strategy"] as? String != "ipv6_only" else { return source }
-        var rules = dns["rules"] as? [[String: Any]] ?? []
-        for index in rules.indices where rules[index]["server"] as? String == "dns-local" {
-            if rules[index]["strategy"] as? String != "ipv6_only" {
-                rules[index]["strategy"] = "ipv4_only"
+        let originalRules = dns["rules"] as? [[String: Any]] ?? []
+        var rules: [[String: Any]] = []
+        for rule in originalRules {
+            if rule["server"] as? String == "dns-local", rule["strategy"] as? String != "ipv6_only" {
+                var condition = rule
+                // DNS rule action strategy cannot coexist with query_type rules
+                // (including our FakeIP rule) in Core 1.14. Use a NODATA answer.
+                for key in ["action", "server", "strategy", "disable_cache", "disable_optimistic_cache",
+                            "rewrite_ttl", "timeout", "client_subnet", "remove_client_subnet", "speculative", "race"] {
+                    condition.removeValue(forKey: key)
+                }
+                let filter: [String: Any] = [
+                    "type": "logical", "mode": "and",
+                    "rules": [condition, ["query_type": "AAAA"]],
+                    "action": "predefined", "rcode": "NOERROR"
+                ]
+                if !originalRules.contains(where: { NSDictionary(dictionary: $0).isEqual(to: filter) }) {
+                    rules.append(filter)
+                }
             }
+            rules.append(rule)
         }
         dns["rules"] = rules
         var result = source
