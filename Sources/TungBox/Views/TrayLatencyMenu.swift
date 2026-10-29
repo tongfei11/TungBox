@@ -27,6 +27,7 @@ final class TrayReadOnlyNodeView: NSView {
         autoresizingMask = [.width]
         check.frame = NSRect(x: 4, y: 2, width: 16, height: 20)
         check.font = .menuFont(ofSize: 0)
+        check.textColor = .disabledControlTextColor
         label.frame = NSRect(x: 20, y: 2, width: width - 32, height: 20)
         label.autoresizingMask = [.width]
         label.lineBreakMode = .byTruncatingTail
