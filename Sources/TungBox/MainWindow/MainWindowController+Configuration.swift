@@ -123,7 +123,13 @@ extension MainWindowController {
         } else {
             interface = TunServiceManager.defaultNetworkInterface()
         }
-        let bound = builder.bindPhysicalInterface(interface, in: prepared.config)
+        let supportsIPv6: Bool?
+        if let networkSnapshot {
+            supportsIPv6 = networkSnapshot.supportsIPv6
+        } else {
+            supportsIPv6 = TunServiceManager.supportsIPv6Egress(on: interface)
+        }
+        let bound = builder.bindPhysicalInterface(interface, supportsIPv6: supportsIPv6, in: prepared.config)
         bound.diagnostics.forEach { appendLog($0) }
         let hosts = TUNRuntimeConfigBuilder.hostsNeedingResolution(in: bound.config)
         let addresses = networkSnapshot?.resolvedAddressesByHost ?? resolvePublicIPv4Addresses(forHosts: hosts)

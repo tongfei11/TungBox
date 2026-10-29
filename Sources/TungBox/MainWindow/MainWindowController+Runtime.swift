@@ -105,9 +105,11 @@ extension MainWindowController {
             discoverTunNetwork: { [self] source in
                 let hosts = tunUpstreamHosts(in: source)
                 return try await coordinator.performBlocking(for: request) {
-                    TUNRuntimeConfigBuilder.NetworkSnapshot(
-                        physicalInterface: TunServiceManager.defaultNetworkInterface(),
-                        resolvedAddressesByHost: self.resolvePublicIPv4Addresses(forHosts: hosts)
+                    let interface = TunServiceManager.defaultNetworkInterface()
+                    return TUNRuntimeConfigBuilder.NetworkSnapshot(
+                        physicalInterface: interface,
+                        resolvedAddressesByHost: self.resolvePublicIPv4Addresses(forHosts: hosts),
+                        supportsIPv6: TunServiceManager.supportsIPv6Egress(on: interface)
                     )
                 }
             },

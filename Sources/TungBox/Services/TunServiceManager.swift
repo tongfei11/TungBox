@@ -570,6 +570,15 @@ enum TunServiceManager {
         return firstIPv4Address(in: ifconfig)
     }
 
+    static func supportsIPv6Egress(on interface: String?) -> Bool? {
+        guard let interface, !isVirtualOrSpecialInterface(interface) else { return nil }
+        return TUNIPv6Egress.availability(
+            interface: interface,
+            ifconfig: runProcessAndGetOutput("/sbin/ifconfig", args: [interface]),
+            route: runProcessAndGetOutput("/sbin/route", args: ["-n", "get", "-inet6", "-ifscope", interface, "default"])
+        )
+    }
+
     private static func externalTunDefaultRouteDescription() -> String? {
         guard let route = defaultRouteInterface(),
               route.interface.hasPrefix("utun") else { return nil }

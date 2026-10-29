@@ -16,6 +16,7 @@ struct TUNRuntimeConfigBuilder {
     struct NetworkSnapshot: Equatable, Sendable {
         let physicalInterface: String?
         let resolvedAddressesByHost: [String: [String]]
+        var supportsIPv6: Bool? = nil
     }
 
     /// 失败时也保留此前的诊断，调用方先展示日志，再取 text 或抛出原错误。
@@ -60,9 +61,13 @@ struct TUNRuntimeConfigBuilder {
         return Transformation(config: config, diagnostics: diagnostics)
     }
 
-    func bindPhysicalInterface(_ interface: String?, in source: [String: Any]) -> Transformation {
+    func bindPhysicalInterface(_ interface: String?, supportsIPv6: Bool? = nil, in source: [String: Any]) -> Transformation {
         var diagnostics: [String] = []
-        let config = applyTunPhysicalEgressBinding(in: source, interface: interface, diagnostics: &diagnostics)
+        var config = applyTunPhysicalEgressBinding(in: source, interface: interface, diagnostics: &diagnostics)
+        config = TUNIPv6Egress.applying(to: config, supportsIPv6: supportsIPv6)
+        if supportsIPv6 == false {
+            diagnostics.append("[TUN] 物理出口无可用 IPv6，国内 DNS 临时仅解析 IPv4；保留代理 DNS、FakeIP IPv6 和显式 IPv6-only 设置\n")
+        }
         return Transformation(config: config, diagnostics: diagnostics)
     }
 
