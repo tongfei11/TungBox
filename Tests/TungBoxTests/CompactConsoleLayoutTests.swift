@@ -5,6 +5,53 @@ import XCTest
 /// Hidden standalone views and fake switches only; never creates TungBox's controller.
 final class CompactConsoleLayoutTests: XCTestCase {
     @MainActor
+    func testNodeTileKeepsLatencyOnTitleRowAndDescriptionFullWidth() throws {
+        _ = NSApplication.shared
+        let previousDark = MD3.isDark
+        defer { MD3.isDark = previousDark }
+        for dark in [true, false] {
+            MD3.isDark = dark
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 390, height: 112),
+                                  styleMask: [.borderless], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            defer { window.contentView = nil; window.close() }
+            let root = NSView(frame: NSRect(x: 0, y: 0, width: 390, height: 112))
+            root.wantsLayer = true
+            root.layer?.backgroundColor = MD3.surface.cgColor
+            window.contentView = root
+            for (index, interactive) in [true, false].enumerated() {
+                let tile = MD3NodeTileView()
+                tile.isInteractive = interactive
+                tile.isSelected = true
+                tile.nameLabel.stringValue = "ATLS日本 03"
+                tile.subLabel.stringValue = "anytls · tls · TCP+UDP"
+                tile.delayValue = "1003 ms"
+                tile.translatesAutoresizingMaskIntoConstraints = false
+                root.addSubview(tile)
+                NSLayoutConstraint.activate([
+                    tile.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: CGFloat(index * 190 + 5)),
+                    tile.topAnchor.constraint(equalTo: root.topAnchor, constant: 20),
+                    tile.widthAnchor.constraint(equalToConstant: 180), tile.heightAnchor.constraint(equalToConstant: 46)
+                ])
+                root.layoutSubtreeIfNeeded()
+                XCTAssertEqual(tile.subviews.count, 3, "无选择圆点，仅保留名称、说明、延迟")
+                XCTAssertEqual(tile.nameLabel.alignmentRect(forFrame: tile.nameLabel.frame).minX, 10, accuracy: 0.5)
+                XCTAssertEqual(tile.actionButton.frame.midY, tile.nameLabel.frame.midY, accuracy: 0.5)
+                XCTAssertFalse(tile.actionButton.frame.intersects(tile.subLabel.frame))
+                XCTAssertEqual(tile.subLabel.alignmentRect(forFrame: tile.subLabel.frame).maxX, tile.bounds.maxX - 10, accuracy: 0.5)
+                XCTAssertEqual(tile.layer?.backgroundColor,
+                               interactive ? MD3.primaryContainer.cgColor : (dark ? MD3.primary.withAlphaComponent(0.12).cgColor : MD3.primaryContainer.withAlphaComponent(0.4).cgColor))
+            }
+            if let prefix = ProcessInfo.processInfo.environment["TUNGBOX_LAYOUT_PREVIEW"] {
+                let rep = try XCTUnwrap(root.bitmapImageRepForCachingDisplay(in: root.bounds))
+                root.cacheDisplay(in: root.bounds, to: rep)
+                try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+                    .write(to: URL(fileURLWithPath: prefix + "-nodes-\(dark ? "dark" : "light").png"))
+            }
+        }
+    }
+
+    @MainActor
     func testPageTabsFitAtActionHeightWithLargerText() throws {
         _ = NSApplication.shared
         for (titles, width) in [(SettingsPageNavigation.titles, SettingsPageNavigation.width),

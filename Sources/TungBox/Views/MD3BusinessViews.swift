@@ -831,6 +831,10 @@ final class MD3ColorSchemeRow: NSView, MD3Themeable {
     }
 }
 // MARK: - MD3 Node Tile View
+final class NodeTileLatencyButton: NSButton {
+    override var alignmentRectInsets: NSEdgeInsets { NSEdgeInsetsZero }
+}
+
 final class MD3NodeTileView: NSView, MD3Themeable {
     /// Updates latency/spinner only; preserves the existing tile and layout tree.
     static func refreshDelays(in root: NSView, delays: [String: String]) {
@@ -845,9 +849,7 @@ final class MD3NodeTileView: NSView, MD3Themeable {
 
     let nameLabel = NSTextField(labelWithString: "")
     let subLabel = NSTextField(labelWithString: "")
-    let actionButton = NSButton()
-    private let radioCircle = NSView()
-    private let radioDot = NSView()
+    let actionButton = NodeTileLatencyButton()
 
     var isSelected: Bool = false {
         didSet {
@@ -894,23 +896,6 @@ final class MD3NodeTileView: NSView, MD3Themeable {
         layer?.cornerRadius = 8
         layer?.borderWidth = 1
 
-        radioCircle.wantsLayer = true
-        radioCircle.layer?.cornerRadius = 7
-        radioCircle.layer?.borderWidth = 1.5
-        radioCircle.translatesAutoresizingMaskIntoConstraints = false
-
-        radioDot.wantsLayer = true
-        radioDot.layer?.cornerRadius = 3.5
-        radioDot.translatesAutoresizingMaskIntoConstraints = false
-        radioCircle.addSubview(radioDot)
-
-        NSLayoutConstraint.activate([
-            radioDot.centerXAnchor.constraint(equalTo: radioCircle.centerXAnchor),
-            radioDot.centerYAnchor.constraint(equalTo: radioCircle.centerYAnchor),
-            radioDot.widthAnchor.constraint(equalToConstant: 7),
-            radioDot.heightAnchor.constraint(equalToConstant: 7)
-        ])
-
         nameLabel.font = .systemFont(ofSize: 12, weight: .medium)
         nameLabel.textColor = MD3.onSurface
         nameLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -937,7 +922,6 @@ final class MD3NodeTileView: NSView, MD3Themeable {
         actionButton.isEnabled = isActionEnabled
         actionButton.isHidden = !isActionEnabled
 
-        addSubview(radioCircle)
         addSubview(nameLabel)
         addSubview(subLabel)
         addSubview(actionButton)
@@ -946,22 +930,18 @@ final class MD3NodeTileView: NSView, MD3Themeable {
         actionButton.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         NSLayoutConstraint.activate([
-            radioCircle.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            radioCircle.centerYAnchor.constraint(equalTo: centerYAnchor),
-            radioCircle.widthAnchor.constraint(equalToConstant: 14),
-            radioCircle.heightAnchor.constraint(equalToConstant: 14),
-
-            nameLabel.leadingAnchor.constraint(equalTo: radioCircle.trailingAnchor, constant: 8),
+            nameLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
             nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+            nameLabel.heightAnchor.constraint(equalToConstant: 15),
             nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: actionButton.leadingAnchor, constant: -6),
 
             subLabel.leadingAnchor.constraint(equalTo: nameLabel.leadingAnchor),
-            subLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 1),
+            subLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 4),
             subLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
-            subLabel.trailingAnchor.constraint(lessThanOrEqualTo: actionButton.leadingAnchor, constant: -6),
+            subLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
 
             actionButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            actionButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            actionButton.centerYAnchor.constraint(equalTo: nameLabel.centerYAnchor),
             actionButton.heightAnchor.constraint(equalToConstant: 20),
             actionButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 32)
         ])
@@ -974,14 +954,12 @@ final class MD3NodeTileView: NSView, MD3Themeable {
     }
 
     private func updateStyle() {
-        if isSelected && !isInteractive {
+        if isSelected && isInteractive {
             layer?.backgroundColor = MD3.primaryContainer.cgColor
             layer?.borderColor = MD3.primary.withAlphaComponent(0.6).cgColor
             layer?.borderWidth = 1.5
-            radioCircle.layer?.borderColor = MD3.primary.cgColor
-            radioDot.layer?.backgroundColor = MD3.primary.cgColor
-            radioDot.isHidden = false
             nameLabel.textColor = MD3.onPrimaryContainer
+            nameLabel.font = .systemFont(ofSize: 12, weight: .bold)
             subLabel.textColor = MD3.onPrimaryContainer.withAlphaComponent(0.7)
         } else if isSelected {
             layer?.backgroundColor = MD3.isDark 
@@ -989,9 +967,6 @@ final class MD3NodeTileView: NSView, MD3Themeable {
                 : MD3.primaryContainer.withAlphaComponent(0.4).cgColor
             layer?.borderColor = MD3.primary.cgColor
             layer?.borderWidth = 1.5
-            radioCircle.layer?.borderColor = MD3.primary.cgColor
-            radioDot.layer?.backgroundColor = MD3.primary.cgColor
-            radioDot.isHidden = false
             nameLabel.textColor = MD3.onSurface
             nameLabel.font = .systemFont(ofSize: 12, weight: .bold)
             subLabel.textColor = MD3.onSurfaceVariant
@@ -999,8 +974,6 @@ final class MD3NodeTileView: NSView, MD3Themeable {
             layer?.backgroundColor = MD3.surfaceContainerLow.cgColor
             layer?.borderColor = MD3.outlineVariant.withAlphaComponent(0.3).cgColor
             layer?.borderWidth = 1
-            radioCircle.layer?.borderColor = MD3.outlineVariant.withAlphaComponent(0.5).cgColor
-            radioDot.isHidden = true
             nameLabel.textColor = MD3.onSurfaceVariant.withAlphaComponent(0.6)
             nameLabel.font = .systemFont(ofSize: 12, weight: .medium)
             subLabel.textColor = MD3.onSurfaceVariant.withAlphaComponent(0.4)
@@ -1008,8 +981,6 @@ final class MD3NodeTileView: NSView, MD3Themeable {
             layer?.backgroundColor = MD3.surfaceContainerLow.cgColor
             layer?.borderColor = MD3.outlineVariant.withAlphaComponent(0.4).cgColor
             layer?.borderWidth = 1
-            radioCircle.layer?.borderColor = MD3.outlineVariant.cgColor
-            radioDot.isHidden = true
             nameLabel.textColor = MD3.onSurface
             nameLabel.font = .systemFont(ofSize: 12, weight: .medium)
             subLabel.textColor = MD3.onSurfaceVariant

@@ -193,7 +193,9 @@ extension MainWindowController {
         card.type = .elevated
         card.translatesAutoresizingMaskIntoConstraints = false
 
-        let titleLabel = NSTextField(labelWithString: group.tag)
+        let groupTitle = group.tag == TungBoxConfig.tagGlobal ? "Global"
+            : (group.tag == TungBoxConfig.tagManual ? "代理组" : group.tag)
+        let titleLabel = NSTextField(labelWithString: groupTitle)
         titleLabel.font = .systemFont(ofSize: 15, weight: .bold)
         titleLabel.textColor = MD3.onSurface
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -326,8 +328,7 @@ extension MainWindowController {
             }
         }
         
-        let flag = CountryFlagHelper.flag(for: displayName)
-        tile.nameLabel.stringValue = "\(flag) \(displayName)"
+        tile.nameLabel.stringValue = displayName
         tile.subLabel.stringValue = nodeSubLabel(displayType: displayType, node: node)
         tile.delayValue = displayDelay
         
