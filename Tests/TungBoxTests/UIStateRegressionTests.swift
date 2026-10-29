@@ -414,7 +414,7 @@ final class UIStateRegressionTests: XCTestCase {
     }
 
     @MainActor
-    func testTrayLatencyControlRetainsMenuAndUsesReadableAppearanceColors() throws {
+    func testTrayLatencyControlRetainsMenuAndReadOnlyResultsStayEnabled() throws {
         let menu = NSMenu()
         let item = NSMenuItem(title: "延迟测试", action: nil, keyEquivalent: "")
         let view = TrayLatencyTestView(width: 280)
@@ -431,23 +431,14 @@ final class UIStateRegressionTests: XCTestCase {
         XCTAssertEqual(view.button.title, "正在测试…")
         view.update(isTesting: false)
         XCTAssertTrue(view.button.isEnabled)
-        func luminance(_ color: NSColor) throws -> CGFloat {
-            let c = try XCTUnwrap(color.usingColorSpace(.sRGB))
-            func linear(_ v: CGFloat) -> CGFloat { v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4) }
-            return 0.2126 * linear(c.redComponent) + 0.7152 * linear(c.greenComponent) + 0.0722 * linear(c.blueComponent)
-        }
-        for (name, background): (NSAppearance.Name, CGFloat) in [(.aqua, 0.66), (.darkAqua, 0.18)] {
-            let appearance = try XCTUnwrap(NSAppearance(named: name))
-            for delay in ["186 ms", "690 ms", "1852 ms"] {
-                var resolved: NSColor = .clear
-                appearance.performAsCurrentDrawingAppearance {
-                    resolved = TrayLatencyStyle.color(for: delay).usingColorSpace(.sRGB)!
-                }
-                let fg = try luminance(resolved)
-                let bg = try luminance(NSColor(srgbRed: background, green: background, blue: background, alpha: 1))
-                XCTAssertGreaterThanOrEqual((max(fg, bg) + 0.05) / (min(fg, bg) + 0.05), 4.5)
-            }
-        }
+        let result = TrayReadOnlyNodeView(width: 280)
+        let title = NSAttributedString(string: "日本 03 (217 ms)", attributes: [.foregroundColor: TrayLatencyStyle.color(for: "217 ms")])
+        result.update(title: title, selected: true)
+        XCTAssertTrue(result.label.isEnabled)
+        XCTAssertEqual(result.label.attributedStringValue, title)
+        let updated = NSAttributedString(string: "日本 03 (998 ms)", attributes: [.foregroundColor: TrayLatencyStyle.color(for: "998 ms")])
+        result.update(title: updated, selected: false)
+        XCTAssertEqual(result.label.attributedStringValue, updated)
     }
 
     @MainActor

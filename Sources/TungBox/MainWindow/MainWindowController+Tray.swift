@@ -135,6 +135,9 @@ extension MainWindowController {
                     item.representedObject = ["group": group, "node": node]
                 } else {
                     item.isEnabled = false
+                    let row = TrayReadOnlyNodeView(width: max(240, width))
+                    row.update(title: displayTitle, selected: groupInfo?.current == node)
+                    item.view = row
                 }
                 item.state = groupInfo?.current == node ? .on : .off
                 menu.addItem(item)
@@ -180,6 +183,7 @@ extension MainWindowController {
                 item.title = title.string
                 item.attributedTitle = title
                 item.state = nodeGroups.first(where: { $0.tag == group })?.current == node ? .on : .off
+                (item.view as? TrayReadOnlyNodeView)?.update(title: title, selected: item.state == .on)
             }
         }
     }
