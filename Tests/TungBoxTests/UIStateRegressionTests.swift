@@ -414,6 +414,43 @@ final class UIStateRegressionTests: XCTestCase {
     }
 
     @MainActor
+    func testTrayLatencyControlRetainsMenuAndUsesReadableAppearanceColors() throws {
+        let menu = NSMenu()
+        let item = NSMenuItem(title: "延迟测试", action: nil, keyEquivalent: "")
+        let view = TrayLatencyTestView(width: 280)
+        var calls = 0
+        view.onTest = { calls += 1; view.update(isTesting: true) }
+        item.view = view
+        menu.addItem(item)
+        view.button.performClick(nil)
+        XCTAssertEqual(calls, 1)
+        XCTAssertTrue(item.menu === menu)
+        XCTAssertTrue(item.view === view)
+        XCTAssertNil(item.action, "Click is handled inside the view instead of a dismissing menu action")
+        XCTAssertFalse(view.button.isEnabled)
+        XCTAssertEqual(view.button.title, "正在测试…")
+        view.update(isTesting: false)
+        XCTAssertTrue(view.button.isEnabled)
+        func luminance(_ color: NSColor) throws -> CGFloat {
+            let c = try XCTUnwrap(color.usingColorSpace(.sRGB))
+            func linear(_ v: CGFloat) -> CGFloat { v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4) }
+            return 0.2126 * linear(c.redComponent) + 0.7152 * linear(c.greenComponent) + 0.0722 * linear(c.blueComponent)
+        }
+        for (name, background): (NSAppearance.Name, CGFloat) in [(.aqua, 0.66), (.darkAqua, 0.18)] {
+            let appearance = try XCTUnwrap(NSAppearance(named: name))
+            for delay in ["186 ms", "690 ms", "1852 ms"] {
+                var resolved: NSColor = .clear
+                appearance.performAsCurrentDrawingAppearance {
+                    resolved = TrayLatencyStyle.color(for: delay).usingColorSpace(.sRGB)!
+                }
+                let fg = try luminance(resolved)
+                let bg = try luminance(NSColor(srgbRed: background, green: background, blue: background, alpha: 1))
+                XCTAssertGreaterThanOrEqual((max(fg, bg) + 0.05) / (min(fg, bg) + 0.05), 4.5)
+            }
+        }
+    }
+
+    @MainActor
     func testLogTextViewExpandsVerticallyInsideItsScrollView() {
         let textView = NSTextView()
         LogTextViewLayout.configure(textView)

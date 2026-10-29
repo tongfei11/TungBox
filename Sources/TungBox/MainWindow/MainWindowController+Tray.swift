@@ -112,8 +112,13 @@ extension MainWindowController {
         let members = groupInfo?.members ?? []
         let isAuto = (group == TungBoxConfig.tagAuto)
         
-        let testItem = NSMenuItem(title: "延迟测试", action: #selector(testAllNodesClicked), keyEquivalent: "")
-        testItem.target = self
+        let testItem = NSMenuItem(title: "延迟测试", action: nil, keyEquivalent: "")
+        let width = members.map { (trayProxyNodeTitle(for: $0).string + " (9999 ms)" as NSString)
+            .size(withAttributes: [.font: NSFont.menuFont(ofSize: 0)]).width + 48 }.max() ?? 240
+        let testView = TrayLatencyTestView(width: max(240, width))
+        testView.onTest = { [weak self] in self?.testAllNodesClicked() }
+        testView.update(isTesting: nodeDelayTestState.isActive)
+        testItem.view = testView
         menu.addItem(testItem)
         menu.addItem(.separator())
         
@@ -124,6 +129,7 @@ extension MainWindowController {
                 let displayTitle = trayProxyNodeTitle(for: node)
                 let item = NSMenuItem(title: displayTitle.string, action: isAuto ? nil : #selector(proxyNodeFromTray(_:)), keyEquivalent: "")
                 item.attributedTitle = displayTitle
+                item.representedObject = ["group": group, "node": node]
                 if !isAuto {
                     item.target = self
                     item.representedObject = ["group": group, "node": node]
@@ -155,7 +161,25 @@ extension MainWindowController {
                 self.recordSelectorObservation(proxiesObj, port: apiPort ?? 9090, source: "托盘刷新")
                 self.lastProxiesObj = proxiesObj
                 self.syncNodeDelaysFromClashAPI(proxiesObj: proxiesObj)
-                self.rebuildTrayMenu(menu)
+                self.refreshTrayMenuContents()
+            }
+        }
+    }
+
+    func refreshTrayMenuContents() {
+        guard let menu = statusItem?.menu else { return }
+        for root in menu.items {
+            guard let submenu = root.submenu else { continue }
+            for item in submenu.items {
+                if let testView = item.view as? TrayLatencyTestView {
+                    testView.update(isTesting: nodeDelayTestState.isActive)
+                }
+                guard let info = item.representedObject as? [String: String],
+                      let node = info["node"], let group = info["group"] else { continue }
+                let title = trayProxyNodeTitle(for: node)
+                item.title = title.string
+                item.attributedTitle = title
+                item.state = nodeGroups.first(where: { $0.tag == group })?.current == node ? .on : .off
             }
         }
     }
@@ -189,10 +213,10 @@ extension MainWindowController {
         ])
         
         if let delayStr = delayStr {
-            let delayColor = MD3.latencyTextColor(delayStr)
+            let delayColor = TrayLatencyStyle.color(for: delayStr)
             let suffix = " (\(delayStr))"
             let suffixAttr = NSAttributedString(string: suffix, attributes: [
-                .font: font,
+                .font: NSFont.monospacedDigitSystemFont(ofSize: font.pointSize, weight: .semibold),
                 .foregroundColor: delayColor
             ])
             result.append(suffixAttr)

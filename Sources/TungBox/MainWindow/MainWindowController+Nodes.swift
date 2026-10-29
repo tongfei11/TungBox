@@ -105,6 +105,7 @@ extension MainWindowController {
     }
 
     func refreshNodeGroupsView() {
+        refreshTrayMenuContents()
         nodeTileActions.removeAll()
         nextNodeTileTag = 1
         nodeGroupsStack.arrangedSubviews.forEach { view in
@@ -538,6 +539,7 @@ extension MainWindowController {
     }
 
     func refreshNodeDelayTiles() {
+        refreshTrayMenuContents()
         var delays = Dictionary(nodes.map { ($0.tag, $0.delay) }, uniquingKeysWith: { first, _ in first })
         for group in nodeGroups where ["urltest", "url-test", "fallback"].contains(group.type.lowercased()) {
             let resolved = resolveActiveOutboundForGroup(groupTag: group.tag, proxiesObj: isProxyRuntimeRunning() ? lastProxiesObj : nil).name
