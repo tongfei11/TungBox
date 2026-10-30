@@ -87,18 +87,21 @@ extension MainWindowController {
         let scroll = MD3ScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = true
         scroll.applyThinOverlayScroller()
         scroll.drawsBackground = false
 
         connectionsTable.backgroundColor = .clear
-        connectionsTable.addTableColumn(connectionColumn("index", "#", 44))
-        connectionsTable.addTableColumn(connectionColumn("network", "网络", 68))
-        connectionsTable.addTableColumn(connectionColumn("status", "状态", 88))
-        connectionsTable.addTableColumn(connectionColumn("source", "来源 IP", 110))
-        connectionsTable.addTableColumn(connectionColumn("destination", "目标", 220))
-        connectionsTable.addTableColumn(connectionColumn("rule", "规则", 130))
-        connectionsTable.addTableColumn(connectionColumn("outbound", "出站", 110))
-        connectionsTable.addTableColumn(connectionColumn("traffic", "流量", 110))
+        connectionsTable.addTableColumn(connectionColumn("index", "#", 30))
+        connectionsTable.addTableColumn(connectionColumn("network", "网络", 50))
+        connectionsTable.addTableColumn(connectionColumn("status", "状态", 80))
+        connectionsTable.addTableColumn(connectionColumn("source", "来源 IP", 88))
+        connectionsTable.addTableColumn(connectionColumn("destination", "目标", 164))
+        connectionsTable.addTableColumn(connectionColumn("outbound", "出站", 86))
+        connectionsTable.addTableColumn(connectionColumn("traffic", "流量", 112))
+        connectionsTable.addTableColumn(connectionColumn("rule", "规则", 96))
+        // Keep the short columns compact; the final rule column takes extra room.
+        connectionsTable.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
         connectionsTable.delegate = self
         connectionsTable.dataSource = self
         connectionsTable.rowHeight = 38
