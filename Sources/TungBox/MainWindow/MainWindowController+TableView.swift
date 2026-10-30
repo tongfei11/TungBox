@@ -62,7 +62,7 @@ extension MainWindowController {
         } else if tableView == connectionsTable {
             let rows = displayedConnections
             guard rows.indices.contains(row), let columnID = tableColumn?.identifier.rawValue else { return nil }
-            return makeConnectionCell(for: rows[row], columnID: columnID)
+            return makeConnectionCell(for: rows[row], columnID: columnID, row: row)
         } else {
             let identifier = NSUserInterfaceItemIdentifier("ProfileCell")
             let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? MD3ProfileCellView ?? MD3ProfileCellView(frame: .zero)

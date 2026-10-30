@@ -5,6 +5,24 @@ import XCTest
 /// Hidden standalone views and fake switches only; never creates TungBox's controller.
 final class CompactConsoleLayoutTests: XCTestCase {
     @MainActor
+    func testConnectionIndexFitsTwoAndThreeDigitsAtCompactWidth() throws {
+        _ = NSApplication.shared
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 44, height: 38),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.contentView = nil; window.close() }
+        let cell = ConnectionTextCell(frame: NSRect(x: 0, y: 0, width: 44, height: 38))
+        window.contentView = cell
+        for text in ["01", "02", "09", "10", "65", "100"] {
+            cell.update(text: text, isMuted: true)
+            cell.layoutSubtreeIfNeeded()
+            let label = try XCTUnwrap(cell.textField)
+            XCTAssertEqual(label.stringValue, text)
+            XCTAssertLessThanOrEqual(label.intrinsicContentSize.width, label.bounds.width, "序号不能被截成省略号：\(text)")
+        }
+    }
+
+    @MainActor
     func testNodeTileKeepsLatencyOnTitleRowAndDescriptionFullWidth() throws {
         _ = NSApplication.shared
         let previousDark = MD3.isDark

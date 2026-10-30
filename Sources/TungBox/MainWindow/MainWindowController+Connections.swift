@@ -92,7 +92,9 @@ extension MainWindowController {
         scroll.drawsBackground = false
 
         connectionsTable.backgroundColor = .clear
-        connectionsTable.addTableColumn(connectionColumn("index", "#", 30))
+        let indexColumn = connectionColumn("index", "#", 44)
+        indexColumn.minWidth = 44
+        connectionsTable.addTableColumn(indexColumn)
         connectionsTable.addTableColumn(connectionColumn("network", "网络", 50))
         connectionsTable.addTableColumn(connectionColumn("status", "状态", 80))
         connectionsTable.addTableColumn(connectionColumn("source", "来源 IP", 88))
@@ -457,7 +459,7 @@ extension MainWindowController {
         return text
     }
 
-    func makeConnectionCell(for connection: ConnectionInfo, columnID: String, row: Int = 0) -> NSView {
+    func makeConnectionCell(for connection: ConnectionInfo, columnID: String, row: Int) -> NSView {
         if columnID == "index" {
             let identifier = NSUserInterfaceItemIdentifier("Connection-index")
             let cell = connectionsTable.makeView(withIdentifier: identifier, owner: nil) as? ConnectionTextCell
