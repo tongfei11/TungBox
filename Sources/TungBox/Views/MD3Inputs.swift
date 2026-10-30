@@ -394,6 +394,7 @@ final class MD3Switch: NSControl, MD3Themeable {
 // MARK: - MD3 Checkbox
 
 final class MD3Checkbox: NSControl, MD3Themeable {
+    var accentColor: NSColor? { didSet { updateColors() } }
     var title: String = "" {
         didSet {
             labelField.stringValue = title
@@ -514,16 +515,16 @@ final class MD3Checkbox: NSControl, MD3Themeable {
         if isEnabled {
             alphaValue = 1.0
             if isChecked {
-                boxView.layer?.backgroundColor = MD3.primary.cgColor
-                boxView.layer?.borderColor = MD3.primary.cgColor
+                boxView.layer?.backgroundColor = (accentColor ?? MD3.primary).cgColor
+                boxView.layer?.borderColor = (accentColor ?? MD3.primary).cgColor
                 checkIcon.isHidden = false
-                checkIcon.contentTintColor = MD3.onPrimary
+                checkIcon.contentTintColor = accentColor == nil ? MD3.onPrimary : (MD3.isDark ? .black : .white)
             } else {
                 boxView.layer?.backgroundColor = isHovered ? MD3.surfaceContainer.cgColor : NSColor.clear.cgColor
-                boxView.layer?.borderColor = MD3.outline.cgColor
+                boxView.layer?.borderColor = (accentColor ?? MD3.outline).cgColor
                 checkIcon.isHidden = true
             }
-            labelField.textColor = MD3.onSurface
+            labelField.textColor = accentColor ?? MD3.onSurface
         } else {
             alphaValue = 0.38
             if isChecked {

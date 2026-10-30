@@ -77,6 +77,8 @@ extension MainWindowController {
         for (title, _) in levels {
             let btn = MD3Checkbox(checkboxWithTitle: title, target: self, action: #selector(refreshLogDisplay))
             btn.state = .on
+            btn.accentColor = LogLevelStyle.parse(title).color
+            registerThemeObserver { [weak btn] in btn?.accentColor = LogLevelStyle.parse(title).color }
             btn.translatesAutoresizingMaskIntoConstraints = false
             levelButtons.append(btn)
         }
@@ -128,7 +130,8 @@ extension MainWindowController {
         logs.textColor = MD3.onSurface
         LogTextViewLayout.configure(logs)
         registerThemeObserver { [weak self] in
-            self?.logs.textColor = MD3.onSurface
+            guard let self else { return }
+            self.logs.setLogText(self.logs.copyableText)
         }
 
         let countLabel = NSTextField(labelWithString: "")
@@ -186,7 +189,7 @@ extension MainWindowController {
                 levels.insert(title)
             }
         }
-        return levels.isEmpty ? ["INFO", "WARN", "ERROR", "DEBUG"] : levels
+        return levels
     }
 
     @objc func refreshLogDisplay() {
@@ -200,20 +203,14 @@ extension MainWindowController {
             let upper = line.uppercased()
             // Level match: if all levels on, skip level filter
             if !allLevelsOn {
-                var matched = false
-                for level in levels {
-                    if upper.contains("[\(level)]") || upper.hasPrefix("\(level) ") || upper.contains(" \(level) ") {
-                        matched = true; break
-                    }
-                }
-                guard matched else { return false }
+                guard levels.contains(LogTextPresentation.level(in: line).rawValue) else { return false }
             }
             // Keyword match from search field
             guard query.isEmpty || upper.contains(query) else { return false }
             return true
         }
 
-        logs.string = filtered.isEmpty ? "" : filtered.joined(separator: "\n")
+        logs.setLogText(filtered.isEmpty ? "" : filtered.joined(separator: "\n"))
         attachedLogCountLabel?.stringValue = filtered.count == lines.count && allLevelsOn
             ? "共 \(lines.filter { !$0.isEmpty }.count) 条"
             : "显示 \(filtered.count) / \(lines.filter { !$0.isEmpty }.count) 条"
@@ -229,7 +226,7 @@ extension MainWindowController {
     @objc func clearLogsClicked() {
         logBuffer = ""
         logLineCount = 0
-        logs.string = ""
+        logs.setLogText("")
         attachedLogCountLabel?.stringValue = "显示 0 条"
         // Also wipe the on-disk log so "清空" actually frees space — otherwise the
         // file keeps growing and the user has no way to truncate it from the UI.
@@ -240,7 +237,7 @@ extension MainWindowController {
     }
 
     @objc func copyLogsClicked() {
-        let text = logs.string
+        let text = logs.copyableText
         guard !text.isEmpty else {
             showToast("日志为空", style: .warning)
             return

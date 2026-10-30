@@ -119,7 +119,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     let pages = ConsoleTabView()
     var navButtons: [MD3SidebarItem] = []
     let editor = NSTextView()
-    let logs = NSTextView()
+    let logs = LogDetailTextView()
     let ruleSearchField = MD3TextField()
     let customRuleTypePopup = MD3PopUpButton()
     let customRuleStrategyPopup = MD3PopUpButton()
@@ -446,7 +446,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             self.pendingLogRefresh = nil
             guard self.isLogsPageSelected(), self.window?.isVisible == true else { return }
             self.refreshLogDisplay()
-            self.logs.scrollToEndOfDocument(nil)
+            if self.logs.selectedRange().length == 0 { self.logs.scrollToEndOfDocument(nil) }
             self.logStatusLabel.stringValue = "日志：\(self.logLineCount) 行"
         }
         pendingLogRefresh = workItem
