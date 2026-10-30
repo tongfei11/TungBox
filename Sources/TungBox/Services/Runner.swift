@@ -136,7 +136,7 @@ final class Runner: @unchecked Sendable {
         return result.output.isEmpty ? "格式化完成" : result.output
     }
 
-    func start(config: URL, elevated: Bool = false) throws {
+    func start(config: URL, elevated: Bool = false, supportsIPv6Egress: Bool? = nil) throws {
         if isRunning { return }
         guard let binary = findSingBox() else {
             throw NSError.user("找不到 sing-box。请先安装：brew install sing-box")
@@ -147,7 +147,7 @@ final class Runner: @unchecked Sendable {
             return
         }
 
-        let actualConfig = try preprocessConfig(at: config, allowTun: false)
+        let actualConfig = try preprocessConfig(at: config, allowTun: false, supportsIPv6Egress: supportsIPv6Egress)
         let configData = try Data(contentsOf: actualConfig)
 
         let process = Process()
@@ -524,7 +524,7 @@ final class Runner: @unchecked Sendable {
         }
     }
 
-    private func preprocessConfig(at url: URL, allowTun: Bool = false) throws -> URL {
+    private func preprocessConfig(at url: URL, allowTun: Bool = false, supportsIPv6Egress: Bool? = nil) throws -> URL {
         guard let data = try? Data(contentsOf: url),
               var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return url
@@ -553,6 +553,9 @@ final class Runner: @unchecked Sendable {
 
         if userMode {
             json = ProxyModeConfig.ensuringRuntimeRuleMode(in: json)
+            // The ordinary proxy also dials node servers over the physical network.
+            // A remote node's IPv6 exit cannot supply a local IPv6 route to that node.
+            json = TUNIPv6Egress.applying(to: json, supportsIPv6: supportsIPv6Egress)
             json = LocalAPIConfiguration.authenticated(
                 json,
                 listen: TungBoxConfig.clashAPIListen,

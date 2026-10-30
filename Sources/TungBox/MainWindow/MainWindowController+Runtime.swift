@@ -402,6 +402,11 @@ extension MainWindowController {
     nonisolated func startNormalProxyBlocking(runner: Runner, config: URL, port: Int, reason: String, log: @Sendable (String) -> Void) throws {
         log("[TungBox] 正在检查普通代理配置...\n")
         _ = try runner.check(config: config)
+        let interface = TunServiceManager.defaultNetworkInterface()
+        let supportsIPv6 = TunServiceManager.supportsIPv6Egress(on: interface)
+        if supportsIPv6 == false {
+            log("[TungBox] 本机无可用 IPv6 出口，普通代理的本地 DNS 与默认节点解析临时仅使用 IPv4；保留显式 IPv6-only 设置\n")
+        }
         let clashPort = 9090
         // Clear our own strays, then give the ports a SHORT chance to free. We do NOT
         // hard-fail on the bind probe anymore — sing-box binds with SO_REUSEADDR and
@@ -419,7 +424,7 @@ extension MainWindowController {
             _ = runtimePortProbe.waitForLocalTCPPortsFree([port, clashPort], timeout: 2.0)
             log("[TungBox] 端口探测：\(runtimePortProbe.portHoldersDescription([port, clashPort]))\n")
         }
-        try runner.start(config: config, elevated: false)
+        try runner.start(config: config, elevated: false, supportsIPv6Egress: supportsIPv6)
         if runtimePortProbe.waitForLocalTCPPort(port, timeout: 6.0) {
             log("[TungBox] \(reason)完成，本地代理端口 \(port) 已监听\n")
             return
@@ -429,7 +434,7 @@ extension MainWindowController {
         runner.reapStrayUserProcesses()
         runtimePortProbe.killSingBoxHoldersOfPorts([port, clashPort])
         _ = runtimePortProbe.waitForLocalTCPPortsFree([port, clashPort], timeout: 3.0)
-        try runner.start(config: config, elevated: false)
+        try runner.start(config: config, elevated: false, supportsIPv6Egress: supportsIPv6)
         guard runtimePortProbe.waitForLocalTCPPort(port, timeout: 6.0) else {
             runner.stop()
             throw NSError.user("普通代理启动失败：本地端口 \(port) 未开始监听。请查看日志中的 sing-box 退出原因。端口探测：\(runtimePortProbe.portHoldersDescription([port, clashPort]))")

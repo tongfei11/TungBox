@@ -20,7 +20,8 @@ enum TUNIPv6Egress {
         }
     }
 
-    /// Restrict local DNS only. Proxy DNS and cached synthetic IPv6 destinations
+    /// Shared by ordinary proxy and TUN runtime configs. Restrict local DNS only.
+    /// Proxy DNS and cached synthetic IPv6 destinations
     /// remain usable through the remote proxy even on an IPv4 physical network.
     static func applying(to source: [String: Any], supportsIPv6: Bool?) -> [String: Any] {
         guard supportsIPv6 == false, var dns = source["dns"] as? [String: Any],

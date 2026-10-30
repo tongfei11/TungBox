@@ -2,6 +2,28 @@ import XCTest
 @testable import TungBox
 
 final class TUNIPv6EgressTests: XCTestCase {
+    func testOrdinaryProxyUsesPhysicalIPv4WithoutChangingRemoteExitOrSavedConfig() throws {
+        let source: [String: Any] = [
+            "inbounds": [["type": "mixed", "listen": "127.0.0.1", "listen_port": 17890]],
+            "dns": ["strategy": "prefer_ipv4", "servers": [["type": "local", "tag": "dns-local"]]],
+            "route": ["default_domain_resolver": "dns-local"],
+            "outbounds": [
+                ["type": "trojan", "tag": "dual-stack", "server": "node.example", "server_port": 443],
+                ["type": "trojan", "tag": "ipv6-explicit", "server": "2001:db8::1", "server_port": 443,
+                 "domain_resolver": ["server": "dns-local", "strategy": "ipv6_only"]]
+            ]
+        ]
+        let before = try ConfigCodec.render(source)
+        let runtime = TUNIPv6Egress.applying(to: source, supportsIPv6: false)
+        let resolver = (runtime["route"] as? [String: Any])?["default_domain_resolver"] as? [String: String]
+        XCTAssertEqual(resolver, ["server": "dns-local", "strategy": "ipv4_only"])
+        XCTAssertEqual(try ConfigCodec.render(["outbounds": runtime["outbounds"]!]),
+                       try ConfigCodec.render(["outbounds": source["outbounds"]!]))
+        XCTAssertEqual((runtime["inbounds"] as? [[String: Any]])?.first?["type"] as? String, "mixed")
+        XCTAssertEqual((runtime["dns"] as? [String: Any])?["strategy"] as? String, "prefer_ipv4")
+        XCTAssertEqual(try ConfigCodec.render(source), before)
+    }
+
     func testLocalAAAAFilterCoexistsWithFakeIPQueryRulesInActualCore() throws {
         guard let core = ProcessInfo.processInfo.environment["TUNGBOX_TEST_CORE"] else {
             throw XCTSkip("设置 TUNGBOX_TEST_CORE 可运行隔离的 Core 配置校验")
