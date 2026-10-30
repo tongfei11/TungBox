@@ -210,7 +210,7 @@ extension MainWindowController {
             return true
         }
 
-        logs.setLogText(filtered.isEmpty ? "" : filtered.joined(separator: "\n"))
+        logs.setLogText(filtered.isEmpty ? "" : filtered.joined(separator: "\n"), connectionNames: LogTextPresentation.connectionNames(in: logBuffer))
         attachedLogCountLabel?.stringValue = filtered.count == lines.count && allLevelsOn
             ? "共 \(lines.filter { !$0.isEmpty }.count) 条"
             : "显示 \(filtered.count) / \(lines.filter { !$0.isEmpty }.count) 条"
@@ -225,6 +225,7 @@ extension MainWindowController {
 
     @objc func clearLogsClicked() {
         logBuffer = ""
+        pendingCoreLog = ""
         logLineCount = 0
         logs.setLogText("")
         attachedLogCountLabel?.stringValue = "显示 0 条"
@@ -248,15 +249,31 @@ extension MainWindowController {
     }
 
     func appendLog(_ text: String) {
-        logBuffer.append(text)
+        let recorded = LogTimestamp.addingMissing(to: text)
+        logBuffer.append(recorded)
         if SessionLogBuffer.trim(&logBuffer) {
             logLineCount = SessionLogBuffer.lineCount(in: logBuffer)
         } else {
-            logLineCount += SessionLogBuffer.lineCount(in: text)
+            logLineCount += SessionLogBuffer.lineCount(in: recorded)
         }
         logStatusLabel.stringValue = "日志：\(logLineCount) 行"
-        appendPersistentLog(text)
+        appendPersistentLog(recorded)
         scheduleLogRefresh()
+    }
+
+    func appendCoreLog(_ text: String) {
+        // Pipe callbacks may split a timestamp or a message across chunks.
+        pendingCoreLog.append(text)
+        if let end = pendingCoreLog.lastIndex(of: "\n") {
+            let completeEnd = pendingCoreLog.index(after: end)
+            let complete = String(pendingCoreLog[..<completeEnd])
+            pendingCoreLog = String(pendingCoreLog[completeEnd...])
+            appendLog(complete)
+        }
+        if pendingCoreLog.count > SessionLogBuffer.maximumCharacters {
+            appendLog(pendingCoreLog + "\n")
+            pendingCoreLog = ""
+        }
     }
 
     func appendPersistentLog(_ text: String) {

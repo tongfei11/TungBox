@@ -33,6 +33,22 @@ struct LogTextPresentation {
     private static let severity = try! NSRegularExpression(pattern: #"^(?:\[(INFO|WARN|WARNING|ERROR|DEBUG|FATAL|TRACE)\]|(INFO|WARN|WARNING|ERROR|DEBUG|FATAL|TRACE)\b)\s*"#, options: .caseInsensitive)
     private static let endpoint = try! NSRegularExpression(pattern: #"(?:[a-zA-Z0-9_-]+\.)+[a-zA-Z0-9_-]+(?::\d+)?|\[[0-9a-fA-F:]+\](?::\d+)?"#)
     private static let direction = try! NSRegularExpression(pattern: #"\b(?:inbound|outbound)(?:/[^\s:]+)?"#)
+    private static let zone = try! NSRegularExpression(pattern: #"^[+-]\d{4}\s+"#)
+    private static let connection = try! NSRegularExpression(pattern: #"\[(\d+)\s+\d+(?:\.\d+)?(?:ms|s|m\d+s)\]\s*"#)
+    private static let outbound = try! NSRegularExpression(pattern: #"outbound/([^\s\[]+)\[(.*?)\]:"#)
+
+    static func connectionNames(in raw: String) -> [String: String] {
+        let plain = ansi.stringByReplacingMatches(in: raw, range: NSRange(location: 0, length: (raw as NSString).length), withTemplate: "")
+        var names: [String: String] = [:]
+        for line in plain.components(separatedBy: "\n") {
+            let ns = line as NSString, range = NSRange(location: 0, length: (line as NSString).length)
+            guard let id = connection.firstMatch(in: line, range: range),
+                  let route = outbound.firstMatch(in: line, range: range) else { continue }
+            let type = ns.substring(with: route.range(at: 1))
+            names[ns.substring(with: id.range(at: 1))] = type == "direct" ? "直连" : ns.substring(with: route.range(at: 2))
+        }
+        return names
+    }
     static func level(in raw: String) -> LogLevelStyle {
         let line = ansi.stringByReplacingMatches(in: raw, range: NSRange(location: 0, length: (raw as NSString).length), withTemplate: "")
         let ns = line as NSString
@@ -45,11 +61,14 @@ struct LogTextPresentation {
     let text: NSAttributedString
     let source: String
     private let offsets: [Int]
+    private let contexts: [(display: NSRange, source: NSRange)]
 
-    init(source raw: String) {
+    init(source raw: String, connectionNames: [String: String] = [:]) {
         source = Self.ansi.stringByReplacingMatches(in: raw, range: NSRange(location: 0, length: (raw as NSString).length), withTemplate: "")
         let result = NSMutableAttributedString(string: "")
         var offsets = [0]
+        var contexts: [(display: NSRange, source: NSRange)] = []
+        let names = connectionNames.merging(Self.connectionNames(in: source)) { _, new in new }
         let paragraph = NSMutableParagraphStyle()
         paragraph.tabStops = [NSTextTab(textAlignment: .left, location: 194), NSTextTab(textAlignment: .left, location: 262)]
         paragraph.headIndent = 262
@@ -91,17 +110,36 @@ struct LogTextPresentation {
                     bodyStart = restStart + NSMaxRange(match.range)
                 }
                 let time = ns.substring(with: timeRange)
-                let measuredWidth = (time as NSString).size(withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)]).width
+                let zoneRange = Self.zone.firstMatch(in: time, range: NSRange(location: 0, length: (time as NSString).length))?.range
+                let visibleTime = (time as NSString).substring(from: zoneRange.map(NSMaxRange) ?? 0)
+                let measuredWidth = (visibleTime as NSString).size(withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)]).width
                 let timeFont = NSFont.monospacedSystemFont(ofSize: min(10, 1630 / max(1, measuredWidth)), weight: .regular)
+                let timeOffset = result.length
                 append(time, sourceRange: NSRange(location: start, length: NSMaxRange(timeRange)), attributes: [.foregroundColor: MD3.onSurfaceVariant, .font: timeFont])
+                if let zoneRange {
+                    result.addAttributes([.font: NSFont.monospacedSystemFont(ofSize: 0.01, weight: .regular), .foregroundColor: NSColor.clear], range: NSRange(location: timeOffset, length: zoneRange.length))
+                }
                 append("\t", sourceRange: NSRange(location: start + NSMaxRange(timeRange), length: levelRange.location - NSMaxRange(timeRange)))
                 append(token, sourceRange: NSRange(location: start + levelRange.location, length: levelRange.length), attributes: [Self.levelKey: level.rawValue, .foregroundColor: level.color, .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold)])
                 append("\t", sourceRange: NSRange(location: start + NSMaxRange(levelRange), length: bodyStart - NSMaxRange(levelRange)))
                 let bodyOffset = result.length
                 let body = ns.substring(from: bodyStart)
-                append(body, sourceRange: NSRange(location: start + bodyStart, length: ns.length - bodyStart), attributes: [.foregroundColor: level == .warn || level == .error ? level.color : MD3.onSurface])
+                var visibleBody = body
+                let bodyAttributes: [NSAttributedString.Key: Any] = [.foregroundColor: level == .warn || level == .error ? level.color : MD3.onSurface]
+                if let context = Self.connection.firstMatch(in: body, range: NSRange(location: 0, length: (body as NSString).length)), context.range.location == 0 {
+                    let id = (body as NSString).substring(with: context.range(at: 1))
+                    let label = "[\(names[id] ?? "待识别")] "
+                    let sourceRange = NSRange(location: start + bodyStart, length: context.range.length)
+                    contexts.append((NSRange(location: result.length, length: (label as NSString).length), sourceRange))
+                    append(label, sourceRange: sourceRange, attributes: bodyAttributes)
+                    let rest = (body as NSString).substring(from: context.range.length)
+                    visibleBody = label + rest
+                    append(rest, sourceRange: NSRange(location: NSMaxRange(sourceRange), length: (rest as NSString).length), attributes: bodyAttributes)
+                } else {
+                    append(body, sourceRange: NSRange(location: start + bodyStart, length: ns.length - bodyStart), attributes: bodyAttributes)
+                }
                 for (regex, color) in [(Self.direction, LogLevelStyle.debug.color), (Self.endpoint, LogLevelStyle.info.color)] {
-                    for match in regex.matches(in: body, range: NSRange(location: 0, length: (body as NSString).length)) {
+                    for match in regex.matches(in: visibleBody, range: NSRange(location: 0, length: (visibleBody as NSString).length)) {
                         result.addAttribute(.foregroundColor, value: color, range: NSRange(location: bodyOffset + match.range.location, length: match.range.length))
                     }
                 }
@@ -111,13 +149,36 @@ struct LogTextPresentation {
         }
         text = result
         self.offsets = offsets
+        self.contexts = contexts
     }
 
     func copyText(in range: NSRange) -> String {
         guard range.location >= 0, range.length >= 0, range.location < offsets.count,
               range.length <= offsets.count - 1 - range.location else { return "" }
-        let start = offsets[range.location], end = offsets[NSMaxRange(range)]
+        var start = offsets[range.location], end = offsets[NSMaxRange(range)]
+        for context in contexts where NSIntersectionRange(context.display, range).length > 0 {
+            start = min(start, context.source.location)
+            end = max(end, NSMaxRange(context.source))
+        }
         return (source as NSString).substring(with: NSRange(location: start, length: end - start))
+    }
+
+    func sourceRange(for range: NSRange) -> NSRange {
+        guard range.location >= 0, range.length >= 0, range.location < offsets.count,
+              range.length <= offsets.count - 1 - range.location else { return NSRange(location: 0, length: 0) }
+        return NSRange(location: offsets[range.location], length: offsets[NSMaxRange(range)] - offsets[range.location])
+    }
+    func displayRange(for source: NSRange) -> NSRange {
+        func lowerBound(_ value: Int) -> Int {
+            var low = 0, high = offsets.count - 1
+            while low < high {
+                let middle = (low + high) / 2
+                if offsets[middle] < value { low = middle + 1 } else { high = middle }
+            }
+            return low
+        }
+        let start = lowerBound(source.location), end = lowerBound(NSMaxRange(source))
+        return NSRange(location: start, length: end - start)
     }
 }
 
@@ -160,6 +221,7 @@ final class LogDetailLayoutManager: NSLayoutManager {
 @MainActor
 final class LogDetailTextView: NSTextView {
     private(set) var presentation = LogTextPresentation(source: "")
+    private var connectionNames: [String: String] = [:]
     var copyableText: String { presentation.source }
 
     init() {
@@ -176,13 +238,14 @@ final class LogDetailTextView: NSTextView {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func setLogText(_ text: String) {
-        let selection = selectedRange()
+    func setLogText(_ text: String, connectionNames: [String: String]? = nil) {
+        let selection = presentation.sourceRange(for: selectedRange())
         let previousSource = presentation.source
-        presentation = LogTextPresentation(source: text)
+        if let connectionNames { self.connectionNames = connectionNames }
+        presentation = LogTextPresentation(source: text, connectionNames: self.connectionNames)
         textStorage?.setAttributedString(presentation.text)
-        if presentation.source.hasPrefix(previousSource), NSMaxRange(selection) <= (string as NSString).length {
-            setSelectedRange(selection)
+        if presentation.source.hasPrefix(previousSource) {
+            setSelectedRange(presentation.displayRange(for: selection))
         } else {
             setSelectedRange(NSRange(location: 0, length: 0))
         }

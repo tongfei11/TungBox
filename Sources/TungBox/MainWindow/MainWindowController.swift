@@ -192,6 +192,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     var logLevelButtons: [MD3Checkbox]?
     weak var logSearchField: NSTextField?
     var logBuffer = ""
+    var pendingCoreLog = ""
 
     let serviceSwitch = MD3Switch()
     let tunSwitch = MD3Switch()
@@ -333,7 +334,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         subscriptions = store.loadSubscriptions()
         customRules = store.loadCustomRules()
         runner.onOutput = { [weak self] text in
-            self?.appendLog(text)
+            self?.appendCoreLog(text)
             self?.scheduleStatusRefreshFromOutput()
         }
 
