@@ -69,9 +69,33 @@ struct LogTextPresentation {
         var offsets = [0]
         var contexts: [(display: NSRange, source: NSRange)] = []
         let names = connectionNames.merging(Self.connectionNames(in: source)) { _, new in new }
+        let lines = source.components(separatedBy: "\n")
+        let timeAttributes: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)]
+        let levelAttributes: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold)]
+        var timeWidth = ("2026-10-30 15:52:11" as NSString).size(withAttributes: timeAttributes).width
+        var levelWidth = ("ERROR" as NSString).size(withAttributes: levelAttributes).width
+        for line in lines {
+            let ns = line as NSString
+            let match = Self.timestamp.firstMatch(in: line, range: NSRange(location: 0, length: ns.length))
+            if let match {
+                let time = ns.substring(with: match.range(at: 1)) as NSString
+                let zone = Self.zone.firstMatch(in: time as String, range: NSRange(location: 0, length: time.length))
+                let visible = time.substring(from: zone.map { NSMaxRange($0.range) } ?? 0) as NSString
+                timeWidth = max(timeWidth, min(163, visible.size(withAttributes: timeAttributes).width))
+            }
+            let rest = ns.substring(from: match.map { NSMaxRange($0.range) } ?? 0) as NSString
+            if let level = Self.severity.firstMatch(in: rest as String, range: NSRange(location: 0, length: rest.length)) {
+                let token = rest.substring(with: level.range).trimmingCharacters(in: .whitespaces) as NSString
+                levelWidth = max(levelWidth, token.size(withAttributes: levelAttributes).width)
+            }
+        }
+        // Leave 8 pt before the dot and 9 pt after the widest badge, rather than
+        // reserving fixed columns sized for a timestamp with a visible timezone.
+        let levelStart = ceil(timeWidth) + 32
+        let bodyStart = levelStart + ceil(levelWidth) + 16
         let paragraph = NSMutableParagraphStyle()
-        paragraph.tabStops = [NSTextTab(textAlignment: .left, location: 194), NSTextTab(textAlignment: .left, location: 262)]
-        paragraph.headIndent = 262
+        paragraph.tabStops = [NSTextTab(textAlignment: .left, location: levelStart), NSTextTab(textAlignment: .left, location: bodyStart)]
+        paragraph.headIndent = bodyStart
         paragraph.minimumLineHeight = 21
         paragraph.paragraphSpacing = 3
         let base: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
@@ -86,7 +110,6 @@ struct LogTextPresentation {
             }
         }
         var start = 0
-        let lines = source.components(separatedBy: "\n")
         for (index, line) in lines.enumerated() {
             let ns = line as NSString
             if ns.length > 0 {
