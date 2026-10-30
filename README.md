@@ -27,7 +27,7 @@ TungBox 是 [sing-box](https://github.com/SagerNet/sing-box) 的 macOS 原生客
 
 > 系统代理与 TUN 模式为两个独立开关，可同时开启；切换出站模式（直连 / 全局 / 规则）实时生效。
 
-> Release 版本 **0.4.0** · 当前编译版本 **0.4.0(0302)**
+> Release 版本 **0.4.0** · 当前编译版本 **0.4.0(0303)**
 
 ## 开发
 
@@ -124,6 +124,7 @@ swift build                         # 开发构建
 - 更新 TungBox 会更新应用内置 Core，保留用户已安装或导入的本地 Core；本地 Core 优先使用
 - 手动导入 Core、打开 Core 目录和检查 GitHub Release 更新
 - 更新 Core 时不打断当前正在运行的代理
+- macOS 27 的普通代理通过独立后台应用启动官方 Core，以兼容系统的进程识别限制；Core 文件逐字节保持原样，无需使用修改版内核或新增管理员服务
 
 ### 日志
 

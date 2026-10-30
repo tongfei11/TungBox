@@ -120,7 +120,10 @@ extension MainWindowController {
             verifyTunStartup: { [self] in verifyTunStartupAsync() },
             userProxyIsRunning: { runnerRef.isRunning },
             stopUserProxy: {
-                try await coordinator.performBlocking(for: request) { if runnerRef.isRunning { runnerRef.stop() } }
+                try await coordinator.performBlocking(for: request) {
+                    if runnerRef.isRunning { runnerRef.stop() }
+                    guard !runnerRef.isRunning else { throw NSError.user("后台 Core 尚未退出，请稍后重试切换") }
+                }
             },
             startUserProxy: { [self] url in
                 try await coordinator.performBlocking(for: request) {

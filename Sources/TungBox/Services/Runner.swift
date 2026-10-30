@@ -3,6 +3,7 @@ import Network
 
 final class Runner: @unchecked Sendable {
     private var process: Process?
+    private var coreAppSession: CoreAppSession?
     private(set) var runningConfigData: Data?
     private var outputPipe: Pipe?
     private var elevatedPID: Int32?
@@ -18,11 +19,13 @@ final class Runner: @unchecked Sendable {
     }()
     var onOutput: ((String) -> Void)?
     var isRunning: Bool {
+        if let coreAppSession { return coreAppSession.isRunning }
         if process?.isRunning == true { return true }
         if let elevatedPID, isProcessRunning(elevatedPID) { return true }
         return false
     }
     var pid: Int32? {
+        if let coreAppSession, coreAppSession.isRunning { return coreAppSession.pid }
         if let proc = process, proc.isRunning { return proc.processIdentifier }
         if let elevatedPID, isProcessRunning(elevatedPID) { return elevatedPID }
         return nil
@@ -149,6 +152,34 @@ final class Runner: @unchecked Sendable {
 
         let actualConfig = try preprocessConfig(at: config, allowTun: false, supportsIPv6Egress: supportsIPv6Egress)
         let configData = try Data(contentsOf: actualConfig)
+
+        if ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27 {
+            var didLaunch = false
+            defer { if !didLaunch { removeGeneratedRuntimeConfig(actualConfig, original: config) } }
+            let session = try CoreAppSession.start(
+                binary: URL(fileURLWithPath: binary), config: actualConfig,
+                workingDirectory: store.baseURL, cacheDirectory: coreAppDirectory,
+                onOutput: { [weak self] text in
+                    DispatchQueue.main.async { self?.onOutput?(text) }
+                },
+                onExit: { [weak self] in
+                    self?.removeGeneratedRuntimeConfig(actualConfig, original: config)
+                    DispatchQueue.main.async {
+                        guard let self, self.runtimeConfigURL == actualConfig else { return }
+                        self.runtimeConfigURL = nil
+                        self.onOutput?("[Core] 后台 Core 已退出\n")
+                    }
+                }
+            )
+            coreAppSession = session
+            runtimeConfigURL = actualConfig
+            runningConfigData = configData
+            didLaunch = true
+            DispatchQueue.main.async { [weak self] in
+                self?.onOutput?("[Core] 通过后台应用启动原版 Core，兼容 macOS 27 进程识别\n")
+            }
+            return
+        }
 
         let process = Process()
         process.currentDirectoryURL = store.baseURL
@@ -309,11 +340,19 @@ final class Runner: @unchecked Sendable {
         [
             store.coreBinaryURL.path,
             Bundle.main.resourceURL?.appendingPathComponent("sing-box").path,
-            Bundle.main.resourceURL?.appendingPathComponent("Core/sing-box").path
+            Bundle.main.resourceURL?.appendingPathComponent("Core/sing-box").path,
+            CoreAppBundle.url(in: coreAppDirectory).appendingPathComponent("Contents/MacOS/sing-box").path
         ].compactMap { $0 }.filter { !$0.isEmpty }
     }
 
     func stop() {
+        if let coreAppSession, !coreAppSession.stop() {
+            DispatchQueue.main.async { [weak self] in
+                self?.onOutput?("[Core] 后台 Core 尚未退出，保留控制句柄与日志，等待后续清理\n")
+            }
+            return
+        }
+        coreAppSession = nil
         if let process, process.isRunning {
             let pid = process.processIdentifier
             process.terminate()  // SIGTERM
@@ -342,6 +381,10 @@ final class Runner: @unchecked Sendable {
             self.runtimeConfigURL = nil
         }
         runningConfigData = nil
+    }
+
+    private var coreAppDirectory: URL {
+        store.coreURL.appendingPathComponent("runtime-app", isDirectory: true)
     }
 
     private func waitForProcessExit(_ process: Process, timeout: TimeInterval) -> Bool {
